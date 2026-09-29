@@ -222,7 +222,8 @@ function stockArmorFor(tons: number, frac: number): Record<string, number> {
   const out: Record<string, number> = {};
   const r5 = (n: number) => Math.round(n / 5) * 5;
   for (const l of MECH_LOCS) {
-    const total = r5(mx[l] * frac);
+    // Stock heads are nearly always fully armored (tabletop 8-9 points)
+    const total = l === 'HD' ? (frac >= 0.7 ? 45 : 40) : r5(mx[l] * frac);
     if (l === 'CT' || l === 'LT' || l === 'RT') {
       const rear = r5(total * 0.26);
       out[l] = total - rear;

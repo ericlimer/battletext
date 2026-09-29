@@ -77,7 +77,7 @@ export function drawDoll(ui: UI, x: number, y: number, f: Frame, o: DollOpts = {
     const place: Record<string, [number, number]> = { F: [COLX.CT, 0], L: [COLX.LT, 3], T: [COLX.CT, 3], R: [COLX.RT, 3], B: [COLX.CT, 7] };
     for (const [l, [dx, dy]] of Object.entries(place)) {
       if (f.maxStruct[l] === undefined) continue;
-      lab(x + dx, y + dy, l === 'T' && f.kind === 'turret' ? 'BODY' : l === 'F' ? 'FRONT' : l === 'B' ? 'REAR' : l === 'T' ? 'TURRET' : l === 'L' ? 'LEFT' : 'RIGHT', l);
+      lab(x + dx, y + dy, l === 'T' && f.kind === 'turret' ? 'BODY' : l === 'F' ? 'FRONT' : l === 'B' ? 'REAR' : l === 'T' ? 'TURR' : l === 'L' ? 'LEFT' : 'RIGHT', l);
       loc(l, x + dx, y + dy + 1, false);
     }
   }

@@ -63,18 +63,18 @@ type WDef = Omit<ItemDef, 'base' | 'kind'> & { kind?: ItemKind };
 
 const W: WDef[] = [
   // ---- Energy
-  { id: 'ML', name: 'Medium Laser', short: 'M LAS', hard: 'E', tons: 1, slots: 1, dmg: 25, heat: 10, stab: 0, min: 0, sr: 3, mr: 6, lr: 9, cost: 40000, rarity: 0,
+  { id: 'ML', name: 'Medium Laser', short: 'ML', hard: 'E', tons: 1, slots: 1, dmg: 25, heat: 10, stab: 0, min: 0, sr: 3, mr: 6, lr: 9, cost: 40000, rarity: 0,
     desc: 'The workhorse of the Inner Sphere. Light, reliable, ammunition-free.' },
-  { id: 'LL', name: 'Large Laser', short: 'L LAS', hard: 'E', tons: 5, slots: 2, dmg: 40, heat: 18, stab: 0, min: 0, sr: 5, mr: 10, lr: 15, cost: 100000, rarity: 1,
+  { id: 'LL', name: 'Large Laser', short: 'LL', hard: 'E', tons: 5, slots: 2, dmg: 40, heat: 18, stab: 0, min: 0, sr: 5, mr: 10, lr: 15, cost: 100000, rarity: 1,
     desc: 'Long-range laser with a punishing heat profile.' },
   { id: 'PPC', name: 'PPC', short: 'PPC', hard: 'E', tons: 7, slots: 3, dmg: 50, heat: 30, stab: 10, min: 3, sr: 6, mr: 12, lr: 18, cost: 200000, rarity: 1, debuffAcc: 10,
     desc: 'Particle Projector Cannon. Its ion storm scrambles the target\'s sensors (-10% accuracy on its next attack). Inaccurate inside 90m.' },
   // ---- Support
-  { id: 'SL', name: 'Small Laser', short: 'S LAS', hard: 'S', tons: 0.5, slots: 1, dmg: 15, heat: 5, stab: 0, min: 0, sr: 1, mr: 2, lr: 3, cost: 11000, rarity: 0,
+  { id: 'SL', name: 'Small Laser', short: 'SL', hard: 'S', tons: 0.5, slots: 1, dmg: 15, heat: 5, stab: 0, min: 0, sr: 1, mr: 2, lr: 3, cost: 11000, rarity: 0,
     desc: 'Anti-personnel laser. Short ranged but nearly heat-free.' },
   { id: 'MG', name: 'Machine Gun', short: 'MG', hard: 'S', tons: 0.5, slots: 1, dmg: 5, heat: 0, stab: 1, shots: 2, min: 0, sr: 1, mr: 2, lr: 3, ammo: 'A-MG', crit: 2.5, cost: 8000, rarity: 0,
     desc: 'Twin-burst anti-personnel gun. Excellent at finding critical hits in exposed structure.' },
-  { id: 'FL', name: 'Flamer', short: 'FLAMR', hard: 'S', tons: 1, slots: 1, dmg: 10, heat: 8, stab: 0, min: 0, sr: 1, mr: 2, lr: 3, targetHeat: 15, cost: 12000, rarity: 0,
+  { id: 'FL', name: 'Flamer', short: 'FLAMER', hard: 'S', tons: 1, slots: 1, dmg: 10, heat: 8, stab: 0, min: 0, sr: 1, mr: 2, lr: 3, targetHeat: 15, cost: 12000, rarity: 0,
     desc: 'Sprays burning fuel gel. Adds 15 heat to the target.' },
   // ---- Ballistic
   { id: 'AC2', name: 'AC/2', short: 'AC/2', hard: 'B', tons: 6, slots: 1, dmg: 25, heat: 3, stab: 10, min: 4, sr: 8, mr: 16, lr: 24, ammo: 'A-AC2', cost: 60000, rarity: 0, acc: 5,
@@ -230,4 +230,4 @@ export function hardName(h: HardType): string {
 }
 export const HARD_COLORS: Record<HardType, string> = { B: '#e8c24a', E: '#e86a5a', M: '#6ab8e8', S: '#b8b8b8' };
 export const ARMOR_PER_TON = 80;
-export const ARMOR_COST_PER_PT = 60;
+export const ARMOR_COST_PER_PT = 40;

@@ -1,8 +1,8 @@
 // Contract execution: build the mission from career state and resolve the results.
 
 import { RNG } from '../engine/rng';
-import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED } from './company';
-import { Frame, frameName, refillAmmo, isFrameDamaged } from './frame';
+import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED, monthlyExpenses } from './company';
+import { Frame, frameName, refillAmmo, isFrameDamaged, repairEstimate } from './frame';
 import { Pilot, health } from './pilot';
 import { setupMission, MissionRuntime, objectivesSummary } from '../combat/missions';
 import { item, bonusesFor, BASE_WEAPONS } from '../data/items';
@@ -73,6 +73,8 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   c.mrb += res.mrbGain;
   if (mrbLevel(c) > oldMrb) lines.push(`MRB rating increased to ${mrbLevel(c)}! Higher-difficulty contracts are now available.`);
   // ---- Pilots & mechs
+  // Wrecks are recovered unless the whole lance was lost
+  const wiped = rt.playerUnits.every((u) => !u.alive);
   const kills = rt.playerUnits.reduce((a, u) => a + u.kills, 0);
   c.stats.kills += kills;
   for (const u of rt.playerUnits) {
@@ -105,18 +107,26 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     if (!p.dead) p.timeline.push(`Day ${c.day}: "${k.name}" (${win ? 'success' : 'failure'}), ${u.kills} kill${u.kills === 1 ? '' : 's'}.`);
     const m = u.frame;
     if (!u.alive && (u.destroyHow === 'ct' || u.destroyHow === 'ammo')) {
-      c.mechs = c.mechs.filter((x) => x.uid !== m.uid);
-      c.lance = c.lance.map((x) => (x === m.uid ? null : x));
-      c.stats.mechsLost++;
-      c.parts[m.defId] = (c.parts[m.defId] ?? 0) + 1;
-      res.mechsLost.push(`${frameName(m)} was destroyed. Your techs recovered 1 part.`);
+      if (!wiped) {
+        // Holding the field lets the techs drag the wreck home for a (costly) rebuild
+        (m as any).wreck = true;
+        res.mechsLost.push(`${frameName(m)} was cored, but the recovery team hauled the wreck aboard. It needs a full rebuild.`);
+      } else {
+        c.mechs = c.mechs.filter((x) => x.uid !== m.uid);
+        c.lance = c.lance.map((x) => (x === m.uid ? null : x));
+        c.stats.mechsLost++;
+        res.mechsLost.push(`${frameName(m)} was destroyed with the rest of the lance and left on the battlefield.`);
+      }
     }
   }
-  // Auto-queue repairs
+  // Auto-queue repairs the company can afford (keeping a month of expenses in reserve)
+  const reserve = monthlyExpenses(c).total;
   for (const u of rt.playerUnits) {
     const m = c.mechs.find((x) => x.uid === u.frame.uid);
-    if (m && isFrameDamaged(m)) { const q = queueRepair(c, m); if (q) res.repairCost += q.cost; }
-    else if (m) refillAmmo(m);
+    if (m && isFrameDamaged(m)) {
+      if (c.funds - repairEstimate(m).cost >= reserve) { const q = queueRepair(c, m); if (q) res.repairCost += q.cost; }
+      else lines.push(`${frameName(m)} needs ${cb(repairEstimate(m).cost)} of repairs — queue them in the Mech Bay when funds allow.`);
+    } else if (m) refillAmmo(m);
   }
   // ---- Salvage
   if (win && neg.salvage > 0) {

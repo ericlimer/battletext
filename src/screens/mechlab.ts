@@ -153,7 +153,7 @@ export class MechLabScreen implements Screen {
         const hov = ui.hover(x + 1, ry, BOX_W - 2, 1) && !this.held;
         const bg = hov ? '#2a1a1a' : '#121820';
         d.fill(x + 1, ry, BOX_W - 2, 1, ' ', C.text, bg);
-        if (s === 0) d.text(x + 1, ry, (it.dead ? '✕' : '') + dd.short, col, bg, BOX_W - 3);
+        if (s === 0) d.text(x + 1, ry, (it.dead ? '✕' : '') + dd.name, col, bg, BOX_W - 2);
         else d.text(x + 1, ry, '  ┊', lerp(col, bg, 0.5), bg);
         if (hov) { ui.setTip([...weaponTip(it.id), it.dead ? '{#e8503a}Destroyed — removing discards it.{/}' : '{#6d7f8a}Click to remove.{/}']); ui.cursor = 'pointer'; }
         if (hov && ui.click(x + 1, ry, BOX_W - 2, 1)) {
@@ -201,7 +201,7 @@ export class MechLabScreen implements Screen {
     d.text(x + 2, 3, 'TONNAGE', C.dim);
     d.text(x + 12, 3, `${s.tonsUsed.toFixed(1)} / ${s.tonsMax}`, over ? C.red : C.bright, undefined, 99, true);
     simpleBar(d, x + 2, 4, w - 4, s.tonsUsed / s.tonsMax, over ? C.red : '#4a8ee8');
-    d.text(x + 2, 5, `Free ${(s.tonsMax - s.tonsUsed).toFixed(1)}t · armor ${s.armorMax} pts (${(s.armorMax / ARMOR_PER_TON).toFixed(1)}t)`, C.faint, undefined, w - 3);
+    d.text(x + 2, 5, `Free ${(s.tonsMax - s.tonsUsed).toFixed(1)}t · armor ${(s.armorMax / ARMOR_PER_TON).toFixed(1)}t`, C.faint, undefined, w - 3);
     statsSummary(f).forEach((ss, i) => {
       const yy = 7 + i * 2;
       d.text(x + 2, yy, ss.label, C.dim);

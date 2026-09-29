@@ -834,7 +834,7 @@ export class CombatScreen implements Screen {
       const x = f.x, y = f.y - k * (f.big ? 2.2 : 1.6) - 0.6;
       const sy = MY + Math.round(y - this.camY);
       const len = [...f.text].length;
-      const sx = MX + Math.round((x - this.camX) * 2 + 1 - len / 2);
+      const sx = Math.max(MX, Math.min(MX + VW * 2 - len, MX + Math.round((x - this.camX) * 2 + 1 - len / 2)));
       if (sy < MY || sy >= MY + VH) continue;
       const col = k > 0.7 ? lerp(f.color, '#000000', (k - 0.7) / 0.3) : f.color;
       for (let c = 0; c < len; c++) {
@@ -1244,7 +1244,7 @@ export class CombatScreen implements Screen {
     let wy = y + 6;
     const ws = b.weaponsOf(t);
     const names = new Map<string, number>();
-    for (const w of ws) names.set(item(w.id).short, (names.get(item(w.id).short) ?? 0) + 1);
+    for (const w of ws) names.set(item(w.id).name, (names.get(item(w.id).name) ?? 0) + 1);
     for (const [n, c] of names) { if (wy > y + 9) break; d.text(sx, wy++, `${c > 1 ? c + 'x ' : ''}${n}`, C.dim, undefined, 17); }
     y += DOLL_H + 1;
     // Hit chance breakdown vs this target

@@ -6,7 +6,7 @@ import { VEHICLES, VehicleDef } from '../data/vehicles';
 import { bonusesFor, item } from '../data/items';
 import { faction } from '../data/factions';
 import { Frame, newMechFrame, newVehicleFrame } from '../game/frame';
-import { Pilot, makePilot } from '../game/pilot';
+import { Pilot, makePilot, uniqueCallsign } from '../game/pilot';
 import { Battle, Unit, SIDE } from './battle';
 import { Biome, generateMap, MapGenOpts, TERRAIN, BattleMap, dist } from './terrain';
 
@@ -71,13 +71,13 @@ function upgradeWeapons(r: RNG, f: Frame, chance: number): void {
 }
 
 export function pickChassis(r: RNG, targetTons: number, maxRarity: number, prefs: string[]): ChassisDef {
-  const pool = CHASSIS.filter((c) => c.rarity <= maxRarity && Math.abs(c.tons - targetTons) <= 15);
+  const pool = CHASSIS.filter((c) => c.rarity <= maxRarity && Math.abs(c.tons - targetTons) <= 10);
   const src = pool.length ? pool : CHASSIS.filter((c) => c.rarity <= maxRarity);
   return r.weighted(src, (c) => (1 / (1 + Math.abs(c.tons - targetTons) / 6)) * (prefs.includes(c.name) ? 2.2 : 1) * (1 / (1 + c.rarity * 0.4)));
 }
 
 function pickVehicle(r: RNG, targetTons: number): VehicleDef {
-  const pool = VEHICLES.filter((v) => v.kind === 'vehicle' && v.role !== 'convoy' && Math.abs(v.tons - targetTons) <= 25);
+  const pool = VEHICLES.filter((v) => v.kind === 'vehicle' && v.role !== 'convoy' && Math.abs(v.tons - targetTons) <= 15);
   const src = pool.length ? pool : VEHICLES.filter((v) => v.kind === 'vehicle' && v.role !== 'convoy');
   return r.weighted(src, (v) => 1 / (1 + Math.abs(v.tons - targetTons) / 10));
 }
@@ -85,19 +85,19 @@ function pickVehicle(r: RNG, targetTons: number): VehicleDef {
 export function generateForce(r: RNG, d: number, factionId: string, count: number, opts: { noVehicles?: boolean; heavier?: number } = {}): Combatant[] {
   const f = faction(factionId);
   const out: Combatant[] = [];
-  const avg = 22 + d * 7.2 + (opts.heavier ?? 0);
+  const avg = (d <= 2 ? 23 + d * 4 : 20 + d * 7.5) + (opts.heavier ?? 0);
   const maxRarity = Math.floor(d / 3) + 1;
   const tier = pilotTier(d);
   for (let i = 0; i < count; i++) {
-    const tons = Math.max(20, Math.min(100, avg + r.gauss(0, 12)));
+    const tons = Math.max(20, Math.min(100, avg + r.gauss(0, d <= 3 ? 7 : 11)));
     const veh = !opts.noVehicles && r.chance(f.vehicleRatio * (d > 7 ? 0.6 : 1));
     let frame: Frame;
-    if (veh) frame = newVehicleFrame(pickVehicle(r, tons + 10).id);
+    if (veh) frame = newVehicleFrame(pickVehicle(r, tons + 5).id);
     else {
       frame = newMechFrame(pickChassis(r, tons, maxRarity, f.prefers).id);
       upgradeWeapons(r, frame, Math.min(0.5, 0.02 + d * 0.035 * (0.6 + f.techBias)));
     }
-    const pilot = makePilot(r, Math.max(0, Math.min(4, tier + (r.chance(0.2) ? 1 : 0) - (r.chance(0.2) ? 1 : 0))));
+    const pilot = makePilot(r, d <= 2 ? 0 : Math.max(0, Math.min(4, tier + (r.chance(0.2) ? 1 : 0) - (r.chance(0.2) ? 1 : 0))));
     out.push({ frame, pilot });
   }
   return out;
@@ -155,7 +155,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
 
   const bonus = (spec.basePay ?? 100000) * 0.25;
 
-  const enemyLance = (count = 4, extra: Parameters<typeof generateForce>[4] = {}) => spec.enemies ?? generateForce(r, d, spec.target, count, extra);
+  const enemyLance = (count = 4, extra: Parameters<typeof generateForce>[4] = {}) => spec.enemies ?? generateForce(r, d, spec.target, d <= 2 ? Math.min(count, 3) : count, extra);
 
   const road = () => {
     // find the road rows at west/east edges
@@ -186,7 +186,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       if (!spec.enemies) force[0] = tgtC;
       if (tgtC.pilot) { tgtC.pilot.callsign = spec.targetName ?? tgtC.pilot.callsign; tgtC.pilot.gun = Math.min(10, tgtC.pilot.gun + 2); }
       enemyUnits = place(b, force, 1, eStart[0], eStart[1], 6);
-      if (enemyUnits[0]) { enemyUnits[0].tag = 'target'; enemyUnits[0].ai.goal = [W - 2, eStart[1] > H / 2 ? H - 2 : 1]; }
+      if (enemyUnits[0]) { enemyUnits[0].tag = 'target'; enemyUnits[0].ai.goal = [Math.floor(W * 0.45), eStart[1] > H / 2 ? H - 1 : 0]; }
       objectives.push({ id: 'target', text: `Destroy ${enemyUnits[0]?.pilot?.callsign ?? 'the target'} (${enemyUnits[0] ? b.fullName(enemyUnits[0]) : ''})`, primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'escorts', text: 'Destroy all escorts', primary: false, status: 'active', bonus });
       briefing.push(`${tgt.short} commander "${enemyUnits[0]?.pilot?.callsign}" is overseeing operations here. ${emp.short} wants them dead. If the target escapes, the contract is void.`);
@@ -218,7 +218,12 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       const cx = Math.floor(base.x + base.w / 2), cy = Math.floor(base.y + base.h / 2);
       playerUnits = place(b, spec.player, 0, cx + 10, cy, 2);
       const w1 = place(b, enemyLance(4), 1, W - 5, cy + r.int(-10, 10), 6);
-      const w2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, 3), 1, W - 4, r.chance(0.5) ? 4 : H - 5, 6, { deployRound: 4, deployed: false });
+      const w2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, d >= 5 ? 3 : 2), 1, W - 4, r.chance(0.5) ? 4 : H - 5, 6, { deployRound: 4, deployed: false });
+      // The employer's base has its own light defenses
+      for (const off of [-5, 5]) {
+        const spot = findSpot(b, base.x + base.w + 1, cy + off, 3);
+        if (spot) { const tu = b.addUnit(newVehicleFrame(d >= 6 ? 'TUR-M' : 'TUR-L'), makePilot(r, 1), 2, spot[0], spot[1], 2); tu.name = 'Turret'; }
+      }
       const w3 = spec.enemies || d < 5 ? [] : place(b, generateForce(r, d, spec.target, 3), 1, W - 4, cy, 6, { deployRound: 7, deployed: false });
       enemyUnits = [...w1, ...w2, ...w3];
       for (const e of enemyUnits) e.ai.goal = [cx, cy];
@@ -236,7 +241,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (let i = 0; i < n; i++) convoy.push({ frame: newVehicleFrame('HAULER'), pilot: makePilot(r, 0) });
       const cu = place(b, convoy, 1, 2, rd.wy, 2, { tag: 'convoy' }, 1);
       for (const c of cu) c.ai.goal = [W - 1, rd.ey];
-      const esc = spec.enemies ?? generateForce(r, d, spec.target, 3);
+      const esc = spec.enemies ?? generateForce(r, d, spec.target, d >= 5 ? 4 : 3);
       const eu = place(b, esc, 1, 5, rd.wy, 2, { tag: 'escort' });
       for (const e of eu) e.ai.goal = [W - 4, rd.ey];
       enemyUnits = [...cu, ...eu];
@@ -251,9 +256,13 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       const convoy: Combatant[] = [];
       for (let i = 0; i < 3; i++) convoy.push({ frame: newVehicleFrame('HAULER'), pilot: makePilot(r, 0) });
       const cu = place(b, convoy, 2, 3, rd.wy, 2, { tag: 'convoy' }, 1);
-      for (const c of cu) { c.ai.goal = [W - 1, rd.ey]; c.name = 'Convoy'; }
+      for (const c of cu) {
+        c.ai.goal = [W - 1, rd.ey]; c.name = 'Convoy';
+        // Escorted convoys use up-armored haulers
+        for (const k in c.frame.armor) { c.frame.armor[k] = Math.round(c.frame.armor[k] * 1.7); c.frame.maxArmor[k] = c.frame.armor[k]; }
+      }
       const a1 = place(b, enemyLance(3), 1, Math.floor(W * 0.6), r.chance(0.5) ? 5 : H - 6, 4);
-      const a2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, 3), 1, W - 5, rd.ey + (r.chance(0.5) ? -8 : 8), 6, { deployRound: 3, deployed: false });
+      const a2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, 2), 1, W - 5, rd.ey + (r.chance(0.5) ? -8 : 8), 6, { deployRound: 3, deployed: false });
       enemyUnits = [...a1, ...a2];
       for (const e of enemyUnits) e.ai.goal = [Math.floor(W * 0.6), rd.ey];
       objectives.push({ id: 'escort', text: 'At least 2 convoy vehicles reach the east edge', primary: true, status: 'active', bonus: 0 });
@@ -264,6 +273,16 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
   }
   if (spec.night) briefing.push('Night operation: visual range reduced to 360m. Sensors unaffected.');
 
+  // Unique callsigns within each side keep the combat log readable
+  for (const side of [0, 1]) {
+    const taken = new Set<string>();
+    for (const u of b.units) {
+      if ((u.team === 0) !== (side === 0) || !u.pilot) continue;
+      if (taken.has(u.pilot.callsign) && u.team !== 0) { u.pilot.callsign = uniqueCallsign(r, taken); }
+      taken.add(u.pilot.callsign);
+      if (u.team === 0) u.name = u.pilot.callsign;
+    }
+  }
   const rt: MissionRuntime = { spec, battle: b, objectives, enemyUnits, playerUnits, briefing };
   installHooks(rt);
   return rt;
@@ -356,7 +375,7 @@ function installHooks(rt: MissionRuntime): void {
   b.hooks.roundStart = () => {
     // Assassination targets bolt once hurt or after round 6
     const tg = rt.enemyUnits.find((u) => u.tag === 'target');
-    if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 7 || tg.dmgTaken > 150)) {
+    if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 8 || tg.dmgTaken > 250)) {
       (tg as any)._fleeing = true;
       b.say(`${tg.pilot?.callsign ?? 'The target'} is attempting to escape!`, '#f0a830');
     }

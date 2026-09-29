@@ -75,10 +75,10 @@ export const SIDE = (team: number) => (team === 0 || team === 2 ? 0 : 1);
 
 // ---- Hit tables ---------------------------------------------------------------------------
 type Table = Record<string, number>;
-const HIT_FRONT: Table = { HD: 1, CT: 16, LT: 14, RT: 14, LA: 10, RA: 10, LL: 8, RL: 8 };
-const HIT_LEFT: Table = { HD: 1, CT: 8, LT: 18, RT: 4, LA: 18, RA: 3, LL: 14, RL: 4 };
-const HIT_RIGHT: Table = { HD: 1, CT: 8, RT: 18, LT: 4, RA: 18, LA: 3, RL: 14, LL: 4 };
-const HIT_REAR: Table = { HD: 1, CTR: 16, LTR: 14, RTR: 14, LA: 10, RA: 10, LL: 8, RL: 8 };
+const HIT_FRONT: Table = { HD: 0.6, CT: 16, LT: 14, RT: 14, LA: 10, RA: 10, LL: 8, RL: 8 };
+const HIT_LEFT: Table = { HD: 0.6, CT: 8, LT: 18, RT: 4, LA: 18, RA: 3, LL: 14, RL: 4 };
+const HIT_RIGHT: Table = { HD: 0.6, CT: 8, RT: 18, LT: 4, RA: 18, LA: 3, RL: 14, LL: 4 };
+const HIT_REAR: Table = { HD: 0.6, CTR: 16, LTR: 14, RTR: 14, LA: 10, RA: 10, LL: 8, RL: 8 };
 const HIT_PRONE: Table = { HD: 4, CT: 14, LT: 12, RT: 12, LA: 10, RA: 10, LL: 5, RL: 5, CTR: 4, LTR: 3, RTR: 3 };
 const HIT_DFA: Table = { HD: 4, CT: 14, LT: 12, RT: 12, LA: 12, RA: 12 };
 const HIT_KICK: Table = { LL: 1, RL: 1 };
@@ -355,7 +355,7 @@ export class Battle {
     }
     for (const o of live) if (o.sensorLocked > 0) this.seen[1 - SIDE(o.team)].add(o.id);
     // AI memory
-    for (const s of live) if (s.team !== 0) for (const id of this.seen[SIDE(s.team)]) {
+    for (const s of live) for (const id of this.seen[SIDE(s.team)]) {
       const o = this.unit(id);
       s.ai.lastKnown.set(id, [o.x, o.y, this.round]);
     }
@@ -385,7 +385,7 @@ export class Battle {
       if (m.terr[i] === 'deep' || m.terr[i] === 'hforest') return Infinity;
       if (m.terr[i] === 'lforest' || m.terr[i] === 'rough') c *= 1.5;
     }
-    if (dh > 0) c += 0.8;
+    if (dh > 0) c += 0.5;
     if (fx !== tx && fy !== ty) c *= 1.414;
     return c;
   }
@@ -765,7 +765,11 @@ export class Battle {
       if (f.armor[loc] === undefined) loc = sl;
     }
     if (f.struct[sl] === undefined) return;
-    if (f.kind === 'mech' && sl === 'HD' && dmg >= 10) this.injure(t, 'Head hit');
+    if (f.kind === 'mech' && sl === 'HD') {
+      if (!t.prone && !t.shutdown) dmg = Math.min(dmg, 45);
+      if (dmg >= 10) this.injure(t, 'Head hit');
+      if (!t.alive) return;
+    }
     const a = f.armor[loc] ?? 0;
     const absorbed = Math.min(a, dmg);
     if (f.armor[loc] !== undefined) f.armor[loc] = a - absorbed;

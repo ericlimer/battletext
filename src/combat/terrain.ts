@@ -17,16 +17,16 @@ export interface TerrainInfo {
 
 export const TERRAIN: Record<Terrain, TerrainInfo> = {
   plain: { name: 'Open Ground', cost: 1, cover: 0, obstruct: 0, blocks: false, height: 0, cool: 0, desc: 'No cover.' },
-  rough: { name: 'Rough Ground', cost: 1.6, cover: 0, obstruct: 0, blocks: false, height: 0, cool: 0, desc: 'Broken ground. Slows movement.' },
-  lforest: { name: 'Light Forest', cost: 1.5, cover: 0.2, obstruct: 3, blocks: false, height: 0, cool: 0, desc: 'Cover: -20% ranged damage taken.' },
-  hforest: { name: 'Heavy Forest', cost: 2.2, cover: 0.35, obstruct: 7, blocks: false, height: 0, cool: 0, desc: 'Cover: -35% ranged damage taken. Obstructs fire passing through.' },
-  water: { name: 'Shallow Water', cost: 2, cover: 0, obstruct: 0, blocks: false, height: 0, cool: 15, desc: '+15 heat dissipation. Slows movement.' },
-  deep: { name: 'Deep Water', cost: 3.2, cover: 0.1, obstruct: 0, blocks: false, height: 0, cool: 30, desc: '+30 heat dissipation. Very slow. Partial cover.' },
+  rough: { name: 'Rough Ground', cost: 1.3, cover: 0, obstruct: 0, blocks: false, height: 0, cool: 0, desc: 'Broken ground. Slows movement.' },
+  lforest: { name: 'Light Forest', cost: 1.3, cover: 0.2, obstruct: 3, blocks: false, height: 0, cool: 0, desc: 'Cover: -20% ranged damage taken.' },
+  hforest: { name: 'Heavy Forest', cost: 1.8, cover: 0.35, obstruct: 7, blocks: false, height: 0, cool: 0, desc: 'Cover: -35% ranged damage taken. Obstructs fire passing through.' },
+  water: { name: 'Shallow Water', cost: 1.6, cover: 0, obstruct: 0, blocks: false, height: 0, cool: 15, desc: '+15 heat dissipation. Slows movement.' },
+  deep: { name: 'Deep Water', cost: 2.5, cover: 0.1, obstruct: 0, blocks: false, height: 0, cool: 30, desc: '+30 heat dissipation. Very slow. Partial cover.' },
   rock: { name: 'Crags', cost: Infinity, cover: 0, obstruct: 0, blocks: true, height: 1.6, cool: 0, desc: 'Impassable rock formations. Blocks line of sight.' },
   road: { name: 'Road', cost: 0.75, cover: 0, obstruct: 0, blocks: false, height: 0, cool: 0, desc: 'Paved. Faster movement.' },
   building: { name: 'Structure', cost: Infinity, cover: 0, obstruct: 0, blocks: true, height: 2, cool: 0, desc: 'Blocks movement and line of sight. Destructible.' },
   wall: { name: 'Wall', cost: Infinity, cover: 0, obstruct: 0, blocks: true, height: 1, cool: 0, desc: 'Fortified wall. Destructible.' },
-  rubble: { name: 'Rubble', cost: 1.8, cover: 0.1, obstruct: 0, blocks: false, height: 0, cool: 0, desc: 'Wreckage. Slow going; slight cover.' },
+  rubble: { name: 'Rubble', cost: 1.5, cover: 0.1, obstruct: 0, blocks: false, height: 0, cool: 0, desc: 'Wreckage. Slow going; slight cover.' },
 };
 
 export type Biome = 'lowlands' | 'highlands' | 'desert' | 'badlands' | 'lunar' | 'martian' | 'polar' | 'tundra';
@@ -70,9 +70,9 @@ export const BIOME_INFO: Record<Biome, BiomeInfo> = {
     forest: ['#9a8a4a', '#6a6a2a'], forestBg: '#241a10', water: ['#4a8ac0', '#102838'], rock: '#b0684a', road: '#9a7a5a',
     forestDensity: 0.12, waterLevel: 0.03, rockDensity: 0.12, roughDensity: 0.2, relief: 1.6, treeGlyphs: ['♣', '♣'] },
   lunar: { name: 'Lunar', heatMult: 0.75, desc: 'Airless moon. No convection: -25% heat dissipation.',
-    ground: ['#101114', '#16171b', '#1d1f24', '#26282e'], groundFg: '#5a5e68', groundGlyphs: ['.', '.', '°', '.'],
+    ground: ['#101114', '#16171b', '#1d1f24', '#26282e'], groundFg: '#5a5e68', groundGlyphs: ['.', '.', '.', '.'],
     forest: ['#7a8a9a', '#4a5a6a'], forestBg: '#101318', water: ['#6a7a9a', '#141820'], rock: '#9aa0aa', road: '#6a6e78',
-    forestDensity: 0.0, waterLevel: 0.0, rockDensity: 0.08, roughDensity: 0.28, relief: 1.1, treeGlyphs: ['¤', '¤'] },
+    forestDensity: 0.0, waterLevel: 0.0, rockDensity: 0.08, roughDensity: 0.16, relief: 1.1, treeGlyphs: ['¤', '¤'] },
   martian: { name: 'Martian', heatMult: 0.9, desc: 'Thin, dusty atmosphere. -10% heat dissipation.',
     ground: ['#2a120c', '#34170f', '#401c12', '#4e2316'], groundFg: '#a04a2a', groundGlyphs: ['.', '.', '.', '°'],
     forest: ['#b06a3a', '#804a2a'], forestBg: '#2a120c', water: ['#8a6a6a', '#2a1616'], rock: '#c0704a', road: '#a0684a',
@@ -199,7 +199,7 @@ export function generateMap(r: RNG, o: MapGenOpts): BattleMap {
     const s = m.shade[i];
     switch (t) {
       case 'plain': m.glyph[i] = B.groundGlyphs[Math.floor(s * 997) % B.groundGlyphs.length]; break;
-      case 'rough': m.glyph[i] = biome === 'lunar' ? (s > 0.6 ? 'o' : '∙') : ['∙', ',', '∴', '\'', '∙'][Math.floor(s * 4999) % 5]; break;
+      case 'rough': m.glyph[i] = biome === 'lunar' ? (s > 0.72 ? 'o' : '∙') : ['∙', ',', '∴', '\'', '∙'][Math.floor(s * 4999) % 5]; break;
       case 'lforest': m.glyph[i] = B.treeGlyphs[0]; break;
       case 'hforest': m.glyph[i] = B.treeGlyphs[1]; break;
       case 'water': m.glyph[i] = '~'; break;

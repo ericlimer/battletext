@@ -162,9 +162,10 @@ export function newCompany(opts: { name: string; commander: string; callsign: st
     pilots.push(p);
   }
   // Starting lance: two mediums, two lights (HBS-style random start)
-  const lights = CHASSIS.filter((c) => c.cls === 'L' && c.rarity <= 1);
-  const meds = CHASSIS.filter((c) => c.cls === 'M' && c.rarity <= 0 && c.tons <= 50);
-  const mechs = [r.pick(meds), r.pick(meds), r.pick(lights), r.pick(lights)].map((c) => newMechFrame(c.id));
+  const meds = ['SHD-2H', 'CN9-A', 'BJ-1', 'VND-1R', 'ENF-4R', 'HBK-4G', 'GRF-1N', 'WVR-6R'];
+  const lights = ['JR7-D', 'COM-2D', 'PNT-9R', 'SDR-5V', 'LCT-1V', 'FS9-H'];
+  const m1 = r.pick(meds), m2 = r.pick(meds.filter((x) => x !== m1)), l1 = r.pick(lights), l2 = r.pick(lights.filter((x) => x !== l1));
+  const mechs = [m1, m2, l1, l2].map((id) => newMechFrame(id));
   const c: Company = {
     version: 1, seed: opts.seed, name: opts.name, day: 0,
     funds: (opts.hard ? 900000 : 1600000) + bg.funds,
@@ -242,7 +243,7 @@ const CONTRACT_NAMES: Record<MissionType, string[]> = {
 };
 
 export function basePay(diff: number): number {
-  return Math.round((140000 + diff * 85000 + diff * diff * 9000) / 5000) * 5000;
+  return Math.round((240000 + diff * 100000 + diff * diff * 9000) / 5000) * 5000;
 }
 
 export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
@@ -260,7 +261,7 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   const diff = Math.max(1, Math.min(10, s.diff + r.int(-1, 1) + (type === 'assassinate' ? 1 : 0)));
   const repF = 1 + Math.max(-0.2, Math.min(0.25, (c.rep[employer] ?? 0) / 300));
   const pay = Math.round((basePay(diff) * r.range(0.9, 1.15) * repF * (s.tags.includes('capital') ? 1.15 : 1)) / 5000) * 5000;
-  const salvageMax = Math.min(12, 3 + Math.floor(diff / 2) + (repLevel(c.rep[employer] ?? 0).idx >= 5 ? 2 : repLevel(c.rep[employer] ?? 0).idx >= 4 ? 1 : 0));
+  const salvageMax = Math.min(14, 5 + Math.floor(diff / 2) + (repLevel(c.rep[employer] ?? 0).idx >= 5 ? 2 : repLevel(c.rep[employer] ?? 0).idx >= 4 ? 1 : 0));
   const tgtF = faction(target), empF = faction(employer);
   const flavors: Record<MissionType, string> = {
     battle: `${tgtF.short} forces are operating on ${s.name} without authorization. ${empF.short} wants them driven off.`,
@@ -323,9 +324,10 @@ function genStore(c: Company, r: RNG, s: StarSystem): StoreItem[] {
     const ch = r.pick(cands);
     out.push({ kind: 'part', id: ch.id, qty: r.int(1, 2), price: Math.round((ch.cost * 0.4 * pm) / 1000) * 1000 });
   }
-  if (r.chance(s.tags.includes('industrial') ? 0.6 : 0.2)) {
+  const nMechs = (r.chance(s.tags.includes('industrial') ? 0.85 : 0.45) ? 1 : 0) + (s.tags.includes('industrial') && r.chance(0.4) ? 1 : 0);
+  for (let i = 0; i < nMechs; i++) {
     const cands = CHASSIS.filter((ch) => ch.rarity <= maxR && Math.abs(ch.tons - (25 + s.diff * 8)) < 25);
-    if (cands.length) { const ch = r.pick(cands); out.push({ kind: 'mech', id: ch.id, qty: 1, price: Math.round((ch.cost * 1.25 * pm) / 5000) * 5000 }); }
+    if (cands.length) { const ch = r.pick(cands); out.push({ kind: 'mech', id: ch.id, qty: 1, price: Math.round((ch.cost * 1.1 * pm) / 5000) * 5000 }); }
   }
   return out.sort((a, b) => (a.kind === b.kind ? item2sort(a) - item2sort(b) : a.kind === 'mech' ? -1 : b.kind === 'mech' ? 1 : a.kind === 'part' ? -1 : 1));
 }
@@ -356,8 +358,8 @@ export function refreshSystem(c: Company, force = false): void {
   const r = rngOf(c);
   const k = c.contracts[s.id] ?? [];
   const valid = k.filter((x) => x.expires > c.day);
-  const want = 4 + (has(c, 'comms') ? 1 : 0) + (s.tags.includes('capital') ? 1 : 0);
-  if (force || valid.length < want - 1 || c.day - s.contractsDay > 20) {
+  const want = 5 + (has(c, 'comms') ? 1 : 0) + (s.tags.includes('capital') ? 1 : 0);
+  if (force || valid.length < want - 2 || c.day - s.contractsDay > 12) {
     while (valid.length < want) valid.push(genContract(c, r, s));
     s.contractsDay = c.day;
   }

@@ -6,7 +6,7 @@ import { C, lerp } from '../engine/color';
 import { RNG } from '../engine/rng';
 import { CHASSIS, chassis, CLASS_NAMES } from '../data/mechs';
 import { newMechFrame, frameStats, weaponSummary } from '../game/frame';
-import { makePilot, Pilot } from '../game/pilot';
+import { makePilot, Pilot, uniqueCallsign } from '../game/pilot';
 import { setupMission, MissionType, MISSION_INFO, Combatant, pilotTier } from '../combat/missions';
 import { BIOMES, BIOME_INFO, Biome } from '../combat/terrain';
 import { CombatScreen } from './combat';
@@ -128,9 +128,11 @@ export class SkirmishScreen implements Screen {
 
   launch(): void {
     const r = new RNG(this.seed++);
+    const taken = new Set<string>();
     const mk = (s: Slot): Combatant | null => {
       if (!s.chassis) return null;
       const p: Pilot = makePilot(r, [0, 1, 3, 4][s.tier]);
+      p.callsign = uniqueCallsign(r, taken); taken.add(p.callsign);
       return { frame: newMechFrame(s.chassis), pilot: p };
     };
     const player = this.player.map(mk).filter(Boolean) as Combatant[];
@@ -157,7 +159,8 @@ export class SkirmishScreen implements Screen {
 
 export function quickSkirmish(type: string, seed: number): void {
   const r = new RNG(seed);
-  const player: Combatant[] = ['HBK-4G', 'CN9-A', 'JR7-D', 'CPLT-C1'].map((id) => ({ frame: newMechFrame(id), pilot: makePilot(r, 2) }));
+  const taken = new Set<string>();
+  const player: Combatant[] = ['HBK-4G', 'CN9-A', 'JR7-D', 'CPLT-C1'].map((id) => { const p = makePilot(r, 2); p.callsign = uniqueCallsign(r, taken); taken.add(p.callsign); return { frame: newMechFrame(id), pilot: p }; });
   const rt = setupMission({ type: type as MissionType, difficulty: 4, biome: BIOMES[seed % BIOMES.length], seed, night: false, employer: 'davion', target: 'liao', player, basePay: 400000 });
   const cs = new CombatScreen(rt, () => app.pop(), 'QUICK SKIRMISH');
   const q = new URLSearchParams(location.search);
