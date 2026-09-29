@@ -1,0 +1,297 @@
+// Tactical AI: utility-scored movement and heat-aware target/weapon selection.
+
+import { item } from '../data/items';
+import { Component } from '../game/frame';
+import { Battle, Unit, SIDE, MoveMode, attackArc, Assignment } from './battle';
+import { TERRAIN, dist, dirTo } from './terrain';
+
+interface Cand {
+  i: number;
+  mode: MoveMode | null;
+  score: number;
+  melee?: Unit;
+  dfa?: boolean;
+}
+
+function roleRange(b: Battle, u: Unit): number {
+  // Damage-weighted optimal range of the loadout
+  let wsum = 0, rsum = 0;
+  for (const c of b.weaponsOf(u)) {
+    const w = item(c.id);
+    const dmg = (w.dmg ?? 0) * (w.shots ?? 1);
+    const opt = w.min ? Math.max(w.min + 1, (w.sr ?? 0) + 1) : Math.max(1.5, (w.sr ?? 0) * 0.9);
+    wsum += dmg;
+    rsum += dmg * opt;
+  }
+  return wsum ? rsum / wsum : 5;
+}
+
+function targetValue(b: Battle, a: Unit, t: Unit): number {
+  const f = t.frame;
+  let s = 0, ms = 0;
+  for (const k in f.maxStruct) { s += f.struct[k]; ms += f.maxStruct[k]; }
+  let a2 = 0, ma = 0;
+  for (const k in f.maxArmor) { a2 += f.armor[k]; ma += f.maxArmor[k]; }
+  const hp = (s + a2) / Math.max(1, ms + ma);
+  let v = 1 + (1 - hp) * 1.2;
+  if (t.frame.kind === 'mech') v *= 1.15;
+  if (t.tag === 'convoy') v *= 1.4;
+  if (t.prone || t.shutdown) v *= 1.3;
+  const arc = attackArc(t, a.x, a.y);
+  if (arc === 'rear') v *= 1.25;
+  return v;
+}
+
+function unitHealth(u: Unit): number {
+  const f = u.frame;
+  let s = 0, ms = 0;
+  for (const k in f.maxStruct) { s += f.struct[k]; ms += f.maxStruct[k]; }
+  let a = 0, ma = 0;
+  for (const k in f.maxArmor) { a += f.armor[k]; ma += f.maxArmor[k]; }
+  return (s + a) / Math.max(1, ms + ma);
+}
+
+/** Rough incoming damage estimate at a tile, from all known enemies. */
+function threatAt(b: Battle, u: Unit, x: number, y: number, pips: number, known: Unit[]): number {
+  const t = TERRAIN[b.map.terr[y * b.map.w + x]];
+  let total = 0;
+  for (const e of known) {
+    const d = dist(e.x, e.y, x, y);
+    const reach = e.stats.walk * 0.6;
+    const gun = e.pilot?.gun ?? 3;
+    for (const c of b.weaponsOf(e)) {
+      const w = item(c.id);
+      const eff = Math.max(0, d - reach);
+      if (eff > (w.lr ?? 0)) continue;
+      let p = 55 + gun * 3 - pips * 8;
+      if (eff > (w.mr ?? 0)) p -= 15; else if (eff > (w.sr ?? 0)) p -= 5;
+      p = Math.max(5, Math.min(95, p));
+      total += (p / 100) * (w.dmg ?? 0) * (w.shots ?? 1);
+    }
+  }
+  return total * (1 - t.cover);
+}
+
+export function aiTakeTurn(b: Battle, u: Unit): void {
+  if (!b.beginActivation(u)) return;
+  const side = SIDE(u.team);
+  const m = b.map;
+  const enemies = b.enemiesOf(u);
+  const visible = enemies.filter((e) => b.seen[side].has(e.id));
+  // Known positions: visible units plus recent memory
+  const known: Unit[] = [...visible];
+  for (const e of enemies) {
+    if (visible.includes(e)) continue;
+    const lk = u.ai.lastKnown.get(e.id);
+    if (lk && b.round - lk[2] <= 3) known.push({ ...e, x: lk[0], y: lk[1] } as Unit);
+  }
+
+  // ---- Convoys drive for the exit -----------------------------------------------------
+  if ((u.tag === 'convoy' || (u as any)._fleeing) && u.ai.goal) {
+    moveToward(b, u, u.ai.goal[0], u.ai.goal[1], 'walk');
+    const [gx, gy] = u.ai.goal;
+    if (dist(u.x, u.y, gx, gy) <= 2.5) {
+      u.fled = true;
+      b.say(`${b.displayName(u)} has left the area.`, side === 0 ? '#6ad46a' : '#f0a830');
+      b.emit({ k: 'destroyed', u: u.id, how: 'fled' });
+    } else if (b.weaponsOf(u).length && visible.length) aiAttack(b, u, visible);
+    b.finishActivation(u);
+    return;
+  }
+
+  // ---- Nothing known: advance on objective / last contact -------------------------------
+  if (!known.length) {
+    if (u.tag === 'guard' && dist(u.x, u.y, u.startX, u.startY) < 6) { b.finishActivation(u); return; }
+    const goal = u.ai.goal ?? [Math.floor(m.w / 2), Math.floor(m.h / 2)];
+    if (u.frame.kind !== 'turret') moveToward(b, u, goal[0], goal[1], dist(u.x, u.y, goal[0], goal[1]) > 14 ? 'sprint' : 'walk');
+    b.finishActivation(u);
+    return;
+  }
+
+  // ---- Evaluate candidate positions -----------------------------------------------------
+  const hp = unitHealth(u);
+  const allies = b.alliesOf(u);
+  const alliedStr = allies.length + 1, enemyStr = Math.max(1, known.length);
+  let aggr = u.ai.aggression + (alliedStr / enemyStr - 1) * 0.15 - (1 - hp) * 0.25;
+  aggr = Math.max(0.2, Math.min(0.9, aggr));
+  const pref = roleRange(b, u);
+  const cands: Cand[] = [];
+  const cur = u.y * m.w + u.x;
+  cands.push({ i: cur, mode: null, score: 0 });
+  if (u.frame.kind !== 'turret' && !u.cannotMove) {
+    for (const [i] of b.reachable(u, 'walk')) cands.push({ i, mode: 'walk', score: 0 });
+    if (u.stats.jump > 0) for (const [i] of b.reachable(u, 'jump')) if (!cands.some((c) => c.i === i)) cands.push({ i, mode: 'jump', score: 0 });
+  }
+  const heatRoom = u.frame.kind === 'mech' ? Math.max(0.35, Math.min(1, (u.stats.heatCap * 0.8 + b.dissipation(u) * 0.3 - u.heat) / Math.max(1, u.stats.alphaHeat))) : 1;
+  let best: Cand | null = null;
+  for (const c of cands) {
+    const x = c.i % m.w, y = (c.i / m.w) | 0;
+    const steps = c.mode === 'jump' ? Math.round(dist(u.x, u.y, x, y)) : Math.round(dist(u.x, u.y, x, y));
+    const pips = c.mode ? b.pipsFor(u, c.mode, steps) : 0;
+    const from = { x, y, moved: c.mode };
+    let off = 0;
+    let nearest = Infinity;
+    for (const t of visible) {
+      const ed = b.expectedDamage(u, t, from) * heatRoom;
+      const v = ed * targetValue(b, { ...u, x, y } as Unit, t);
+      if (v > off) off = v;
+    }
+    for (const t of known) nearest = Math.min(nearest, dist(x, y, t.x, t.y));
+    const threat = threatAt(b, u, x, y, pips, known);
+    const T = TERRAIN[m.terr[c.i]];
+    let pos = T.cover * 22 + m.elev[c.i] * 3.5 - Math.abs(nearest - pref) * 1.2;
+    if (c.mode === 'jump') pos -= (steps * 3 + u.heat > u.stats.heatCap * 0.6 ? 10 : 2);
+    if (T.cool > 0 && u.heat > 40) pos += T.cool * 0.4;
+    // cohesion
+    if (allies.length) {
+      let dmin = Infinity;
+      for (const a of allies) dmin = Math.min(dmin, dist(x, y, a.x, a.y));
+      if (dmin > 10) pos -= (dmin - 10) * 0.8;
+    }
+    if (u.tag === 'target') pos -= Math.max(0, 12 - nearest) * 2; // assassination targets are timid
+    if (u.tag === 'guard' && u.ai.goal) pos -= Math.max(0, dist(x, y, u.ai.goal[0], u.ai.goal[1]) - 7) * 1.5;
+    c.score = off * aggr * 1.0 - threat * (1 - aggr) * 0.35 + pos + b.rng.next() * 0.5;
+    if (!best || c.score > best.score) best = c;
+  }
+
+  // ---- Melee options ----------------------------------------------------------------------
+  if (u.frame.kind === 'mech' && !u.cannotMove) {
+    for (const t of visible) {
+      if (t.frame.kind === 'turret' && false) continue;
+      for (const dfa of u.stats.jump > 0 ? [false, true] : [false]) {
+        if (dist(u.x, u.y, t.x, t.y) > (dfa ? u.stats.jump : u.stats.walk) + 1.5) continue;
+        const spots = b.meleeSpots(u, t, dfa);
+        if (!spots.size) continue;
+        const hc = b.meleeChance(u, t, dfa);
+        const dmg = dfa ? u.stats.dfaDmg : u.stats.meleeDmg;
+        let v = (hc.chance / 100) * dmg * targetValue(b, u, t) * (dfa ? 0.85 : 1);
+        // melee is attractive vs knocked-down / unsteady targets and for heavies
+        if (t.unsteady) v *= 1.3;
+        let bestSpot = -1, bestS = -Infinity;
+        for (const [i] of spots) {
+          const x = i % m.w, y = (i / m.w) | 0;
+          const s = -threatAt(b, u, x, y, 0, known) * (1 - aggr) * 0.35 + TERRAIN[m.terr[i]].cover * 10 + (attackArc(t, x, y) === 'rear' ? 12 : 0);
+          if (s > bestS) { bestS = s; bestSpot = i; }
+        }
+        const score = v * aggr + bestS;
+        if (best && score > best.score) best = { i: bestSpot, mode: dfa ? 'jump' : 'walk', score, melee: t, dfa };
+      }
+    }
+  }
+
+  if (!best) { b.finishActivation(u); return; }
+  if (best.melee) {
+    const t = best.melee;
+    const spots = b.meleeSpots(u, t, !!best.dfa);
+    const path = best.i === cur ? [] : b.pathTo(u, spots, best.i, best.dfa ? 'jump' : 'walk');
+    b.melee(u, t, path, !!best.dfa);
+    b.finishActivation(u);
+    return;
+  }
+  if (best.mode && best.i !== cur) {
+    const reach = b.reachable(u, best.mode);
+    const path = b.pathTo(u, reach, best.i, best.mode);
+    b.move(u, path, best.mode);
+  }
+  if (!u.alive) return;
+  const visNow = b.enemiesOf(u).filter((e) => b.seen[side].has(e.id));
+  const attacked = aiAttack(b, u, visNow) || aiAttackStructure(b, u);
+  if (!attacked && u.alive) {
+    // No shot: sensor lock, vigilance or brace; face the nearest threat
+    const lockT = visNow.find((t) => t.pips >= 3);
+    if (u.pilot?.abilities.includes('sensorlock') && lockT) b.sensorLock(u, lockT);
+    else if (hp < 0.55 && b.resolve[side] >= b.resolveCost() && known.length && u.frame.kind === 'mech') b.vigilance(u);
+    else if (u.frame.kind === 'mech' && (hp < 0.8 || u.stab > u.stats.stabMax * 0.3)) b.brace(u);
+    const near = known.reduce((a, t) => (dist(u.x, u.y, t.x, t.y) < dist(u.x, u.y, a.x, a.y) ? t : a), known[0]);
+    if (near && u.frame.kind === 'mech') b.setFacing(u, dirTo(u.x, u.y, near.x, near.y));
+  }
+  b.finishActivation(u);
+}
+
+function moveToward(b: Battle, u: Unit, gx: number, gy: number, mode: MoveMode): void {
+  if (u.cannotMove || u.frame.kind === 'turret') return;
+  const m = b.map;
+  const reach = b.reachable(u, mode);
+  let bi = -1, bd = dist(u.x, u.y, gx, gy);
+  for (const [i] of reach) {
+    const d = dist(i % m.w, (i / m.w) | 0, gx, gy) + TERRAIN[m.terr[i]].cost * 0.05;
+    if (d < bd) { bd = d; bi = i; }
+  }
+  if (bi < 0) return;
+  b.move(u, b.pathTo(u, reach, bi, mode), mode);
+}
+
+/** Pick target + weapons within heat budget and fire. Returns true if an attack was made. */
+export function aiAttack(b: Battle, u: Unit, visible: Unit[]): boolean {
+  if (!b.canAttack(u) || !visible.length) return false;
+  const side = SIDE(u.team);
+  const weps = b.weaponsOf(u).filter((w) => b.hasAmmo(u, w));
+  if (!weps.length) return false;
+  let bestT: Unit | null = null, bestV = 0, bestW: Component[] = [];
+  for (const t of visible) {
+    const usable: [Component, number, number][] = [];
+    for (const wc of weps) {
+      const w = item(wc.id);
+      const hc = b.hitChance(u, t, w);
+      if (!hc.ok || hc.chance < 12) continue;
+      usable.push([wc, (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1), w.heat ?? 0]);
+    }
+    if (!usable.length) continue;
+    const chosen = pickWithinHeat(b, u, usable, unitHealth(t) < 0.25);
+    const ev = chosen.reduce((a, c) => a + c[1], 0) * targetValue(b, u, t);
+    if (ev > bestV) { bestV = ev; bestT = t; bestW = chosen.map((c) => c[0]); }
+  }
+  if (!bestT || !bestW.length) return false;
+  let called: string | undefined;
+  if (u.frame.kind === 'mech' && b.resolve[side] >= b.resolveCost() && bestT.frame.kind === 'mech') {
+    if (bestT.prone || bestT.shutdown) called = 'HD';
+    else if (b.rng.chance(0.5)) {
+      // Focus the most damaged torso
+      const f = bestT.frame;
+      called = ['CT', 'LT', 'RT'].reduce((a, l) => (f.struct[l] > 0 && f.struct[l] + (f.armor[l] ?? 0) < f.struct[a] + (f.armor[a] ?? 0) ? l : a), 'CT');
+    }
+    if (called) { b.resolve[side] -= b.resolveCost(); b.say(`${b.displayName(u)} uses PRECISION STRIKE on the ${called}.`, '#f0a830'); }
+  }
+  const plan: Assignment[] = [{ target: bestT, weapons: bestW }];
+  b.attack(u, plan, called);
+  return true;
+}
+
+function pickWithinHeat(b: Battle, u: Unit, usable: [Component, number, number][], finishing: boolean): [Component, number, number][] {
+  if (u.frame.kind !== 'mech') return usable;
+  const cap = u.stats.heatCap;
+  const limit = (finishing ? cap * 0.95 : cap * 0.74) - u.heat + (finishing ? 0 : Math.min(15, b.dissipation(u) * 0.25));
+  const sorted = [...usable].sort((a, c) => (c[1] / Math.max(1, c[2])) - (a[1] / Math.max(1, a[2])));
+  const out: [Component, number, number][] = [];
+  let heat = 0;
+  for (const s of sorted) {
+    if (s[2] === 0 || heat + s[2] <= limit) { out.push(s); heat += s[2]; }
+  }
+  if (!out.length && sorted.length) out.push(sorted[sorted.length - 1]);
+  return out;
+}
+
+/** Shoot at the opposing side's objective structures when no unit targets are available. */
+export function aiAttackStructure(b: Battle, u: Unit): boolean {
+  if (!b.canAttack(u)) return false;
+  const side = SIDE(u.team);
+  const m = b.map;
+  let best: { s: typeof m.structures[0]; w: Component[]; ev: number } | null = null;
+  for (const s of m.structures) {
+    if (s.destroyed || !s.objective || SIDE(s.team) === side) continue;
+    const ws: Component[] = [];
+    let ev = 0;
+    for (const wc of b.weaponsOf(u)) {
+      if (!b.hasAmmo(u, wc)) continue;
+      const w = item(wc.id);
+      const hc = b.hitChance(u, null, w, u, undefined, false, s);
+      if (!hc.ok) continue;
+      ws.push(wc);
+      ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1);
+    }
+    if (ws.length && (!best || ev > best.ev)) best = { s, w: pickWithinHeat(b, u, ws.map((c) => [c, 1, item(c.id).heat ?? 0] as [Component, number, number]), false).map((x) => x[0]), ev };
+  }
+  if (!best) return false;
+  b.attack(u, [{ target: null, struct: best.s, weapons: best.w }]);
+  return true;
+}

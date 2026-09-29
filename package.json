@@ -1,0 +1,26 @@
+{
+  "name": "battletext",
+  "version": "1.0.0",
+  "description": "ASCII roguelike demake of BATTLETECH (2018)",
+  "main": "index.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --dev",
+    "typecheck": "tsc -p .",
+    "sim": "node scripts/run.mjs scripts/sim.ts",
+    "check": "node scripts/run.mjs scripts/check-data.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com-battletext:ericlimer/battletext.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2"
+  }
+}

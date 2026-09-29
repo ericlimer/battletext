@@ -1,0 +1,312 @@
+// The Argo: career hub with tabs, time control and company overview.
+
+import { Screen, app } from './app';
+import { UI } from '../engine/ui';
+import { C, lerp, scale, healthColor } from '../engine/color';
+import { COLS, ROWS } from '../engine/display';
+import { company, saveGame, exportSave } from '../game/save';
+import {
+  Company, dateStr, monthlyExpenses, morale, moraleName, mrbLevel, MRB_LEVELS, EXPENSE_LEVELS, UPGRADES, sys, advanceDay,
+  bays, pilotCap, techHours, CAREER_DAYS, careerScore, companyValue, travelDaysLeft, rngOf, saveRng, mechReady, has,
+} from '../game/company';
+import { FACTIONS, repLevel, faction } from '../data/factions';
+import { cb, cbk, wrap } from '../engine/util';
+import { drawContractsTab } from './contracts';
+import { drawStarmapTab } from './starmap';
+import { drawMechBayTab } from './mechbay';
+import { drawBarracksTab } from './barracks';
+import { drawStoreTab } from './store';
+import { EventScreen } from './eventscreen';
+import { GameOverScreen } from './gameover';
+import { pickEvent } from '../game/events';
+import { TitleScreen } from './title';
+import { simpleBar } from './widgets';
+import { tagDesc } from '../game/world';
+
+export const TABS = ['COMMAND', 'CONTRACTS', 'STAR MAP', 'MECH BAY', 'BARRACKS', 'STORE', 'FINANCE', 'ARGO'] as const;
+export type Tab = typeof TABS[number];
+
+export class ArgoScreen implements Screen {
+  tab: Tab = 'COMMAND';
+  advancing = false;
+  advT = 0;
+  toast: { text: string; t: number; color: string } | null = null;
+  menuOpen = false;
+  // per-tab state
+  st: Record<string, any> = {};
+  logState = { scroll: 1e9 };
+
+  get c(): Company { return company!; }
+
+  onEnter(): void {
+    const c = this.c;
+    if (c && c.gameOver) app.push(new GameOverScreen());
+  }
+
+  notify(text: string, color: string = C.accent): void { this.toast = { text, t: 3, color }; }
+
+  passDay(): boolean {
+    const c = this.c;
+    const rep = advanceDay(c);
+    saveGame(c);
+    if (rep.gameOver) { this.advancing = false; app.push(new GameOverScreen()); return false; }
+    if (rep.event) {
+      const r = rngOf(c);
+      const e = pickEvent(c, r, rep.event === 'travel' ? 'travel' : 'docked');
+      saveRng(c, r);
+      if (e) { this.advancing = false; app.push(new EventScreen(e.ev, e.ctx)); return false; }
+    }
+    if (rep.arrived) { this.advancing = false; this.notify(`Arrived at ${sys(c).name}`, C.cyan); this.tab = 'CONTRACTS'; return false; }
+    if (rep.monthEnd) { this.advancing = false; this.notify(`Month end: paid ${cb(c.lastExpenses)}`, C.cbill); return false; }
+    return true;
+  }
+
+  /** Stop condition for continuous time: something the player cares about finished. */
+  stopWatch(): string {
+    const c = this.c;
+    return `${c.work.length}|${c.pilots.filter((p) => p.injuries > 0).length}|${c.location}`;
+  }
+  watchKey = '';
+
+  render(ui: UI, dt: number): void {
+    const c = this.c;
+    if (!c) { app.reset(new TitleScreen()); return; }
+    const d = ui.d;
+    d.fill(0, 0, COLS, ROWS, ' ', C.text, C.bg);
+    // Continuous time advance
+    if (this.advancing) {
+      this.advT += dt;
+      if (this.advT > 0.14) {
+        this.advT = 0;
+        const cont = this.passDay();
+        if (cont && this.stopWatch() !== this.watchKey) { this.advancing = false; this.notify('Time paused: task complete', C.green); }
+      }
+    }
+    this.drawHeader(ui);
+    this.drawTabs(ui);
+    const x = 0, y = 3, w = COLS, h = ROWS - 3;
+    switch (this.tab) {
+      case 'COMMAND': this.drawCommand(ui, x, y, w, h); break;
+      case 'CONTRACTS': drawContractsTab(ui, this, x, y, w, h); break;
+      case 'STAR MAP': drawStarmapTab(ui, this, x, y, w, h); break;
+      case 'MECH BAY': drawMechBayTab(ui, this, x, y, w, h); break;
+      case 'BARRACKS': drawBarracksTab(ui, this, x, y, w, h); break;
+      case 'STORE': drawStoreTab(ui, this, x, y, w, h); break;
+      case 'FINANCE': this.drawFinance(ui, x, y, w, h); break;
+      case 'ARGO': this.drawUpgrades(ui, x, y, w, h); break;
+    }
+    if (this.toast) {
+      this.toast.t -= dt;
+      const t = this.toast;
+      const len = t.text.length + 4;
+      const a = Math.min(1, t.t * 2);
+      d.fill(COLS - len - 2, ROWS - 3, len, 1, ' ', C.text, lerp(C.bg, '#14202a', a));
+      d.text(COLS - len, ROWS - 3, t.text, lerp(C.bg, t.color, a));
+      if (t.t <= 0) this.toast = null;
+    }
+    if (this.menuOpen) this.drawMenu(ui);
+  }
+
+  drawHeader(ui: UI): void {
+    const d = ui.d, c = this.c;
+    d.fill(0, 0, COLS, 1, ' ', C.text, '#0e151c');
+    let x = 1;
+    x += d.text(x, 0, `◆ ${c.name.toUpperCase()}`, C.accent, undefined, 30, true) + 3;
+    x += d.text(x, 0, dateStr(c.day), C.bright) + 1;
+    x += d.text(x, 0, `(day ${c.day}/${CAREER_DAYS})`, C.faint) + 3;
+    d.text(x, 0, cb(c.funds), c.funds < 0 ? C.red : C.cbill, undefined, 99, true);
+    const ex = monthlyExpenses(c);
+    const runway = ex.total > 0 ? Math.floor(c.funds / ex.total) : 99;
+    if (ui.hover(x, 0, 14, 1)) ui.setTip([`Funds ${cb(c.funds)}`, `Monthly expenses ${cb(ex.total)} (next payment in ${30 - (c.day % 30)} days).`, `Runway: ~${Math.max(0, runway)} months.`]);
+    x += 16;
+    x += d.text(x, 0, `-${cbk(ex.total)}/mo`, runway < 2 ? C.red : C.dim) + 3;
+    const m = morale(c);
+    x += d.ctext(x, 0, `MORALE {${m >= 30 ? '#6ad46a' : m >= 15 ? '#f0c040' : '#e8503a'}}${m} ${moraleName(m)}{/}`, C.dim) + 3;
+    x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}`, C.dim) + 3;
+    const s = sys(c);
+    const loc = c.travel ? `IN TRANSIT → ${sys(c, c.travel.dest).name} (${travelDaysLeft(c)}d)` : `${s.name}`;
+    d.text(x, 0, loc, c.travel ? C.cyan : C.text, undefined, 40);
+    // time controls
+    const bx = COLS - 36;
+    if (ui.button(bx, 0, this.advancing ? '❚❚ Pause' : '▸ Advance', { key: ' ', keyLabel: '␣', tip: 'Pass time continuously until something completes (repairs, healing, arrival) or an event happens.' , style: 'plain', fg: this.advancing ? C.accent : C.text })) {
+      this.advancing = !this.advancing;
+      this.watchKey = this.stopWatch();
+    }
+    if (ui.button(bx + 14, 0, '+1 Day', { key: '.', style: 'plain', tip: 'Pass a single day.' })) { this.advancing = false; this.passDay(); }
+    if (ui.button(bx + 25, 0, 'Menu', { key: 'Escape', style: 'plain' })) this.menuOpen = !this.menuOpen;
+  }
+
+  drawTabs(ui: UI): void {
+    const d = ui.d;
+    d.fill(0, 1, COLS, 1, ' ', C.text, C.bg);
+    let x = 1;
+    TABS.forEach((t, i) => {
+      const w = t.length + 6;
+      if (ui.button(x, 1, t, { key: String(i + 1), active: this.tab === t, w, style: 'tab', center: true })) this.tab = t;
+      x += w + 1;
+    });
+    d.hline(0, 2, COLS, C.border, '─');
+  }
+
+  drawMenu(ui: UI): void {
+    const d = ui.d;
+    ui.dimAll(0.4);
+    const w = 34, h = 12, x = (COLS - w) >> 1, y = 12;
+    ui.panel(x, y, w, h, 'MENU', { style: 'double', fg: C.borderHi, bg: '#0a1016' });
+    let yy = y + 2;
+    const btn = (label: string, fn: () => void, key?: string) => { if (ui.button(x + 3, yy, label, { w: w - 6, style: 'block', key })) fn(); yy += 2; };
+    btn('Resume', () => { this.menuOpen = false; });
+    btn('Save game', () => { saveGame(this.c); this.notify('Game saved'); this.menuOpen = false; }, 's');
+    btn('Export save file', () => { exportSave(this.c); this.menuOpen = false; }, 'x');
+    btn('Save & quit to title', () => { saveGame(this.c); app.reset(new TitleScreen()); }, 'q');
+    void d;
+  }
+
+  // ---- COMMAND ------------------------------------------------------------------------------
+  drawCommand(ui: UI, x: number, y: number, w: number, h: number): void {
+    const d = ui.d, c = this.c;
+    const s = sys(c);
+    // Left: system + readiness
+    ui.panel(x + 1, y, 58, 14, `SYSTEM · ${s.name.toUpperCase()}`);
+    const own = faction(s.owner);
+    d.ctext(x + 3, y + 1, `Controlled by {${own.color}}${own.name}{/}`, C.dim);
+    d.ctext(x + 3, y + 2, `Threat {#e8503a}${skulls(s.diff)}{/}`, C.dim);
+    wrap(s.desc, 54).forEach((l, i) => d.text(x + 3, y + 4 + i, l, C.text));
+    s.tags.forEach((t, i) => d.ctext(x + 3, y + 7 + i, `{#f0a830}▪{/} ${tagDesc(t)}`, C.dim, undefined, 54));
+    const kN = (c.contracts[s.id] ?? []).length;
+    if (!c.travel) { if (ui.button(x + 3, y + 12, `${kN} contracts available`, { tip: 'View contracts' })) this.tab = 'CONTRACTS'; }
+    else d.text(x + 3, y + 12, 'In transit: no contracts until arrival.', C.cyan);
+    // Readiness
+    ui.panel(x + 1, y + 15, 58, h - 15, 'READINESS');
+    let yy = y + 16;
+    const ready = c.mechs.filter((m) => mechReady(c, m)).length;
+    const pReady = c.pilots.filter((p) => !p.dead && p.injuries === 0).length;
+    d.ctext(x + 3, yy++, `'Mechs ready: {#f2f6f8}${ready}{/}/${c.mechs.length} (bays ${c.mechs.length}/${bays(c)})   MechWarriors fit: {#f2f6f8}${pReady}{/}/${c.pilots.filter((p) => !p.dead).length}`, C.dim);
+    d.ctext(x + 3, yy++, `Tech capacity {#f2f6f8}${techHours(c)}{/} hrs/day · Work orders {#f2f6f8}${c.work.length}{/}`, C.dim);
+    yy++;
+    for (const wo of c.work.slice(0, 6)) {
+      const f = 1 - wo.hours / Math.max(1, wo.total);
+      d.text(x + 3, yy, wo.desc.slice(0, 30), C.text);
+      simpleBar(d, x + 35, yy, 14, f, '#4a8ee8');
+      d.text(x + 50, yy, `${Math.ceil(wo.hours / techHours(c))}d`, C.dim);
+      yy++;
+    }
+    if (!c.work.length) d.text(x + 3, yy++, 'No work orders pending.', C.faint);
+    yy++;
+    for (const p of c.pilots.filter((q) => q.injuries > 0 && !q.dead).slice(0, 5)) d.ctext(x + 3, yy++, `{#f08a30}✚{/} ${p.callsign} recovering: ${p.healDays} days`, C.text);
+    // Middle: reputation
+    ui.panel(x + 60, y, 44, 22, 'STANDING');
+    const lvl = mrbLevel(c);
+    d.ctext(x + 62, y + 1, `Mercenary Review Board rating {#f0a830}${lvl}{/}/5`, C.text);
+    const nxt = MRB_LEVELS[Math.min(5, lvl + 1)];
+    simpleBar(d, x + 62, y + 2, 38, lvl >= 5 ? 1 : (c.mrb - MRB_LEVELS[lvl]) / (nxt - MRB_LEVELS[lvl]), '#d89a30');
+    d.text(x + 62, y + 3, lvl >= 5 ? 'Maximum rating' : `${c.mrb}/${nxt} to next rating · max contract ${skulls(Math.floor(4 + lvl * 1.5))}`, C.faint, undefined, 40);
+    let ry = y + 5;
+    for (const f of FACTIONS) {
+      const v = c.rep[f.id] ?? 0;
+      const lv = repLevel(v);
+      d.text(x + 62, ry, f.short.slice(0, 11), f.color);
+      // centered bar -100..100
+      const bw = 16, bx = x + 74;
+      for (let i = 0; i < bw; i++) {
+        const a = (i + 0.5) / bw * 200 - 100;
+        const on = v >= 0 ? a >= 0 && a <= v : a <= 0 && a >= v;
+        d.set(bx + i, ry, i === bw / 2 ? '│' : ' ', C.faint, on ? lv.color : '#161c22');
+      }
+      d.text(x + 91, ry, lv.name, lv.color);
+      if (ui.hover(x + 62, ry, 40, 1)) ui.setTip([`{${f.color}}${f.name}{/}: ${v} (${lv.name})`, f.desc, 'Higher standing improves pay, salvage offers and store prices.']);
+      ry += 2;
+    }
+    // Company summary
+    ui.panel(x + 60, y + 23, 44, h - 23, 'COMPANY');
+    const e = monthlyExpenses(c);
+    const lines = [
+      `Funds {#f0c850}${cb(c.funds)}{/}`,
+      `Monthly burn {#f2f6f8}${cb(e.total)}{/} (${EXPENSE_LEVELS[c.expense].name})`,
+      `Company value {#f2f6f8}${cb(companyValue(c))}{/}`,
+      `Contracts {#f2f6f8}${c.stats.wins}{/}/${c.stats.missions} won · kills {#f2f6f8}${c.stats.kills}{/}`,
+      `Lost: {#e8503a}${c.stats.mechsLost}{/} 'Mechs, {#e8503a}${c.stats.pilotsLost}{/} MechWarriors`,
+      `Days remaining {#f2f6f8}${CAREER_DAYS - c.day}{/}`,
+      `Career score {#f0a830}${careerScore(c)}{/}`,
+    ];
+    lines.forEach((l, i) => d.ctext(x + 62, y + 24 + i, l, C.dim));
+    // Right: log
+    ui.panel(x + 105, y, w - 106, h, 'COMPANY LOG');
+    const lw = w - 110;
+    const all: { t: string; c?: string }[] = [];
+    for (const l of c.log) { const ws = wrap(`{#3b4a54}${dateStr(l.day).slice(0, 6)}{/} ${l.text}`, lw); ws.forEach((t) => all.push({ t, c: l.color })); }
+    ui.list(x + 106, y + 1, w - 108, h - 2, all, this.logState, (l, _i, lx, ly) => d.ctext(lx + 1, ly, l.t, l.c ?? C.text, undefined, lw));
+  }
+
+  // ---- FINANCE ------------------------------------------------------------------------------
+  drawFinance(ui: UI, x: number, y: number, w: number, h: number): void {
+    const d = ui.d, c = this.c;
+    ui.panel(x + 1, y, 70, 22, 'EXPENSE LEVEL');
+    d.text(x + 3, y + 1, 'How well you treat your crew. Affects monthly costs and morale.', C.dim);
+    EXPENSE_LEVELS.forEach((lv, i) => {
+      const yy = y + 3 + i * 2;
+      if (ui.button(x + 3, yy, lv.name, { active: c.expense === i, w: 16 })) { c.expense = i; saveGame(c); }
+      d.ctext(x + 21, yy, `Salaries x${lv.mult.toFixed(2)}   Morale {${lv.morale >= 0 ? '#6ad46a' : '#e8503a'}}${lv.morale >= 0 ? '+' : ''}${lv.morale}{/}`, C.dim);
+    });
+    const m = morale(c);
+    d.ctext(x + 3, y + 14, `Current morale: {#f2f6f8}${m}{/} (${moraleName(m)})`, C.text);
+    d.text(x + 3, y + 15, 'Morale sets how quickly Resolve builds in combat (Precision Strike, Vigilance).', C.faint, undefined, 66);
+    simpleBar(d, x + 3, y + 17, 50, m / 50, healthColor(m / 50));
+    // Breakdown
+    const e = monthlyExpenses(c);
+    ui.panel(x + 1, y + 23, 70, h - 23, 'MONTHLY EXPENSES');
+    const rows: [string, number][] = [['Argo operations', e.argo], ['\'Mech maintenance', e.mechs], ['MechWarrior salaries', e.pilots], ['Upgrade upkeep', e.upgrades]];
+    rows.forEach(([l, v], i) => { d.text(x + 3, y + 25 + i, l, C.text); d.text(x + 40, y + 25 + i, cb(v).padStart(14), C.cbill); });
+    d.hline(x + 3, y + 30, 51, C.border);
+    d.text(x + 3, y + 31, 'TOTAL', C.bright, undefined, 99, true);
+    d.text(x + 40, y + 31, cb(e.total).padStart(14), C.cbill, undefined, 99, true);
+    const days = 30 - (c.day % 30);
+    d.ctext(x + 3, y + 33, `Next payment in {#f2f6f8}${days}{/} days. ${c.funds >= e.total ? `Runway ~{#f2f6f8}${Math.floor(c.funds / Math.max(1, e.total))}{/} months.` : '{#e8503a}Insufficient funds for next payment!{/}'}`, C.dim);
+    if (c.negativeMonths) d.text(x + 3, y + 35, 'The company is in debt. Another negative month means bankruptcy.', C.red);
+    // Mech upkeep detail
+    ui.panel(x + 73, y, w - 74, h, 'MAINTENANCE DETAIL');
+    let yy = y + 1;
+    for (const mm of c.mechs) { d.text(x + 75, yy, mm.nickname ?? mm.defId, C.text); d.text(x + 110, yy, cb(12000 + (chassisTons(mm)) * 450).padStart(10), C.dim); yy++; }
+    yy++;
+    for (const p of c.pilots.filter((q) => !q.dead)) {
+      if (yy >= y + h - 1) break;
+      d.text(x + 75, yy, `${p.callsign}`, C.text);
+      d.text(x + 110, yy, (p.commander ? 'owner' : cb(Math.round(salaryOf(p) * e.mult))).padStart(10), C.dim);
+      yy++;
+    }
+  }
+
+  // ---- ARGO UPGRADES ---------------------------------------------------------------------------
+  drawUpgrades(ui: UI, x: number, y: number, w: number, h: number): void {
+    const d = ui.d, c = this.c;
+    ui.panel(x + 1, y, w - 2, h, 'ARGO UPGRADES');
+    d.text(x + 3, y + 1, 'Refit your Leopard-class dropship. Upgrades add monthly upkeep.', C.dim);
+    UPGRADES.forEach((u, i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const bx = x + 3 + col * 73, by = y + 3 + row * 6;
+      const owned = has(c, u.id);
+      const locked = u.requires && !has(c, u.requires);
+      d.box(bx, by, 71, 5, owned ? '#2a6a4a' : locked ? '#2a2a2a' : C.border, owned ? '#0c1a14' : C.panel);
+      d.text(bx + 2, by + 1, u.name, owned ? C.green : locked ? C.faint : C.bright, undefined, 99, true);
+      d.text(bx + 2, by + 2, u.desc, C.dim, undefined, 66);
+      d.ctext(bx + 2, by + 3, `{#f0c850}${cb(u.cost)}{/} · upkeep ${cb(u.upkeep)}/mo${locked ? `  {#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}` : ''}`, C.dim);
+      if (owned) d.text(bx + 60, by + 1, 'INSTALLED', C.green);
+      else if (!locked && ui.button(bx + 58, by + 3, 'Purchase', { disabled: c.funds < u.cost || !!c.travel, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : '' })) {
+        c.funds -= u.cost; c.stats.spent += u.cost; c.upgrades.push(u.id); saveGame(c); this.notify(`${u.name} installed`, C.green);
+      }
+    });
+    void scale; void pilotCap;
+  }
+}
+
+import { chassis } from '../data/mechs';
+import { salary } from '../game/pilot';
+import { Frame } from '../game/frame';
+function chassisTons(m: Frame): number { return chassis(m.defId).tons; }
+function salaryOf(p: Parameters<typeof salary>[0]): number { return salary(p); }
+
+/** Difficulty as five pips: ■ full skull, ◧ half skull, □ empty. */
+export function skulls(diff: number): string {
+  const full = Math.floor(diff / 2), half = diff % 2;
+  return '■'.repeat(full) + (half ? '◧' : '') + '□'.repeat(Math.max(0, 5 - full - half));
+}

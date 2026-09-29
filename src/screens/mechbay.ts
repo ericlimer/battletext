@@ -1,0 +1,130 @@
+// Mech Bay: roster, repair, storage, assembly from parts, sale.
+
+import { UI } from '../engine/ui';
+import { C, healthColor } from '../engine/color';
+import { COLS } from '../engine/display';
+import type { ArgoScreen } from './argo';
+import { app } from './app';
+import { company, saveGame } from '../game/save';
+import { bays, mechBusy, queueRepair, assembleMech, PARTS_NEEDED, workQueueDays, techHours, addLog } from '../game/company';
+import { Frame, frameName, frameStats, repairEstimate, frameValue, isFrameDamaged, weaponSummary } from '../game/frame';
+import { chassis, CLASS_NAMES } from '../data/mechs';
+import { item, MECH_LOCS, LOC_NAMES, HARD_COLORS } from '../data/items';
+import { cb, cbk } from '../engine/util';
+import { drawDoll, statsSummary, simpleBar, hardpointStr } from './widgets';
+import { MechLabScreen } from './mechlab';
+
+type Row = { kind: 'hdr'; text: string } | { kind: 'mech'; m: Frame; stored: boolean } | { kind: 'part'; id: string; n: number };
+
+export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: number, h: number): void {
+  const d = ui.d, c = company!;
+  const st = (argo.st.bay ??= { sel: c.mechs[0]?.uid ?? '', list: { scroll: 0 }, confirmSell: false });
+  const rows: Row[] = [{ kind: 'hdr', text: `ACTIVE BAYS ${c.mechs.length}/${bays(c)}` }];
+  for (const m of c.mechs) rows.push({ kind: 'mech', m, stored: false });
+  rows.push({ kind: 'hdr', text: `STORAGE ${c.storage.length}` });
+  for (const m of c.storage) rows.push({ kind: 'mech', m, stored: true });
+  const parts = Object.entries(c.parts).filter(([, n]) => n > 0);
+  rows.push({ kind: 'hdr', text: `SALVAGED PARTS` });
+  for (const [id, n] of parts) rows.push({ kind: 'part', id, n });
+  ui.panel(x + 1, y, 50, h, '\'MECH BAY');
+  const cl = ui.list(x + 2, y + 1, 48, h - 2, rows, st.list, (r, _i, lx, ly, lw, hov) => {
+    if (r.kind === 'hdr') { d.text(lx + 1, ly, r.text, C.accent, undefined, lw, true); return; }
+    if (r.kind === 'part') {
+      const ch = chassis(r.id);
+      const ready = r.n >= PARTS_NEEDED;
+      const bg = hov ? '#16222c' : C.panel;
+      d.fill(lx, ly, lw, 1, ' ', C.text, bg);
+      d.text(lx + 1, ly, `⚙ ${ch.name} ${ch.id}`, ready ? C.cyan : C.text, bg);
+      d.text(lx + 30, ly, `${r.n}/${PARTS_NEEDED}`, ready ? C.green : C.dim, bg);
+      if (ready && ui.button(lx + 37, ly, 'Assemble', { style: 'plain', fg: C.green, tip: `Build a ${ch.name} from ${PARTS_NEEDED} parts. Some weapons will be missing.` })) {
+        assembleMech(c, r.id); saveGame(c); argo.notify(`Assembling ${ch.name}`, C.green);
+      }
+      return;
+    }
+    const m = r.m;
+    const sel = st.sel === m.uid;
+    const bg = sel ? '#16242e' : hov ? '#121c24' : C.panel;
+    d.fill(lx, ly, lw, 1, ' ', C.text, bg);
+    if (sel) d.set(lx, ly, '▌', C.accent, bg);
+    const ch = chassis(m.defId);
+    d.text(lx + 2, ly, `${ch.name} ${ch.id}`.slice(0, 20), r.stored ? C.dim : C.bright, bg);
+    d.text(lx + 22, ly, `${ch.tons}t`, C.faint, bg);
+    const wo = mechBusy(c, m.uid);
+    let status = 'Ready', col = C.green;
+    if (r.stored) { status = 'Stored'; col = C.faint; }
+    if (wo) { status = `${wo.kind === 'repair' ? 'Repair' : wo.kind === 'refit' ? 'Refit' : wo.kind === 'assemble' ? 'Build' : 'Ready'} ${workQueueDays(c, m.uid)}d`; col = C.warn; }
+    else if (isFrameDamaged(m) && !r.stored) { status = 'Damaged'; col = C.orange; }
+    d.text(lx + 27, ly, status, col, bg);
+    const s = frameStats(m);
+    simpleBar(d, lx + 38, ly, lw - 39, s.armorTotal / Math.max(1, s.armorMax), healthColor(s.armorTotal / Math.max(1, s.armorMax)), '#161c22');
+  }, 1);
+  if (cl >= 0) { const r = rows[cl]; if (r.kind === 'mech') { st.sel = r.m.uid; st.confirmSell = false; } }
+  const all = [...c.mechs, ...c.storage];
+  const m = all.find((q) => q.uid === st.sel) ?? all[0];
+  if (!m) { d.text(x + 55, y + 3, 'No \'Mechs. Buy one in the Store, or assemble salvaged parts.', C.dim); return; }
+  st.sel = m.uid;
+  const stored = c.storage.includes(m);
+  // Detail
+  const dx = x + 52, dw = w - 53;
+  const ch = chassis(m.defId);
+  ui.panel(dx, y, dw, h, `${ch.name.toUpperCase()} ${ch.id}`);
+  d.ctext(dx + 2, y + 1, `${CLASS_NAMES[ch.cls]} · ${ch.tons} tons · hardpoints ${hardpointStr(m)} · value {#f0c850}${cbk(frameValue(m))}{/}`, C.dim);
+  d.text(dx + 2, y + 2, ch.desc, C.faint, undefined, dw - 4);
+  drawDoll(ui, dx + 2, y + 4, m, {});
+  // Stats bars
+  const ss = statsSummary(m);
+  ss.forEach((s, i) => {
+    d.text(dx + 34, y + 4 + i * 2, s.label, C.dim);
+    d.text(dx + 46, y + 4 + i * 2, s.val, C.bright);
+    simpleBar(d, dx + 34, y + 5 + i * 2, 24, s.frac, '#4a8ee8');
+    if (ui.hover(dx + 34, y + 4 + i * 2, 24, 2)) ui.setTip(s.tip);
+  });
+  // Loadout
+  let ly = y + 15;
+  d.text(dx + 2, ly++, 'LOADOUT', C.accent, undefined, 99, true);
+  const colW = Math.floor((dw - 4) / 4);
+  MECH_LOCS.forEach((l, i) => {
+    const cx = dx + 2 + (i % 4) * colW, cy = ly + Math.floor(i / 4) * 9;
+    const hp = ch.hardpoints[l] ?? [];
+    d.ctext(cx, cy, `{#f2f6f8}${LOC_NAMES[l]}{/} ${hp.map((hh) => `{${HARD_COLORS[hh]}}${hh}{/}`).join('')}`, C.text, undefined, colW - 1);
+    m.items.filter((it) => it.loc === l).slice(0, 7).forEach((it, k) => {
+      const dd = item(it.id);
+      d.text(cx + 1, cy + 1 + k, `${dd.name}`.slice(0, colW - 3), it.dead ? '#6a3030' : dd.kind === 'weapon' ? C.text : C.dim);
+    });
+  });
+  // Actions
+  const e = repairEstimate(m);
+  let by = y + h - 7;
+  d.hline(dx + 1, by - 1, dw - 2, C.border);
+  if (e.armorPts || e.structPts || e.deadItems.length) {
+    d.ctext(dx + 2, by, `Damage: {#f2f6f8}${e.armorPts}{/} armor, {#f2f6f8}${e.structPts}{/} structure, {#f2f6f8}${e.deadItems.length}{/} destroyed components. Repair {#f0c850}${cb(e.cost)}{/}, ~${Math.ceil(e.hours / techHours(c))} days`, C.dim, undefined, dw - 4);
+  } else d.text(dx + 2, by, 'Fully operational.', C.green);
+  by += 2;
+  let bx = dx + 2;
+  const wo = mechBusy(c, m.uid);
+  if (ui.button(bx, by, 'MECH LAB', { key: 'l', style: 'block', w: 14, center: true, disabled: !!wo && wo.kind !== 'repair' && wo.kind !== 'refit', tip: wo && wo.kind !== 'repair' && wo.kind !== 'refit' ? 'Busy with a work order.' : 'Customize weapons, armor and equipment.' })) app.push(new MechLabScreen(m, argo));
+  bx += 16;
+  if (ui.button(bx, by, `REPAIR ${cbk(e.cost)}`, { key: 'r', style: 'block', w: 18, center: true, disabled: !!wo || !isFrameDamaged(m) || c.funds < e.cost, tip: 'Queue a repair work order.' })) {
+    const q = queueRepair(c, m); if (q) { saveGame(c); argo.notify(`Repair queued: ${cb(q.cost)}`, C.green); }
+  }
+  bx += 20;
+  if (!stored) {
+    if (ui.button(bx, by, 'TO STORAGE', { style: 'block', w: 14, center: true, disabled: !!wo, tip: 'Move to cold storage. Stored \'Mechs cost no maintenance but take a day to ready.' })) {
+      c.mechs = c.mechs.filter((q) => q !== m); c.storage.push(m); c.lance = c.lance.map((u) => (u === m.uid ? null : u)); saveGame(c);
+    }
+  } else if (ui.button(bx, by, 'ACTIVATE', { style: 'block', w: 14, center: true, disabled: c.mechs.length >= bays(c), tip: c.mechs.length >= bays(c) ? 'No free \'Mech bays.' : 'Move to an active bay (24 tech-hours).' })) {
+    c.storage = c.storage.filter((q) => q !== m); c.mechs.push(m);
+    c.work.push({ id: 'w' + Math.random().toString(36).slice(2), mechUid: m.uid, kind: 'ready', hours: 24, total: 24, desc: `Ready ${frameName(m)}` });
+    saveGame(c);
+  }
+  bx += 16;
+  const price = Math.round(frameValue(m) * 0.45 / 1000) * 1000;
+  if (!st.confirmSell) {
+    if (ui.button(bx, by, `SELL ${cbk(price)}`, { style: 'block', w: 16, center: true, disabled: !!wo || !!c.travel, tip: c.travel ? 'Must be docked.' : 'Sell this \'Mech and everything installed in it.' })) st.confirmSell = true;
+  } else if (ui.button(bx, by, 'CONFIRM SELL', { style: 'block', w: 16, center: true, fg: C.red })) {
+    c.mechs = c.mechs.filter((q) => q !== m); c.storage = c.storage.filter((q) => q !== m);
+    c.lance = c.lance.map((u) => (u === m.uid ? null : u));
+    c.funds += price; addLog(c, `Sold ${frameName(m)} for ${cb(price)}.`, '#f0c850'); saveGame(c); st.confirmSell = false;
+  }
+  void COLS;
+}
