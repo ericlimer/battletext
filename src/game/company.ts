@@ -108,6 +108,9 @@ export interface Company {
   pendingEvent?: string;
   ironman: boolean;
   commanderId: string;
+  pendingSalvage?: { pool: { kind: 'part' | 'item'; id: string; label: string; value: number }[]; shares: number; priority: number; seed: number; name: string };
+  lastEventDay?: number;
+  recentEvents?: string[];
 }
 
 export function rngOf(c: Company): RNG {
@@ -254,7 +257,7 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   for (const l of s.links) neigh.add(sys(c, l).owner);
   const employers = [...neigh].filter((f) => faction(f).employer);
   if (!employers.length) employers.push('locals');
-  const employer = r.weighted(employers, (f) => (f === s.owner ? 2 : 1) * (c.rep[f] < -50 ? 0.1 : 1));
+  const employer = r.weighted(employers, (f) => (f === s.owner ? 3 : f === 'locals' ? 0.8 : 1.5) * (c.rep[f] < -50 ? 0.1 : 1));
   const enemies = faction(employer).enemies.filter((e) => e !== employer);
   let target = r.weighted(enemies, (e) => (neigh.has(e) ? 3 : 1) * (e === 'pirates' ? 1.5 : 1));
   if (!target) target = 'pirates';
@@ -273,7 +276,7 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   };
   return {
     id: 'k' + r.int(0, 1e9).toString(36),
-    name: r.pick(CONTRACT_NAMES[type]),
+    name: (() => { const used = new Set((c.contracts[s.id] ?? []).map((x) => x.name)); const opts = CONTRACT_NAMES[type].filter((n) => !used.has(n)); return r.pick(opts.length ? opts : CONTRACT_NAMES[type]); })(),
     type, employer, target, diff,
     biome: r.pick(s.biomes),
     night: r.chance(0.18),
@@ -283,6 +286,13 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
     flavor: flavors[type],
     targetName: type === 'assassinate' ? r.pick(['Red Baron', 'The Butcher', 'Iron Duke', 'Cobra', 'Warlord', 'Grendel', 'Mad Dog', 'The Colonel', 'Vulture']) : undefined,
   };
+}
+
+export function contractDays(k: Contract): number { return 2 + Math.ceil(k.diff / 3); }
+
+/** How far toward salvage the employer will let you negotiate (HBS: limited by standing). */
+export function maxSlider(c: Company, k: Contract): number {
+  return Math.max(2, Math.min(10, 2 + repLevel(c.rep[k.employer] ?? 0).idx + mrbLevel(c)));
 }
 
 export function negotiate(k: Contract, slider: number): Negotiation {
@@ -315,14 +325,14 @@ function genStore(c: Company, r: RNG, s: StarSystem): StoreItem[] {
     out.push({ kind: 'item', id, qty: item(id).kind === 'ammo' ? r.int(3, 8) : r.int(1, 3), price: Math.round((item(id).cost * pm) / 100) * 100 });
   }
   // Ammo always stocked
-  for (const a of ['A-SRM', 'A-LRM', 'A-AC5', 'A-AC10', 'A-MG']) if (!out.some((o) => o.id === a)) out.push({ kind: 'item', id: a, qty: 5, price: Math.round((item(a).cost * pm) / 100) * 100 });
+  for (const a of ['A-SRM', 'A-LRM', 'A-AC2', 'A-AC5', 'A-AC10', 'A-AC20', 'A-MG']) if (!out.some((o) => o.id === a)) out.push({ kind: 'item', id: a, qty: 5, price: Math.round((item(a).cost * pm) / 100) * 100 });
   // Mech parts and occasionally a complete 'Mech
   const nParts = s.tags.includes('industrial') ? r.int(2, 4) : r.int(0, 2);
   for (let i = 0; i < nParts; i++) {
     const cands = CHASSIS.filter((ch) => ch.rarity <= maxR && Math.abs(ch.tons - (20 + s.diff * 8)) < 30);
     if (!cands.length) break;
     const ch = r.pick(cands);
-    out.push({ kind: 'part', id: ch.id, qty: r.int(1, 2), price: Math.round((ch.cost * 0.4 * pm) / 1000) * 1000 });
+    out.push({ kind: 'part', id: ch.id, qty: r.int(1, 2), price: Math.round((ch.cost * 0.26 * pm) / 1000) * 1000 });
   }
   const nMechs = (r.chance(s.tags.includes('industrial') ? 0.85 : 0.45) ? 1 : 0) + (s.tags.includes('industrial') && r.chance(0.4) ? 1 : 0);
   for (let i = 0; i < nMechs; i++) {
@@ -435,6 +445,17 @@ export function advanceDay(c: Company): DayReport {
     c.lastExpenses = e.total;
     say(`Month end: paid ${cb(e.total)} in operating costs.`, '#f0c850');
     rep.monthEnd = true;
+    const mor = morale(c);
+    if (mor < 12) {
+      const cands = c.pilots.filter((p) => !p.dead && !p.commander);
+      if (cands.length && r.chance(mor < 6 ? 0.6 : 0.3)) {
+        const p = r.pick(cands);
+        c.pilots = c.pilots.filter((q) => q !== p);
+        c.lancePilots = c.lancePilots.map((id) => (id === p.id ? null : id));
+        say(`Morale is ${moraleName(mor).toLowerCase()}: ${p.callsign} has deserted the company.`, '#e8503a');
+      } else say('The crew is grumbling about conditions aboard the Argo. Morale is dangerously low.', '#f0a830');
+    }
+    if (c.funds < 0) liquidate(c, say);
     if (c.funds < 0) {
       c.negativeMonths++;
       if (c.negativeMonths >= 2) { c.gameOver = 'bankrupt'; rep.gameOver = 'bankrupt'; }
@@ -449,8 +470,24 @@ export function advanceDay(c: Company): DayReport {
     if (c.contracts[c.location].length < before) refreshSystem(c);
   }
   if (c.day >= CAREER_DAYS && !c.gameOver) { c.gameOver = 'retired'; rep.gameOver = 'retired'; }
+  // Out of 'Mechs with no way to get more: the company is finished
+  if (!c.gameOver && c.mechs.length + c.storage.length === 0 && !Object.values(c.parts).some((n) => n >= PARTS_NEEDED)) {
+    const cheapest = Math.min(...CHASSIS.map((ch) => ch.cost));
+    if (c.funds < cheapest) { c.gameOver = 'destroyed'; rep.gameOver = 'destroyed'; say('With no \'Mechs left and no money to buy one, the company dissolves.', '#e8503a'); }
+  }
   saveRng(c, r);
   return rep;
+}
+
+/** Creditors force a sale of spare equipment, then stored and finally active 'Mechs. */
+function liquidate(c: Company, say: (t: string, col?: string) => void): void {
+  let raised = 0;
+  for (const [id, n] of Object.entries(c.inventory)) { if (c.funds >= 0) break; const v = sellPrice(c, id) * n; c.funds += v; raised += v; c.inventory[id] = 0; }
+  for (const [id, n] of Object.entries(c.parts)) { if (c.funds >= 0) break; const v = Math.round(chassis(id).cost * 0.12) * n; c.funds += v; raised += v; c.parts[id] = 0; }
+  const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const v = Math.round(frameValue(m) * 0.35); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); say(`Creditors seized ${frameName(m)}.`, '#e8503a'); } };
+  sellM(c.storage);
+  if (c.funds < 0 && c.mechs.length > 1) { const keep = c.mechs.slice(0, 1); const rest = c.mechs.slice(1); sellM(rest); c.mechs = [...keep, ...rest]; }
+  if (raised) say(`Forced liquidation raised ${cb(raised)} to cover debts.`, '#f0a830');
 }
 
 export function startTravel(c: Company, dest: string): string | null {
@@ -487,7 +524,9 @@ export function assembleMech(c: Company, chassisId: string): string | null {
   c.parts[chassisId] -= PARTS_NEEDED;
   const f = newMechFrame(chassisId);
   // Salvaged 'Mechs arrive stripped of some weapons, like in BATTLETECH
-  f.items = f.items.filter((it) => item(it.id).kind !== 'weapon' || Math.random() < 0.5);
+  const rr = rngOf(c);
+  f.items = f.items.filter((it) => item(it.id).kind !== 'weapon' || rr.chance(0.5));
+  saveRng(c, rr);
   const hrs = 24 + Math.round(chassis(chassisId).tons * 0.6);
   if (c.mechs.length < bays(c)) c.mechs.push(f); else c.storage.push(f);
   c.work.push({ id: 'w' + Math.random().toString(36).slice(2), mechUid: f.uid, kind: 'assemble', hours: hrs, total: hrs, desc: `Assemble ${frameName(f)}` });

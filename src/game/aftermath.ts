@@ -1,7 +1,7 @@
 // Contract execution: build the mission from career state and resolve the results.
 
 import { RNG } from '../engine/rng';
-import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED, monthlyExpenses } from './company';
+import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED, monthlyExpenses, dateStr, morale, contractDays } from './company';
 import { Frame, frameName, refillAmmo, isFrameDamaged, repairEstimate } from './frame';
 import { Pilot, health } from './pilot';
 import { setupMission, MissionRuntime, objectivesSummary } from '../combat/missions';
@@ -28,6 +28,7 @@ export interface MissionResult {
   priority: number;
   repairCost: number;
   lines: string[];
+  days: number;
 }
 
 export function launchContract(c: Company, k: Contract, lance: { mech: Frame; pilot: Pilot }[]): MissionRuntime {
@@ -35,7 +36,7 @@ export function launchContract(c: Company, k: Contract, lance: { mech: Frame; pi
   return setupMission({
     type: k.type, difficulty: k.diff, biome: k.biome, seed: k.seed, night: k.night,
     employer: k.employer, target: k.target, targetName: k.targetName, basePay: k.pay,
-    player: lance.map((l) => ({ frame: l.mech, pilot: l.pilot })),
+    player: lance.map((l) => ({ frame: l.mech, pilot: l.pilot })), morale: morale(c),
   });
 }
 
@@ -52,7 +53,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   const { primaryOk, bonus } = objectivesSummary(rt);
   const win = outcome === 'win' && primaryOk;
   const lines: string[] = [];
-  const res: MissionResult = { contract: k, neg, outcome: win ? 'win' : outcome === 'withdraw' ? 'withdraw' : 'loss', pay: 0, bonus: 0, repChanges: [], mrbGain: 0, xp: [], casualties: [], mechsLost: [], pool: [], salvageShares: 0, priority: 0, repairCost: 0, lines };
+  const res: MissionResult = { contract: k, neg, outcome: win ? 'win' : outcome === 'withdraw' ? 'withdraw' : 'loss', pay: 0, bonus: 0, repChanges: [], mrbGain: 0, xp: [], casualties: [], mechsLost: [], pool: [], salvageShares: 0, priority: 0, repairCost: 0, lines, days: 0 };
   c.stats.missions++;
   // ---- Money
   if (win) {
@@ -86,9 +87,11 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     res.xp.push([p, gained]);
     let died = false;
     if (!u.alive) {
+      // HBS-style: a cored 'Mech wounds its pilot; death comes from a destroyed cockpit or
+      // from wounds exceeding the pilot's health.
       if (u.destroyHow === 'head') died = true;
-      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') died = r.chance(0.25);
-      else if (u.destroyHow === 'pilot') died = r.chance(0.35);
+      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') { p.injuries++; if (p.injuries > health(p)) died = true; }
+      else if (u.destroyHow === 'pilot') died = r.chance(0.2);
     }
     if (died && !p.commander) {
       p.dead = true;
@@ -104,18 +107,21 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
       p.healDays = healDaysFor(c, p.injuries);
       res.casualties.push(`${p.callsign} injured: ${p.injuries} wound${p.injuries > 1 ? 's' : ''}, ${p.healDays} days to recover.`);
     }
-    if (!p.dead) p.timeline.push(`Day ${c.day}: "${k.name}" (${win ? 'success' : 'failure'}), ${u.kills} kill${u.kills === 1 ? '' : 's'}.`);
+    if (!p.dead) p.timeline.push(`${dateStr(c.day)}: "${k.name}" (${win ? 'success' : 'failure'}), ${u.kills} kill${u.kills === 1 ? '' : 's'}.`);
     const m = u.frame;
     if (!u.alive && (u.destroyHow === 'ct' || u.destroyHow === 'ammo')) {
-      if (!wiped) {
-        // Holding the field lets the techs drag the wreck home for a (costly) rebuild
+      // Recovery team: likely when the field is held, possible on a withdrawal, never when wiped out
+      const recovered = !wiped && r.chance(win ? 0.7 : 0.35);
+      if (recovered) {
         (m as any).wreck = true;
         res.mechsLost.push(`${frameName(m)} was cored, but the recovery team hauled the wreck aboard. It needs a full rebuild.`);
       } else {
         c.mechs = c.mechs.filter((x) => x.uid !== m.uid);
         c.lance = c.lance.map((x) => (x === m.uid ? null : x));
         c.stats.mechsLost++;
-        res.mechsLost.push(`${frameName(m)} was destroyed with the rest of the lance and left on the battlefield.`);
+        const back = wiped ? 0 : 1;
+        if (back) c.parts[m.defId] = (c.parts[m.defId] ?? 0) + back;
+        res.mechsLost.push(`${frameName(m)} was destroyed and could not be recovered${back ? ' — your techs salvaged 1 part' : ''}.`);
       }
     }
   }
@@ -161,6 +167,8 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     pool.sort((a, b2) => b2.value - a.value);
     res.pool = pool;
   }
+  res.days = contractDays(k);
+  if (res.pool.length) c.pendingSalvage = { pool: res.pool, shares: res.salvageShares, priority: res.priority, seed: k.seed, name: k.name };
   // Remove contract
   c.contracts[c.location] = (c.contracts[c.location] ?? []).filter((x) => x.id !== k.id);
   const summary = win ? `Contract "${k.name}" completed for ${faction(emp).short}: ${cb(res.pay + res.bonus)}.` : outcome === 'withdraw' ? `Withdrew from "${k.name}".` : `Contract "${k.name}" failed.`;
@@ -171,19 +179,24 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   return res;
 }
 
-/** Apply salvage picks: priority picks are chosen, the rest of the shares are random. */
-export function claimSalvage(c: Company, res: MissionResult, picks: number[]): SalvageEntry[] {
-  const r = new RNG(res.contract.seed ^ 0x51ed);
-  const got: SalvageEntry[] = [];
-  const remaining = res.pool.map((_, i) => i).filter((i) => !picks.includes(i));
-  for (const i of picks) got.push(res.pool[i]);
-  const randomShares = Math.max(0, res.salvageShares - picks.length);
-  r.shuffle(remaining);
-  for (let k = 0; k < randomShares && k < remaining.length; k++) got.push(res.pool[remaining[k]]);
+/** Employer takes its cut of the pool (after priority picks); the player then chooses the rest. */
+export function employerCut(res: { pool: SalvageEntry[]; salvageShares: number }, picks: number[], seed: number): number[] {
+  const r = new RNG(seed ^ 0x51ed);
+  const rest = res.pool.map((_, i) => i).filter((i) => !picks.includes(i));
+  r.shuffle(rest);
+  // The employer claims roughly half of what remains (never leaving less than the player's shares)
+  const keepForPlayer = Math.max(0, res.salvageShares - picks.length);
+  const cut = Math.max(0, Math.min(rest.length - keepForPlayer, Math.ceil(rest.length * 0.5)));
+  return rest.slice(0, cut);
+}
+
+export function claimSalvage(c: Company, pool: SalvageEntry[], picks: number[]): SalvageEntry[] {
+  const got = picks.map((i) => pool[i]);
   for (const g of got) {
     if (g.kind === 'part') c.parts[g.id] = (c.parts[g.id] ?? 0) + 1;
     else c.inventory[g.id] = (c.inventory[g.id] ?? 0) + 1;
   }
   if (got.length) addLog(c, `Salvage recovered: ${got.map((g) => g.label).join(', ')}.`, '#f0c850');
+  c.pendingSalvage = undefined;
   return got;
 }

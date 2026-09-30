@@ -80,10 +80,10 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     if (sel) { d.set(sx - 1, sy, '[', C.accent); d.set(sx + 1, sy, ']', C.accent); }
     // label
     const label = s.name;
-    const lx = sx + 2;
+    // Labels flip to the left near the right edge of the map
+    const lx = sx + 2 + label.length >= ox + MW ? sx - 1 - label.length : sx + 2;
     let free = true;
     for (let k = -1; k < label.length + 1; k++) if (occupied.has(`${lx + k},${sy}`)) free = false;
-    if (lx + label.length >= ox + MW) free = false;
     if (free || sel || hov || cur) {
       d.text(lx, sy, label, cur ? C.accent : sel || hov ? C.bright : scale(f.color, s.visited ? 0.8 : 0.55));
       for (let k = -1; k < label.length + 1; k++) occupied.add(`${lx + k},${sy}`);

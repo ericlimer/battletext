@@ -44,6 +44,7 @@ export interface MissionSpec {
   enemies?: Combatant[]; // explicit (skirmish)
   targetName?: string;
   basePay?: number;
+  morale?: number;
 }
 
 export interface MissionRuntime {
@@ -147,6 +148,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
   mo.clear!.push({ x: pStart[0], y: pStart[1], r: 4 }, { x: eStart[0], y: eStart[1], r: 4 });
   const map: BattleMap = generateMap(r, mo);
   const b = new Battle(map, r);
+  if (spec.morale !== undefined) { b.morale = spec.morale; b.resolveMax[0] = 60 + spec.morale * 2; b.resolve[0] = Math.round(spec.morale / 2); }
   const objectives: Objective[] = [];
   const briefing: string[] = [];
   const emp = faction(spec.employer), tgt = faction(spec.target);
@@ -196,11 +198,11 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       playerUnits = place(b, spec.player, 0, pStart[0], pStart[1], 2);
       const base = mo.base!;
       const cx = base.x + base.w / 2, cy = base.y + base.h / 2;
-      const guards = place(b, enemyLance(4), 1, Math.floor(cx - 4), Math.floor(cy), 6, { tag: 'guard' }, 3);
+      const guards = place(b, enemyLance(d <= 4 ? 3 : 4), 1, Math.floor(cx - 4), Math.floor(cy), 6, { tag: 'guard' }, 3);
       for (const g of guards) g.ai.goal = [Math.floor(cx), Math.floor(cy)];
       const turrets: Combatant[] = [];
-      const nT = 2 + Math.floor(d / 4);
-      for (let i = 0; i < nT; i++) turrets.push({ frame: newVehicleFrame(d >= 7 ? 'TUR-H' : d >= 4 ? 'TUR-M' : 'TUR-L'), pilot: makePilot(r, pilotTier(d)) });
+      const nT = 1 + Math.floor(d / 4);
+      for (let i = 0; i < nT; i++) turrets.push({ frame: newVehicleFrame(d >= 8 ? 'TUR-H' : d >= 5 ? 'TUR-M' : 'TUR-L'), pilot: makePilot(r, Math.max(0, pilotTier(d) - 1)) });
       const tu: Unit[] = [];
       turrets.forEach((tc, k) => {
         const ang = (k / turrets.length) * Math.PI * 2;
@@ -208,6 +210,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
         if (spot) tu.push(b.addUnit(tc.frame, tc.pilot, 1, spot[0], spot[1], 6));
       });
       enemyUnits = [...guards, ...tu];
+      for (const pu of playerUnits) pu.ai.goal = [Math.floor(cx), Math.floor(cy)];
       objectives.push({ id: 'buildings', text: 'Destroy the base\'s primary structures', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'turrets', text: 'Destroy all defensive turrets', primary: false, status: 'active', bonus });
       briefing.push(`A ${tgt.short} installation is operating in the region. Level its primary structures (marked ■). Turrets and a garrison lance defend it.`);

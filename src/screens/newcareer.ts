@@ -5,7 +5,7 @@ import { UI } from '../engine/ui';
 import { C } from '../engine/color';
 import { COLS, ROWS } from '../engine/display';
 import { BACKGROUNDS, newCompany } from '../game/company';
-import { setCompany, saveGame } from '../game/save';
+import { setCompany, saveGame, hasSave, deleteSave } from '../game/save';
 import { ArgoScreen } from './argo';
 import { cb, wrap } from '../engine/util';
 import { FACTIONS } from '../data/factions';
@@ -20,6 +20,7 @@ export class NewCareerScreen implements Screen {
   hard = false;
   ironman = false;
   seed = (Math.random() * 1e9) >>> 0;
+  confirmOverwrite = false;
 
   render(ui: UI): void {
     const d = ui.d;
@@ -39,13 +40,13 @@ export class NewCareerScreen implements Screen {
     if (ui.button(5, 23, this.ironman ? 'Ironman ■' : 'Ironman □', { tip: 'The save is deleted if the company goes bankrupt.' })) this.ironman = !this.ironman;
     d.text(5, 25, 'Career length: 1,200 days. Score is based on company value,', C.faint);
     d.text(5, 26, 'MRB rating, reputation and contracts completed.', C.faint);
-    ui.panel(65, 4, COLS - 68, 36, 'BACKGROUND');
+    ui.panel(65, 4, COLS - 68, 39, 'BACKGROUND');
     BACKGROUNDS.forEach((b, i) => {
-      const y = 6 + i * 6;
+      const y = 6 + i * 7;
       const sel = this.bg === i;
-      d.box(67, y, COLS - 72, 5, sel ? C.accent : C.border, sel ? '#161c10' : C.panel);
-      if (ui.click(67, y, COLS - 72, 5)) this.bg = i;
-      if (ui.hover(67, y, COLS - 72, 5)) ui.cursor = 'pointer';
+      d.box(67, y, COLS - 72, 6, sel ? C.accent : C.border, sel ? '#161c10' : C.panel);
+      if (ui.click(67, y, COLS - 72, 6)) this.bg = i;
+      if (ui.hover(67, y, COLS - 72, 6)) ui.cursor = 'pointer';
       d.text(69, y + 1, b.name, sel ? C.accent : C.bright, undefined, 99, true);
       wrap(b.desc, COLS - 78).forEach((l, k) => d.text(69, y + 2 + k, l, C.dim));
       const mods = [
@@ -53,12 +54,16 @@ export class NewCareerScreen implements Screen {
         ...Object.entries(b.rep).map(([f, v]) => `${FACTIONS.find((x) => x.id === f)?.short} ${v > 0 ? '+' : ''}${v}`),
         b.funds ? `+${cb(b.funds)}` : '',
       ].filter(Boolean).join(' · ');
-      d.text(69, y + 3, mods, C.cyan, undefined, COLS - 78);
+      d.text(69, y + 4, mods, C.cyan, undefined, COLS - 78);
     });
     if (ui.button(3, ROWS - 3, 'Back', { key: 'Escape' })) app.pop();
     const ok = this.name.trim().length > 1 && this.cmd.trim().length > 1 && this.call.trim().length > 1;
-    if (ui.button(COLS - 26, ROWS - 3, 'LAUNCH CAREER', { key: 'Enter', style: 'block', w: 22, center: true, disabled: !ok })) {
+    const existing = hasSave();
+    if (this.confirmOverwrite) d.text(COLS - 70, ROWS - 3, 'This will overwrite your saved career. Launch again to confirm.', C.warn);
+    if (ui.button(COLS - 26, ROWS - 3, this.confirmOverwrite ? 'OVERWRITE & LAUNCH' : 'LAUNCH CAREER', { key: 'Enter', style: 'block', w: 22, center: true, disabled: !ok })) {
+      if (existing && !this.confirmOverwrite) { this.confirmOverwrite = true; return; }
       const c = newCompany({ name: this.name.trim(), commander: this.cmd.trim(), callsign: this.call.trim(), background: BACKGROUNDS[this.bg].id, seed: this.seed, hard: this.hard, ironman: this.ironman });
+      deleteSave();
       setCompany(c);
       saveGame(c);
       app.reset(new ArgoScreen());

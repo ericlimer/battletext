@@ -258,7 +258,7 @@ export function repairEstimate(f: Frame): RepairEstimate {
   let cost = armorPts * ARMOR_COST_PER_PT + structPts * (60 + tons);
   let hours = armorPts / 12 + structPts / 3;
   for (const c of deadItems) { const d: ItemDef = item(c.id); cost += d.cost * 0.2; hours += 2 + d.tons * 0.8; }
-  if ((f as any).wreck && f.kind === 'mech') { cost += chassis(f.defId).cost * 0.04; hours += 40 + tons; }
+  if ((f as any).wreck && f.kind === 'mech') { cost += chassis(f.defId).cost * 0.08; hours += 40 + tons; }
   return { armorPts, structPts, deadItems, cost: Math.round(cost / 100) * 100, hours: Math.ceil(hours) };
 }
 
@@ -281,7 +281,9 @@ export function frameValue(f: Frame): number {
   const c = chassis(f.defId);
   const stockItemCost = c.stockItems.reduce((a, i) => a + item(i.id).cost, 0);
   const curItemCost = f.items.reduce((a, i) => a + item(i.id).cost, 0);
-  return Math.round(c.cost - stockItemCost * 0.8 + curItemCost * 0.8);
+  const liveItemCost = f.items.filter((i) => !i.dead).reduce((a, i) => a + item(i.id).cost, 0);
+  void curItemCost;
+  return Math.max(Math.round(c.cost * 0.1), Math.round(c.cost - stockItemCost * 0.8 + liveItemCost * 0.8 - repairEstimate(f).cost));
 }
 
 export function maxArmorPer(f: Frame): Record<Loc, number> {

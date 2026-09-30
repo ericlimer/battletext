@@ -32,7 +32,28 @@ export function loadGame(): Company | null {
 }
 
 export function deleteSave(): void {
-  try { localStorage.removeItem(KEY); } catch { /* ignore */ }
+  try { localStorage.removeItem(KEY); localStorage.removeItem(BACKUP); } catch { /* ignore */ }
+}
+
+/** Non-ironman careers keep a snapshot taken before each deployment. */
+const BACKUP = 'battletext.career.backup.v1';
+export function saveBackup(c: Company): void {
+  if (c.ironman) return;
+  try { localStorage.setItem(BACKUP, JSON.stringify(c)); } catch { /* ignore */ }
+}
+export function hasBackup(): boolean {
+  try { return !!localStorage.getItem(BACKUP); } catch { return false; }
+}
+export function restoreBackup(): Company | null {
+  try {
+    const s = localStorage.getItem(BACKUP);
+    if (!s) return null;
+    const c = JSON.parse(s);
+    if (!valid(c)) return null;
+    company = c;
+    saveGame(c);
+    return c;
+  } catch { return null; }
 }
 
 export function exportSave(c: Company | null = company): void {

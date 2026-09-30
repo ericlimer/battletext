@@ -83,7 +83,7 @@ export const EVENTS: GameEvent[] = [
     weight: (c) => (c.pilots.some((p) => p.injuries > 0) ? 3 : 0.2),
     text: () => 'The ship\'s doctor has a lead on an experimental regenerative treatment. It is expensive, but could put the wounded back on their feet quickly.',
     choices: [
-      { text: `Pay for the treatment (${cb(90000)}).`, req: funds(90000), apply: (c) => { pay(c, 90000); let n = 0; for (const p of c.pilots) if (p.injuries > 0) { p.healDays = Math.max(1, Math.floor(p.healDays / 3)); n++; } return `${n} injured MechWarrior${n === 1 ? '' : 's'} recover much faster.`; } },
+      { text: `Pay for the treatment (${cb(90000)}).`, req: funds(90000), apply: (c) => { pay(c, 90000); let n = 0; for (const p of c.pilots) if (p.injuries > 0) { p.healDays = Math.max(1, Math.floor(p.healDays / 3)); n++; } return n ? `${n} injured MechWarrior${n === 1 ? ' recovers' : 's recover'} much faster.` : 'Nobody needed it after all. The money is spent.'; } },
       { text: 'Too risky. Stick with conventional care.', apply: () => 'The doctor sighs and returns to the medbay.' },
     ],
   },
@@ -150,9 +150,14 @@ export const EVENTS: GameEvent[] = [
 export function pickEvent(c: Company, r: RNG, where: 'travel' | 'docked'): { ev: GameEvent; ctx: EventCtx } | null {
   const alive = c.pilots.filter((p) => !p.dead);
   if (alive.length < 2) return null;
-  const pool = EVENTS.filter((e) => e.where === where || e.where === 'any');
+  // Events are spaced out and don't repeat until several others have fired
+  if (c.lastEventDay !== undefined && c.day - c.lastEventDay < 12) return null;
+  const recent = c.recentEvents ?? [];
+  const pool = EVENTS.filter((e) => (e.where === where || e.where === 'any') && !recent.includes(e.id));
   const ev = r.weighted(pool, (e) => e.weight?.(c) ?? 1);
   if (!ev) return null;
+  c.lastEventDay = c.day;
+  c.recentEvents = [...recent, ev.id].slice(-6);
   const pa = r.shuffle([...alive]);
   return { ev, ctx: { pilot: pa[0], pilot2: pa[1], sysName: sys(c).name } };
 }

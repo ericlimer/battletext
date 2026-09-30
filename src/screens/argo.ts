@@ -21,6 +21,7 @@ import { GameOverScreen } from './gameover';
 import { pickEvent } from '../game/events';
 import { TitleScreen } from './title';
 import { simpleBar } from './widgets';
+import { SalvageScreen } from './salvage';
 import { isMuted, setMuted } from '../engine/sound';
 import { tagDesc } from '../game/world';
 
@@ -36,12 +37,17 @@ export class ArgoScreen implements Screen {
   // per-tab state
   st: Record<string, any> = {};
   logState = { scroll: 1e9 };
+  logLen = -1;
+  queueDays = 0;
+  confirmBuy = '';
 
   get c(): Company { return company!; }
 
   onEnter(): void {
     const c = this.c;
-    if (c && c.gameOver) app.push(new GameOverScreen());
+    if (!c) return;
+    if (c.gameOver) { app.push(new GameOverScreen()); return; }
+    if (c.pendingSalvage && app.top() === this) app.push(new SalvageScreen(this));
   }
 
   notify(text: string, color: string = C.accent): void { this.toast = { text, t: 3, color }; }
@@ -65,6 +71,8 @@ export class ArgoScreen implements Screen {
   /** Stop condition for continuous time: something the player cares about finished. */
   stopWatch(): string {
     const c = this.c;
+    // While travelling only arrival stops the clock
+    if (c.travel) return `T${c.travel.dest}`;
     return `${c.work.length}|${c.pilots.filter((p) => p.injuries > 0).length}|${c.location}`;
   }
   watchKey = '';
@@ -74,8 +82,13 @@ export class ArgoScreen implements Screen {
     if (!c) { app.reset(new TitleScreen()); return; }
     const d = ui.d;
     d.fill(0, 0, COLS, ROWS, ' ', C.text, C.bg);
+    // Days spent on deployment pass once we're back aboard
+    if (this.queueDays > 0 && app.top() === this && !this.menuOpen) {
+      this.advT += dt;
+      if (this.advT > 0.08) { this.advT = 0; this.queueDays--; if (!this.passDay()) this.queueDays = 0; }
+    }
     // Continuous time advance
-    if (this.advancing) {
+    if (this.advancing && !this.menuOpen) {
       this.advT += dt;
       if (this.advT > 0.14) {
         this.advT = 0;
@@ -83,6 +96,7 @@ export class ArgoScreen implements Screen {
         if (cont && this.stopWatch() !== this.watchKey) { this.advancing = false; this.notify('Time paused: task complete', C.green); }
       }
     }
+    if (this.menuOpen) ui.enabled = false;
     this.drawHeader(ui);
     this.drawTabs(ui);
     const x = 0, y = 3, w = COLS, h = ROWS - 3;
@@ -105,7 +119,7 @@ export class ArgoScreen implements Screen {
       d.text(COLS - len, ROWS - 3, t.text, lerp(C.bg, t.color, a));
       if (t.t <= 0) this.toast = null;
     }
-    if (this.menuOpen) this.drawMenu(ui);
+    if (this.menuOpen) { ui.enabled = true; this.drawMenu(ui); }
   }
 
   drawHeader(ui: UI): void {
@@ -123,10 +137,10 @@ export class ArgoScreen implements Screen {
     x += d.text(x, 0, `-${cbk(ex.total)}/mo`, runway < 2 ? C.red : C.dim) + 3;
     const m = morale(c);
     x += d.ctext(x, 0, `MORALE {${m >= 30 ? '#6ad46a' : m >= 15 ? '#f0c040' : '#e8503a'}}${m} ${moraleName(m)}{/}`, C.dim) + 3;
-    x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}`, C.dim) + 3;
+    x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}{#3b4a54}(${c.mrb}){/}`, C.dim) + 2;
     const s = sys(c);
     const loc = c.travel ? `IN TRANSIT → ${sys(c, c.travel.dest).name} (${travelDaysLeft(c)}d)` : `${s.name}`;
-    d.text(x, 0, loc, c.travel ? C.cyan : C.text, undefined, 40);
+    d.text(x, 0, loc, c.travel ? C.cyan : C.text, undefined, Math.max(0, COLS - 37 - x));
     // time controls
     const bx = COLS - 36;
     if (ui.button(bx, 0, this.advancing ? '❚❚ Pause' : '▸ Advance', { key: ' ', keyLabel: '␣', tip: 'Pass time continuously until something completes (repairs, healing, arrival) or an event happens.' , style: 'plain', fg: this.advancing ? C.accent : C.text })) {
@@ -135,6 +149,7 @@ export class ArgoScreen implements Screen {
     }
     if (ui.button(bx + 14, 0, '+1 Day', { key: '.', style: 'plain', tip: 'Pass a single day.' })) { this.advancing = false; this.passDay(); }
     if (ui.button(bx + 25, 0, 'Menu', { key: 'Escape', style: 'plain' })) this.menuOpen = !this.menuOpen;
+    if (this.menuOpen && ui.enabled === false) { /* menu handles its own input */ }
   }
 
   drawTabs(ui: UI): void {
@@ -156,7 +171,7 @@ export class ArgoScreen implements Screen {
     ui.panel(x, y, w, h, 'MENU', { style: 'double', fg: C.borderHi, bg: '#0a1016' });
     let yy = y + 2;
     const btn = (label: string, fn: () => void, key?: string) => { if (ui.button(x + 3, yy, label, { w: w - 6, style: 'block', key })) fn(); yy += 2; };
-    btn('Resume', () => { this.menuOpen = false; });
+    btn('Resume', () => { this.menuOpen = false; }, 'Escape');
     btn(isMuted() ? 'Sound: off' : 'Sound: on', () => setMuted(!isMuted()), 'm');
     btn('Save game', () => { saveGame(this.c); this.notify('Game saved'); this.menuOpen = false; }, 's');
     btn('Export save file', () => { exportSave(this.c); this.menuOpen = false; }, 'x');
@@ -196,6 +211,21 @@ export class ArgoScreen implements Screen {
     if (!c.work.length) d.text(x + 3, yy++, 'No work orders pending.', C.faint);
     yy++;
     for (const p of c.pilots.filter((q) => q.injuries > 0 && !q.dead).slice(0, 5)) d.ctext(x + 3, yy++, `{#f08a30}✚{/} ${p.callsign} recovering: ${p.healDays} days`, C.text);
+    yy++;
+    d.text(x + 3, yy++, "'MECHS", C.accent, undefined, 99, true);
+    for (const m of c.mechs) {
+      if (yy >= y + h - 1) break;
+      const ch = chassis(m.defId);
+      const wo = c.work.find((w) => w.mechUid === m.uid);
+      const st = frameStats(m);
+      const pi = c.lance.indexOf(m.uid);
+      const pl = pi >= 0 ? c.pilots.find((p) => p.id === c.lancePilots[pi]) : undefined;
+      d.text(x + 3, yy, `${ch.name} ${ch.id}`.slice(0, 20), C.text);
+      d.text(x + 24, yy, `${ch.tons}t`, C.faint);
+      simpleBar(d, x + 29, yy, 10, st.armorTotal / Math.max(1, st.armorMax), healthColor(st.armorTotal / Math.max(1, st.armorMax)));
+      d.text(x + 41, yy, wo ? `${wo.kind} ${workQueueDays(c, m.uid)}d` : pl ? pl.callsign.slice(0, 14) : 'ready', wo ? C.warn : pl ? C.cyan : C.green, undefined, 16);
+      yy++;
+    }
     // Middle: reputation
     ui.panel(x + 60, y, 44, 22, 'STANDING');
     const lvl = mrbLevel(c);
@@ -235,6 +265,7 @@ export class ArgoScreen implements Screen {
     // Right: log
     ui.panel(x + 105, y, w - 106, h, 'COMPANY LOG');
     const lw = w - 110;
+    if (this.logLen !== c.log.length) { this.logLen = c.log.length; this.logState.scroll = 1e9; }
     const all: { t: string; c?: string }[] = [];
     for (const l of c.log) { const ws = wrap(`{#3b4a54}${dateStr(l.day).slice(0, 6)}{/} ${l.text}`, lw); ws.forEach((t) => all.push({ t, c: l.color })); }
     ui.list(x + 106, y + 1, w - 108, h - 2, all, this.logState, (l, _i, lx, ly) => d.ctext(lx + 1, ly, l.t, l.c ?? C.text, undefined, lw));
@@ -252,7 +283,8 @@ export class ArgoScreen implements Screen {
     });
     const m = morale(c);
     d.ctext(x + 3, y + 14, `Current morale: {#f2f6f8}${m}{/} (${moraleName(m)})`, C.text);
-    d.text(x + 3, y + 15, 'Morale sets how quickly Resolve builds in combat (Precision Strike, Vigilance).', C.faint, undefined, 66);
+    d.text(x + 3, y + 15, 'Morale sets your starting and maximum Resolve and how fast it builds in combat.', C.faint, undefined, 66);
+    d.text(x + 3, y + 16, 'Below 12 at month end, unhappy MechWarriors may desert.', C.faint, undefined, 66);
     simpleBar(d, x + 3, y + 17, 50, m / 50, healthColor(m / 50));
     // Breakdown
     const e = monthlyExpenses(c);
@@ -293,8 +325,9 @@ export class ArgoScreen implements Screen {
       d.text(bx + 2, by + 2, u.desc, C.dim, undefined, 66);
       d.ctext(bx + 2, by + 3, `{#f0c850}${cb(u.cost)}{/} · upkeep ${cb(u.upkeep)}/mo${locked ? `  {#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}` : ''}`, C.dim);
       if (owned) d.text(bx + 60, by + 1, 'INSTALLED', C.green);
-      else if (!locked && ui.button(bx + 58, by + 3, 'Purchase', { disabled: c.funds < u.cost || !!c.travel, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : '' })) {
-        c.funds -= u.cost; c.stats.spent += u.cost; c.upgrades.push(u.id); saveGame(c); this.notify(`${u.name} installed`, C.green);
+      else if (!locked && ui.button(bx + 56, by + 3, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : 'Click twice to purchase.' })) {
+        if (this.confirmBuy !== u.id) this.confirmBuy = u.id;
+        else { c.funds -= u.cost; c.stats.spent += u.cost; c.upgrades.push(u.id); saveGame(c); this.notify(`${u.name} installed`, C.green); this.confirmBuy = ''; }
       }
     });
     void scale; void pilotCap;
@@ -302,6 +335,8 @@ export class ArgoScreen implements Screen {
 }
 
 import { chassis } from '../data/mechs';
+import { frameStats } from '../game/frame';
+import { workQueueDays } from '../game/company';
 import { salary } from '../game/pilot';
 import { Frame } from '../game/frame';
 function chassisTons(m: Frame): number { return chassis(m.defId).tons; }

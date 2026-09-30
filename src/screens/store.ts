@@ -16,7 +16,7 @@ type Cat = 'all' | 'weapon' | 'equip' | 'ammo' | 'mech';
 
 export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: number, h: number): void {
   const d = ui.d, c = company!;
-  const st = (argo.st.store ??= { cat: 'all' as Cat, buy: { scroll: 0 }, sell: { scroll: 0 } });
+  const st = (argo.st.store ??= { cat: 'all' as Cat, buy: { scroll: 0 }, sell: { scroll: 0 }, confirmPart: '' });
   if (c.travel) {
     ui.panel(x + 1, y, w - 2, h, 'STORE');
     d.text(x + 4, y + 3, 'Markets are only accessible while docked.', C.cyan);
@@ -87,7 +87,11 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
     d.text(lx + 38, ly, `x${e.n}`, C.dim, bg);
     d.text(lx + lw - 10, ly, cbk(price).padStart(9), C.cbill, bg);
   });
-  if (sl >= 0) {
+  if (sl >= 0 && sellList[sl].kind === 'part' && st.confirmPart !== sellList[sl].id) {
+    st.confirmPart = sellList[sl].id;
+    argo.notify(`Click again to sell a ${chassis(sellList[sl].id).name} part`, C.warn);
+  } else if (sl >= 0) {
+    st.confirmPart = '';
     const e = sellList[sl];
     let price: number;
     if (e.kind === 'item') { price = sellPrice(c, e.id); c.inventory[e.id]--; }

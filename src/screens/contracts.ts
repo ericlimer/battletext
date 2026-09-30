@@ -6,15 +6,16 @@ import { C, lerp, healthColor } from '../engine/color';
 import { COLS, ROWS } from '../engine/display';
 import type { ArgoScreen } from './argo';
 import { skulls } from './argo';
-import { company, saveGame } from '../game/save';
-import { Company, Contract, Negotiation, negotiate, maxContractDiff, sys, mechReady, mrbLevel, PARTS_NEEDED } from '../game/company';
+import { company, saveGame, saveBackup } from '../game/save';
+import { Company, Contract, Negotiation, negotiate, maxContractDiff, sys, mechReady, mrbLevel, PARTS_NEEDED, maxSlider, contractDays, workQueueDays } from '../game/company';
 import { MISSION_INFO } from '../combat/missions';
 import { BIOME_INFO } from '../combat/terrain';
 import { faction, repLevel } from '../data/factions';
 import { cb, cbk, wrap } from '../engine/util';
 import { Frame, frameName, frameTons, weaponSummary, frameStats, repairEstimate } from '../game/frame';
 import { Pilot, isAvailable, health } from '../game/pilot';
-import { launchContract, resolveContract, claimSalvage, MissionResult, SalvageEntry } from '../game/aftermath';
+import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
+import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
 import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
 import { item } from '../data/items';
@@ -87,25 +88,34 @@ function threatText(d: number): string {
 // ---- Negotiation --------------------------------------------------------------------------
 export class NegotiateScreen implements Screen {
   modal = true;
-  slider = 3;
-  constructor(public k: Contract, public argo: ArgoScreen) {}
+  slider: number;
+  constructor(public k: Contract, public argo: ArgoScreen) { this.slider = Math.min(3, maxSlider(company!, k)); }
   render(ui: UI): void {
-    const d = ui.d, k = this.k;
-    const w = 76, h = 20, x = (COLS - w) >> 1, y = 10;
+    const d = ui.d, k = this.k, c = company!;
+    const w = 86, h = 23, x = (COLS - w) >> 1, y = 9;
     ui.panel(x, y, w, h, 'NEGOTIATION', { style: 'double', fg: C.borderHi, bg: '#0a1016' });
-    const emp = faction(k.employer);
+    const emp = faction(k.employer), tgt = faction(k.target);
+    const cap = maxSlider(c, k);
     d.ctext(x + 3, y + 2, `{${emp.color}}${emp.name}{/} representative is on the line.`, C.dim);
-    d.text(x + 3, y + 3, '"We can discuss the payment structure. Cash or a share of the salvage — your choice."', C.text, undefined, w - 6);
+    d.text(x + 3, y + 3, '"Cash, or a share of the salvage. Within reason."', C.text, undefined, w - 6);
     const n: Negotiation = negotiate(k, this.slider);
     d.text(x + 3, y + 6, 'C-BILLS', C.cbill, undefined, 99, true);
     d.text(x + w - 11, y + 6, 'SALVAGE', C.bright, undefined, 99, true);
-    this.slider = ui.slider(x + 12, y + 6, w - 25, this.slider, 0, 10);
+    const sw = w - 25;
+    this.slider = Math.min(cap, ui.slider(x + 12, y + 6, sw, this.slider, 0, 10));
+    for (let i = Math.round((cap / 10) * (sw - 1)) + 1; i < sw; i++) d.set(x + 12 + i, y + 6, '─', '#5a2020');
     if (ui.key('ArrowLeft')) this.slider = Math.max(0, this.slider - 1);
-    if (ui.key('ArrowRight')) this.slider = Math.min(10, this.slider + 1);
-    d.ctext(x + 3, y + 9, `Payment on completion   {#f0c850}${cb(n.cash)}{/}`, C.dim);
-    d.ctext(x + 3, y + 10, `Salvage shares         {#f2f6f8}${n.salvage}{/}  (priority picks: {#f0a830}${n.priority}{/}, the rest assigned randomly)`, C.dim);
-    d.ctext(x + 3, y + 12, `Optional objectives pay a bonus of ~{#f0c850}${cb(k.pay * 0.25)}{/} each.`, C.faint);
-    d.ctext(x + 3, y + 13, `Failure pays nothing and damages your standing with ${emp.short}.`, C.faint);
+    if (ui.key('ArrowRight')) this.slider = Math.min(cap, this.slider + 1);
+    const lv = repLevel(c.rep[k.employer] ?? 0);
+    if (cap < 10) d.ctext(x + 12, y + 7, `{#6d7f8a}Your standing ({${lv.color}}${lv.name}{/}{#6d7f8a}) and MRB cap salvage.{/}`, C.dim, undefined, sw);
+    d.ctext(x + 3, y + 9, `Payment on completion  {#f0c850}${cb(n.cash)}{/}`, C.dim);
+    d.ctext(x + 3, y + 10, `Salvage shares        {#f2f6f8}${n.salvage}{/} {#6d7f8a}(${n.priority} priority, the rest chosen after the employer's cut){/}`, C.dim, undefined, w - 6);
+    d.ctext(x + 3, y + 11, `Optional objectives   {#f0c850}~${cb(k.pay * 0.25)}{/} bonus each`, C.dim);
+    d.ctext(x + 3, y + 12, `Deployment            {#f2f6f8}${contractDays(k)}{/} days`, C.dim);
+    const eRep = Math.round(3 + k.diff * 0.9), tRep = Math.round(2 + k.diff * 0.5), fRep = Math.round(3 + k.diff * 0.5);
+    d.ctext(x + 3, y + 14, `Success: {${emp.color}}${emp.short}{/} {#6ad46a}+${eRep}{/}, {${tgt.color}}${tgt.short}{/} {#e8503a}-${tRep}{/}   Failure: {${emp.color}}${emp.short}{/} {#e8503a}-${fRep}{/}`, C.dim, undefined, w - 6);
+    const tl = repLevel(c.rep[k.target] ?? 0);
+    if (tl.idx >= 4) d.ctext(x + 3, y + 15, `{#f0a830}Warning:{/} you are {${tl.color}}${tl.name}{/} with ${tgt.name}. This contract will sour that.`, C.dim, undefined, w - 6);
     if (ui.button(x + 3, y + h - 3, 'Back', { key: 'Escape' })) app.pop();
     if (ui.button(x + w - 28, y + h - 3, 'ACCEPT CONTRACT', { key: 'Enter', style: 'block', w: 24, center: true })) {
       app.pop();
@@ -220,6 +230,7 @@ export class DropScreen implements Screen {
     const lance = this.slots.filter((s) => s.mech && s.pilot).map((s) => ({ mech: c.mechs.find((m) => m.uid === s.mech)!, pilot: c.pilots.find((p) => p.id === s.pilot)! }));
     c.lance = this.slots.map((s) => s.mech);
     c.lancePilots = this.slots.map((s) => s.pilot);
+    saveBackup(c);
     const rt = launchContract(c, this.k, lance);
     saveGame(c);
     const k = this.k, n = this.n, argo = this.argo;
@@ -280,59 +291,25 @@ export class AftermathScreen implements Screen {
       simpleBar(d, 30, y, 20, st.armorTotal / Math.max(1, st.armorMax), healthColor(st.armorTotal / Math.max(1, st.armorMax)));
       d.text(52, y, e.armorPts || e.structPts || e.deadItems.length ? `${e.armorPts} armor · ${e.structPts} structure · ${e.deadItems.length} components` : 'Undamaged', e.armorPts ? C.warn : C.green);
       const wo = c.work.find((w) => w.mechUid === m.uid);
-      if (wo) d.text(110, y, `Repair ${Math.ceil(wo.hours / 40)}d · ${cb(e.cost)}`, C.dim);
+      if (wo) d.text(110, y, `Repair ~${workQueueDays(c, m.uid)}d · ${cb(e.cost)}`, C.dim);
       y++;
     }
     const next = r.pool.length ? 'SALVAGE' : 'CONTINUE';
+    d.ctext(3, ROWS - 3, `Deployment took {#f2f6f8}${r.days}{/} days; they pass as you return to the Argo.`, C.faint);
     if (ui.button(COLS - 22, ROWS - 3, next, { key: 'Enter', style: 'block', w: 18, center: true })) {
-      if (r.pool.length) this.stage = 'salvage';
-      else this.finish();
+      this.finish();
     }
   }
 
-  salvage(ui: UI, c: Company, r: MissionResult): void {
-    const d = ui.d;
-    if (this.stage === 'done') {
-      d.text(3, 2, 'SALVAGE RECOVERED', C.accent, undefined, 99, true);
-      this.got.forEach((g, i) => d.text(5, 4 + i, `${g.kind === 'part' ? '⚙' : '▪'} ${g.label}`, g.kind === 'part' ? C.cyan : C.text));
-      const parts = new Set(this.got.filter((g) => g.kind === 'part').map((g) => g.id));
-      let y = 6 + this.got.length;
-      for (const p of parts) { d.ctext(5, y++, `${chassis(p).name} ${p}: {#f2f6f8}${c.parts[p] ?? 0}/${PARTS_NEEDED}{/} parts${(c.parts[p] ?? 0) >= PARTS_NEEDED ? ' — {#6ad46a}ready to assemble in the Mech Bay!{/}' : ''}`, C.dim); }
-      if (ui.button(COLS - 22, ROWS - 3, 'RETURN TO ARGO', { key: 'Enter', style: 'block', w: 18, center: true })) this.finish();
-      return;
-    }
-    d.ctext(3, 2, `Choose {#f0a830}${r.priority}{/} priority salvage item${r.priority === 1 ? '' : 's'}. The remaining {#f2f6f8}${Math.max(0, r.salvageShares - r.priority)}{/} shares will be assigned at random.`, C.text);
-    ui.panel(2, 4, 90, ROWS - 8, `SALVAGE POOL (${r.pool.length})`);
-    const cl = ui.list(3, 5, 88, ROWS - 10, r.pool, this.listState, (e, i, lx, ly, lw, hov) => {
-      const sel = this.picks.includes(i);
-      const bg = sel ? '#2a2210' : hov ? '#16222c' : C.panel;
-      d.fill(lx, ly, lw, 1, ' ', C.text, bg);
-      d.text(lx + 1, ly, sel ? '■' : '□', sel ? C.accent : C.faint, bg);
-      d.text(lx + 3, ly, e.kind === 'part' ? '⚙' : '▪', e.kind === 'part' ? C.cyan : C.dim, bg);
-      d.text(lx + 5, ly, e.label, sel ? C.bright : C.text, bg, 50);
-      if (e.kind === 'part') d.text(lx + 58, ly, `have ${c.parts[e.id] ?? 0}/${PARTS_NEEDED}`, C.dim, bg);
-      d.text(lx + lw - 10, ly, cbk(e.value).padStart(9), C.cbill, bg);
-      if (hov && e.kind === 'item') ui.setTip(weaponTip(e.id));
-    });
-    if (cl >= 0) {
-      const k = this.picks.indexOf(cl);
-      if (k >= 0) this.picks.splice(k, 1); else if (this.picks.length < r.priority) this.picks.push(cl);
-    }
-    d.text(95, 6, `Picks ${this.picks.length}/${r.priority}`, C.accent, undefined, 99, true);
-    this.picks.forEach((p, i) => d.text(95, 8 + i, `▪ ${r.pool[p].label}`, C.text, undefined, 50));
-    if (ui.button(COLS - 22, ROWS - 3, 'CONFIRM', { key: 'Enter', style: 'block', w: 18, center: true, disabled: this.picks.length < Math.min(r.priority, r.pool.length) })) {
-      this.got = claimSalvage(c, r, this.picks);
-      saveGame(c);
-      this.stage = 'done';
-    }
-    void lerp; void health;
-  }
+  salvage(ui: UI, c: Company, r: MissionResult): void { void ui; void c; void r; }
 
   finish(): void {
     const c = company!;
+    this.argo.queueDays += this.res.days;
     saveGame(c);
     this.argo.tab = 'COMMAND';
-    app.pop();
+    if (c.pendingSalvage) app.replace(new SalvageScreen(this.argo));
+    else app.pop();
   }
 }
 export type { Frame, Pilot };

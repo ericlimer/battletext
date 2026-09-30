@@ -42,7 +42,8 @@ export class MechLabScreen implements Screen {
     const ch = chassis(f.defId);
     d.fill(0, 0, COLS, ROWS, ' ', C.text, C.bg);
     ui.header(0, 0, COLS, `MECH LAB · ${ch.name.toUpperCase()} ${ch.id} · ${CLASS_NAMES[ch.cls].toUpperCase()} ${ch.tons}t`, C.bg, C.accent);
-    d.ctext(COLS - 40, 0, hardpointStr(f), C.bg);
+    d.fill(COLS - 30, 0, 30, 1, ' ', C.text, '#1a1206');
+    d.ctext(COLS - 28, 0, `hardpoints ${hardpointStr(f)}`, C.dim, '#1a1206');
     if (ui.inp.rclicked || ui.key('Escape')) {
       ui.inp.rclicked = false;
       if (this.held) this.held = null; else { app.pop(); return; }
@@ -245,9 +246,11 @@ export class MechLabScreen implements Screen {
     const ch = this.changes();
     o.items = f.items.map((it) => ({ ...it }));
     for (const k of Object.keys(f.maxArmor)) {
-      const inc = f.maxArmor[k] > (o.maxArmor[k] ?? 0);
+      const prev = o.maxArmor[k] ?? 0;
+      const inc = f.maxArmor[k] > prev;
       o.maxArmor[k] = f.maxArmor[k];
-      o.armor[k] = inc ? f.maxArmor[k] : Math.min(o.armor[k] ?? 0, f.maxArmor[k]);
+      // New plating is added on top of current armor; it does not repair damage
+      o.armor[k] = inc ? Math.min(f.maxArmor[k], (o.armor[k] ?? 0) + (f.maxArmor[k] - prev)) : Math.min(o.armor[k] ?? 0, f.maxArmor[k]);
     }
     c.inventory = { ...this.inv };
     c.funds -= ch.cost;
