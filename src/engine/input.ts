@@ -1,4 +1,5 @@
 import { Display } from './display';
+import { unlockAudio } from './sound';
 
 export interface KeyEv {
   key: string;
@@ -28,6 +29,7 @@ export class Input {
       this.mx = x; this.my = y; this.moved = true;
     });
     c.addEventListener('mousedown', (e) => {
+      unlockAudio();
       if (e.button === 0) this.down = true;
       e.preventDefault();
     });
@@ -46,6 +48,7 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' || e.key === ' ' || e.key.startsWith('Arrow') || e.key === 'F1' || e.key === 'Backspace') e.preventDefault();
       if (e.metaKey) return;
+      unlockAudio();
       this.held.add(e.key.length === 1 ? e.key.toLowerCase() : e.key);
       this.keys.push({ key: e.key, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, used: false });
     });

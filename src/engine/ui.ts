@@ -4,6 +4,7 @@ import { Display, COLS, ROWS } from './display';
 import { Input } from './input';
 import { C, lerp } from './color';
 import { vlen, wrap } from './util';
+import { sfx } from './sound';
 
 export interface ButtonOpts {
   w?: number;
@@ -130,8 +131,7 @@ export class UI {
       if (o.key) this.key(o.key); // swallow
       return false;
     }
-    if (this.click(x, y, w, 1)) return true;
-    if (o.key && this.key(o.key)) return true;
+    if (this.click(x, y, w, 1) || (o.key && this.key(o.key))) { sfx('click'); return true; }
     return false;
   }
 

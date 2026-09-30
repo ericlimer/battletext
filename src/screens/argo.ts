@@ -21,6 +21,7 @@ import { GameOverScreen } from './gameover';
 import { pickEvent } from '../game/events';
 import { TitleScreen } from './title';
 import { simpleBar } from './widgets';
+import { isMuted, setMuted } from '../engine/sound';
 import { tagDesc } from '../game/world';
 
 export const TABS = ['COMMAND', 'CONTRACTS', 'STAR MAP', 'MECH BAY', 'BARRACKS', 'STORE', 'FINANCE', 'ARGO'] as const;
@@ -151,11 +152,12 @@ export class ArgoScreen implements Screen {
   drawMenu(ui: UI): void {
     const d = ui.d;
     ui.dimAll(0.4);
-    const w = 34, h = 12, x = (COLS - w) >> 1, y = 12;
+    const w = 34, h = 14, x = (COLS - w) >> 1, y = 12;
     ui.panel(x, y, w, h, 'MENU', { style: 'double', fg: C.borderHi, bg: '#0a1016' });
     let yy = y + 2;
     const btn = (label: string, fn: () => void, key?: string) => { if (ui.button(x + 3, yy, label, { w: w - 6, style: 'block', key })) fn(); yy += 2; };
     btn('Resume', () => { this.menuOpen = false; });
+    btn(isMuted() ? 'Sound: off' : 'Sound: on', () => setMuted(!isMuted()), 'm');
     btn('Save game', () => { saveGame(this.c); this.notify('Game saved'); this.menuOpen = false; }, 's');
     btn('Export save file', () => { exportSave(this.c); this.menuOpen = false; }, 'x');
     btn('Save & quit to title', () => { saveGame(this.c); app.reset(new TitleScreen()); }, 'q');

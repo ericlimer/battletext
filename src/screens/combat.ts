@@ -14,6 +14,7 @@ import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability } from '../game/pilot';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
+import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
 
 const MX = 0, MY = 1, VW = 50, VH = 36;
 const PX = 100, PW = 50;
@@ -91,6 +92,7 @@ export class CombatScreen implements Screen {
     switch (e.k) {
       case 'round':
         this.banner = { text: `ROUND ${e.round}`, sub: '', t: 1.4, color: C.accent };
+        sfx('alert');
         this.wait = 0.35 / sp;
         break;
       case 'phase':
@@ -110,6 +112,8 @@ export class CombatScreen implements Screen {
         const stepT = (e.mode === 'jump' ? 0.5 : 0.075 * path.length) / sp;
         let t = 0;
         const total = stepT;
+        let lastStep = -1;
+        if (e.mode === 'jump') sfx('jump');
         const tick = () => {
           const f = Math.min(1, t / total);
           if (e.mode === 'jump') {
@@ -122,6 +126,7 @@ export class CombatScreen implements Screen {
             const fr = k - i;
             const [ax, ay] = path[i], [bx, by] = path[i + 1];
             this.animPos.set(e.u, [ax + (bx - ax) * fr, ay + (by - ay) * fr]);
+            if (i !== lastStep && u.frame.kind === 'mech') { lastStep = i; sfx('step', 0, 0.4 + frameTonsOf(u) / 150); }
           }
           const [px, py] = this.animPos.get(e.u)!;
           if (u.team === 0 || this.visibleUnit(u)) this.ensureVisible(Math.round(px), Math.round(py), 4);
@@ -140,6 +145,7 @@ export class CombatScreen implements Screen {
         const a = b.unit(e.u), t = b.unit(e.t);
         const [ax, ay] = this.posOf(a), [tx, ty] = this.posOf(t);
         this.fx.parts.push({ x: tx, y: ty, vx: 0, vy: 0, life: 0, max: 0.3, glyph: e.hit ? '✶' : '·', c0: '#ffffff', c1: '#f0a830', light: e.hit ? 3 : 0 });
+        sfx('melee', 0, e.hit ? 1 : 0.4);
         if (e.hit) { this.fx.sparks(tx, ty, 10, ['#ffe0a0', '#a04010'], 4); this.fx.shake = 0.4; this.fx.float(tx, ty, `${e.dmg}`, '#f0d050', true); }
         else this.fx.float(tx, ty, 'MISS', '#889');
         void ax; void ay;
@@ -147,7 +153,10 @@ export class CombatScreen implements Screen {
         break;
       }
       case 'float':
-        if (this.tileVisibleXY(e.x, e.y) || true) this.fx.float(e.x, e.y, e.text, e.color, e.big);
+        if (this.tileVisibleXY(e.x, e.y) || this.unitVisibleAt(e.x, e.y)) {
+          this.fx.float(e.x, e.y, e.text, e.color, e.big);
+          if (e.text.startsWith('CRIT')) sfx('crit');
+        }
         this.wait = 0.02;
         break;
       case 'log':
@@ -158,6 +167,7 @@ export class CombatScreen implements Screen {
         break;
       case 'boom':
         this.fx.explosion(e.x, e.y, e.size);
+        sfx(e.size >= 3 ? 'bigboom' : 'boom', 0, e.size >= 2 ? 1 : 0.6);
         this.wait = (e.size >= 3 ? 0.35 : 0.15) / sp;
         break;
       case 'destroyed': {
@@ -181,6 +191,11 @@ export class CombatScreen implements Screen {
   }
 
   anims: { dur: number; step: (dt: number) => void; done: () => void; t?: number }[] = [];
+
+  private unitVisibleAt(x: number, y: number): boolean {
+    const u = this.b.units.find((q) => q.x === x && q.y === y);
+    return !!u && (SIDE(u.team) === 0 || this.b.seen[0].has(u.id));
+  }
 
   private tileSeenNow(p: [number, number]): boolean {
     return !!this.b.visibleTiles[p[1] * this.b.map.w + p[0]];
@@ -207,7 +222,9 @@ export class CombatScreen implements Screen {
       const ang = Math.random() * Math.PI * 2, r = 0.8 + Math.random() * 1.6;
       return [tx + Math.cos(ang) * r, ty + Math.sin(ang) * r];
     };
+    sfx(weaponSfx(base), 0, 0.9);
     const impact = (x: number, y: number, hit: boolean, big: number) => {
+      if (hit) sfx('hit', 0, 0.5 + big * 0.2);
       if (hit) this.fx.sparks(x, y, 3 + big * 2, ['#ffe8a0', '#c04010'], 2 + big);
       else this.fx.sparks(x, y, 2, ['#8a7a60', '#3a3228'], 1.5);
     };
@@ -529,6 +546,7 @@ export class CombatScreen implements Screen {
     if (ui.key('b')) this.actBrace(u);
     if (ui.key('v')) this.actVigilance(u);
     if (ui.key('r')) this.actReserve(u);
+    if (ui.key('x') && b.isMech(u)) this.actEject(u);
     if (ui.key('p')) this.togglePrecision(u);
     if (ui.key('l') && has(u.pilot ?? undefined, 'sensorlock') && b.canAttack(u)) this.mode = this.mode === 'lock' ? 'move' : 'lock';
     if (ui.key('e') || ui.key(' ')) {
@@ -629,6 +647,20 @@ export class CombatScreen implements Screen {
     if (!this.commit(u)) return;
     this.b.setFacing(u, this.facingDir);
     this.endActivation(u);
+  }
+
+  ejectArm = false;
+  dangerous(u: Unit): boolean {
+    const f = u.frame;
+    return f.struct.CT < f.maxStruct.CT * 0.5 || (u.pilot ? health(u.pilot) - u.pilot.injuries <= 1 : false);
+  }
+  actEject(u: Unit): void {
+    if (!this.ejectArm) { this.ejectArm = true; return; }
+    this.ejectArm = false;
+    if (!this.commit(u)) return;
+    this.b.eject(u);
+    this.pull();
+    this.afterActivation();
   }
 
   actBrace(u: Unit): void {
@@ -817,6 +849,24 @@ export class CombatScreen implements Screen {
       const facing = un.frame.kind === 'turret' ? -1 : (un === this.sel && this.mode === 'facing') ? this.facingDir : un.facing;
       d.wide(sx, sy, glyph, fg, bg, facing, un.team === 0 ? '#bfe8ff' : '#ffc0b0');
     }
+    // Line of fire to the hovered enemy
+    if (act && u && ht >= 0) {
+      const hx = ht % m.w, hy = (ht / m.w) | 0;
+      const he = b.unitAt(hx, hy);
+      if (he && SIDE(he.team) === 1 && b.seen[0].has(he.id) && destFrom) {
+        const ws = b.weaponsOf(u);
+        let best = 0, anyOk = false, indirect = false;
+        for (const w of ws) { const hc = b.hitChance(u, he, item(w.id), destFrom); if (hc.ok) { anyOk = true; best = Math.max(best, hc.chance); indirect = indirect || hc.indirect; } }
+        const col = !anyOk ? '#5a5a5a' : indirect ? '#b27ae8' : healthColor(best / 100);
+        const n = Math.ceil(dist(destFrom.x, destFrom.y, hx, hy) * 2);
+        for (let k = 2; k < n - 1; k++) {
+          const tx = Math.round(destFrom.x + ((hx - destFrom.x) * k) / n), ty = Math.round(destFrom.y + ((hy - destFrom.y) * k) / n);
+          if (tx < this.camX || ty < this.camY || tx >= this.camX + VW || ty >= this.camY + VH || b.unitAt(tx, ty)) continue;
+          const sx = MX + (tx - this.camX) * 2, sy = MY + (ty - this.camY);
+          if (k % 2 === 0) d.wide(sx, sy, '·', col, d.getBg(sx, sy));
+        }
+      }
+    }
     // Pending destination ghost + facing
     if (act && u && pendingTile >= 0) {
       const x = pendingTile % m.w, y = (pendingTile / m.w) | 0;
@@ -938,8 +988,9 @@ export class CombatScreen implements Screen {
     simpleBar(d, x + 8, 0, 20, r / b.resolveMax[0], r >= cost ? '#d89a30' : '#7a5a2a', '#1a1a14', cost / b.resolveMax[0]);
     d.text(x + 29, 0, String(Math.floor(r)).padStart(3), r >= cost ? C.accent : C.dim);
     ui.setTip(ui.hover(x, 0, 32, 1) ? [`{#f0a830}Resolve{/} ${Math.floor(r)}/${b.resolveMax[0]}`, `Precision Strike and Vigilance cost ${cost}. Gained by dealing damage, destroying locations and kills, and each round from company morale.`] : undefined);
-    if (ui.button(135, 0, 'Withdraw', { style: 'plain', fg: C.dim, tip: 'Call the dropship and abandon the contract.' })) this.confirmWithdraw = true;
+    if (ui.button(136, 0, 'Withdraw', { style: 'plain', fg: C.dim, tip: 'Call the dropship and abandon the contract.' })) this.confirmWithdraw = true;
     d.text(146, 0, `${this.speed}x`, C.faint);
+    if (ui.button(92, 0, isMuted() ? '♪ off' : '♪ on', { style: 'plain', fg: C.dim, tip: 'Toggle sound' })) setMuted(!isMuted());
   }
 
   drawBottom(ui: UI): void {
@@ -962,7 +1013,7 @@ export class CombatScreen implements Screen {
     // Action bar
     this.drawActions(ui, 1, y0 + 1);
     // Log
-    const ly = y0 + 3, lh = ROWS - ly;
+    const ly = y0 + 4, lh = ROWS - ly;
     const lw = 62;
     const lines: { text: string; color?: string }[] = [];
     for (const l of this.logLines) for (const w of wrap(l.text, lw - 2)) lines.push({ text: w, color: l.color });
@@ -998,13 +1049,14 @@ export class CombatScreen implements Screen {
     if (!act || !u) {
       const who = this.lastActor === 'ai' || this.queue.length ? 'ENEMY ACTIVITY' : '';
       ui.d.text(x, y, who ? `▌ ${who}…` : '', C.enemy, undefined, 99, true);
+      if (who) ui.d.text(x, y + 1, '[+/-] change speed', C.faint);
       return;
     }
     const canMove = !u.moved && !u.cannotMove && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
     const mech = b.isMech(u);
-    let cx = x;
+    let cx = x, by = y;
     const btn = (label: string, key: string, active: boolean, disabled: boolean, tip: string, fn: () => void) => {
-      if (ui.button(cx, y, label, { key, active, disabled, tip })) fn();
+      if (ui.button(cx, by, label, { key, active, disabled, tip })) fn();
       cx += vlen(label) + key.length + 4;
     };
     btn('Move', 'W', this.mode === 'move', !canMove, 'Click a blue tile to walk, amber to sprint. Click again (or Space) to confirm.', () => { this.mode = 'move'; });
@@ -1013,10 +1065,12 @@ export class CombatScreen implements Screen {
     btn('DFA', 'D', this.mode === 'dfa', !canMove || !mech || u.stats.jump <= 0, `Death From Above: jump onto an enemy for ${u.stats.dfaDmg} damage. Damages your legs.`, () => { this.mode = this.mode === 'dfa' ? 'move' : 'dfa'; this.meleeTarget = null; });
     btn('Fire', 'F', false, !b.canAttack(u) || (!this.target && !this.tStruct), 'Fire selected weapons at the target.', () => this.fire(u));
     btn('Precision', 'P', this.mode === 'called', !this.target || this.target.frame.kind !== 'mech' || !b.canAttack(u) || b.resolve[0] < b.resolveCost(), `Precision Strike (${b.resolveCost()} Resolve): choose the hit location on the target's paper doll. Head only if prone or shut down.`, () => this.togglePrecision(u));
+    cx = x; by = y + 1;
     btn('Brace', 'B', false, !mech || u.attacked, 'Guarded (-40% damage), clears stability. Ends activation.', () => this.actBrace(u));
     btn('Vigil', 'V', false, !mech || u.attacked || b.resolve[0] < b.resolveCost(), `Vigilance (${b.resolveCost()} Resolve): Guarded + Entrenched, clears stability and debuffs. Ends activation.`, () => this.actVigilance(u));
     btn('Reserve', 'R', false, b.active === u || u.phase <= 1, 'Delay this unit to the next phase.', () => this.actReserve(u));
     if (has(u.pilot ?? undefined, 'sensorlock')) btn('Lock', 'L', this.mode === 'lock', !b.canAttack(u), 'Sensor Lock a detected enemy: -2 evasion, visible to all. Uses your attack.', () => { this.mode = this.mode === 'lock' ? 'move' : 'lock'; });
+    if (mech && (this.ejectArm || this.dangerous(u))) btn(this.ejectArm ? 'EJECT!' : 'Eject', 'X', this.ejectArm, false, 'Eject the pilot. The \'Mech is abandoned but recoverable; the pilot survives. Press twice.', () => this.actEject(u));
     btn(this.mode === 'facing' ? 'Confirm' : 'Done', 'E', this.mode === 'facing', false, 'End activation: choose a facing with the mouse, then click.', () => {
       if (this.mode === 'facing') this.confirmFacing(u); else { this.mode = 'facing'; this.facingDir = u.facing; }
     });
@@ -1028,7 +1082,7 @@ export class CombatScreen implements Screen {
       this.pending ? `Click again/[Space] to move. Evasion: ${pipStr(this.b.pipsFor(u, this.pending.mode, this.pendingSteps(u)), this.b.maxPips(u))}` :
       u.moved || u.attacked ? (b.canAttack(u) ? 'Click a target and [F]ire, or [E] to end.' : '[E] to choose facing and end.') :
       'Move, attack or brace. [Tab] next unit. [?] help.';
-    ui.d.ctext(x, y + 1, `{#6d7f8a}${hint}{/}`, C.dim, undefined, 62);
+    ui.d.ctext(x, y + 2, `{#6d7f8a}${hint}{/}`, C.dim, undefined, 62);
   }
 
   pendingSteps(u: Unit): number {
@@ -1055,12 +1109,44 @@ export class CombatScreen implements Screen {
     if (hovered && hovered !== u && (SIDE(hovered.team) === 0 || b.seen[0].has(hovered.id))) t = hovered;
     else if (this.target) t = this.target;
     if (t) this.drawTargetCard(ui, u, t, PX, y + 1);
+    else if (!this.tStruct) this.drawRoster(ui, PX, y + 1);
     else if (this.tStruct) {
       const s = this.tStruct;
       ui.header(PX, y + 1, PW, `TARGET: ${s.name.toUpperCase()}`, C.bg, '#c06040');
       d.text(PX + 1, y + 3, `Structure ${Math.max(0, s.hp)}/${s.maxHp}`, C.text);
       simpleBar(d, PX + 1, y + 4, 30, s.hp / s.maxHp, '#c06040');
       if (u) this.drawWeaponList(ui, u, null, PX, y + 6, s);
+    }
+  }
+
+  drawRoster(ui: UI, x: number, y: number): void {
+    const d = ui.d, b = this.b;
+    ui.header(x, y, PW, 'LANCE STATUS', C.bg, '#2a5a70');
+    let yy = y + 1;
+    const units = b.units.filter((u) => SIDE(u.team) === 0 && u.deployed);
+    for (const u of units) {
+      if (yy >= ROWS - 1) break;
+      const f = u.frame;
+      let arm = 0, marm = 0, st = 0, mst = 0;
+      for (const k in f.maxArmor) { arm += f.armor[k]; marm += f.maxArmor[k]; }
+      for (const k in f.maxStruct) { st += Math.max(0, f.struct[k]); mst += f.maxStruct[k]; }
+      const hov = ui.hover(x, yy, PW, 2) && u.alive && u.team === 0;
+      const bg = hov ? '#16222c' : C.panel;
+      d.fill(x, yy, PW, 2, ' ', C.text, bg);
+      const col = !u.alive ? C.faint : u.team === 0 ? C.player : C.ally;
+      d.text(x + 1, yy, frameGlyph(f), col, bg, 99, true);
+      d.text(x + 3, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 12), u.alive ? C.bright : C.faint, bg);
+      d.text(x + 16, yy, frameTitle(f).slice(0, 18), C.dim, bg);
+      const status = !u.alive ? (u.fled ? 'EXITED' : u.destroyHow === 'eject' ? 'EJECTED' : 'DESTROYED') : u.acted ? 'done' : u.phase === b.phase ? 'READY' : `ph ${u.phase}`;
+      d.text(x + PW - 1 - status.length, yy, status, !u.alive ? (u.fled ? C.green : C.red) : status === 'READY' ? C.accent : C.faint, bg);
+      if (u.alive) {
+        simpleBar(d, x + 3, yy + 1, 14, arm / Math.max(1, marm), '#a8b8c0', '#161c22');
+        simpleBar(d, x + 18, yy + 1, 10, st / Math.max(1, mst), healthColor(st / Math.max(1, mst)), '#161c22');
+        if (b.isMech(u)) { d.text(x + 30, yy + 1, 'H', '#ff8a4a', bg); simpleBar(d, x + 31, yy + 1, 8, u.heat / u.stats.heatCap, '#ff6a2a', '#1a1210', 0.75); }
+        if (u.pilot && u.team === 0) d.ctext(x + 41, yy + 1, healthPips(u.pilot), C.text, bg);
+      }
+      if (hov) { ui.cursor = 'pointer'; if (ui.click(x, yy, PW, 2)) { if (this.canAct(u) && !b.active) this.select(u); this.centerOn(u.x, u.y); } }
+      yy += 2;
     }
   }
 
@@ -1349,6 +1435,8 @@ export class CombatScreen implements Screen {
   }
 }
 
+import { frameTons } from '../game/frame';
+function frameTonsOf(u: Unit): number { return frameTons(u.frame); }
 const DOLL_H = 10;
 const DOLL_H_PLUS = 11;
 void rgb; void hex; void Display;
