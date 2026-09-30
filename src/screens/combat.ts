@@ -219,6 +219,8 @@ export class CombatScreen implements Screen {
         break;
       case 'boom':
         this.fx.explosion(e.x, e.y, e.size);
+        { const m = this.b.map; const rr = e.size >= 3 ? 2 : e.size >= 2 ? 1 : 0;
+          for (let dy = -rr; dy <= rr; dy++) for (let dx = -rr; dx <= rr; dx++) { const xx = e.x + dx, yy = e.y + dy; if (xx >= 0 && yy >= 0 && xx < m.w && yy < m.h) m.scorch[yy * m.w + xx] = Math.max(m.scorch[yy * m.w + xx], 1 - Math.hypot(dx, dy) / (rr + 1.5)); } }
         sfx(e.size >= 3 ? 'bigboom' : 'boom', 0, e.size >= 2 ? 1 : 0.6);
         this.wait = (e.size >= 3 ? 0.35 : 0.15) / sp;
         break;
@@ -330,6 +332,7 @@ export class CombatScreen implements Screen {
     } else {
       // Missiles
       const lrm = base.startsWith('LRM');
+      for (let k = 0; k < 4; k++) this.fx.parts.push({ x: ax + (Math.random() - 0.5) * 0.6, y: ay + (Math.random() - 0.5) * 0.6, vx: (Math.random() - 0.5) * 0.8, vy: -0.3 - Math.random() * 0.4, life: 0, max: 0.9 + Math.random() * 0.6, glyph: ['░', '░'], c0: '#9a9088', c1: '#2a2826', delay: k * 0.05 });
       let last = 0;
       shots.forEach((s, i) => {
         const [ex, ey] = s.hit ? [tx + (Math.random() - 0.5) * 0.8, ty + (Math.random() - 0.5) * 0.8] : missPt();

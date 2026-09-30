@@ -2,7 +2,7 @@
 
 import { RNG } from '../engine/rng';
 import { Company, addLog, sys } from './company';
-import { Pilot, SKILLS, SKILL_NAMES } from './pilot';
+import { Pilot, SKILLS, SKILL_NAMES, makePilot } from './pilot';
 import { cb } from '../engine/util';
 
 export interface EventChoice {
@@ -143,6 +143,89 @@ export const EVENTS: GameEvent[] = [
     choices: [
       { text: `Buy the wreck (${cb(180000)}).`, req: funds(180000), apply: (c, x, r) => { pay(c, 180000); const ids = ['SHD-2H', 'WVR-6R', 'GRF-1N', 'DRG-1N', 'CPLT-C1', 'TDR-5S', 'QKD-4G', 'CN9-A', 'HBK-4G']; const id = r.pick(ids); const n = r.int(1, 2); c.parts[id] = (c.parts[id] ?? 0) + n; return `The techs strip ${n} usable ${id} part${n > 1 ? 's' : ''} from it.`; } },
       { text: 'Pass.', apply: () => 'Probably full of rust anyway.' },
+    ],
+  },
+  {
+    id: 'ghost-signal', title: 'Ghost in the Machine', where: 'travel',
+    text: (c, x) => `${x.pilot.callsign} swears their neurohelmet is picking up voices — old SLDF battle chatter, looping. The techs can find nothing wrong.`,
+    choices: [
+      { text: 'Have the techs strip the cockpit and look again.', apply: (c) => { pay(c, 20000); return `Nothing. ${cb(20000)} of labor later, the voices have stopped anyway.`; } },
+      { text: 'Tell them to get some sleep.', apply: (c, x, r) => { if (r.chance(0.5)) { xp(x.pilot, 500); return `${x.pilot.callsign} spends nights transcribing the chatter and learns a trick or two. +500 XP.`; } mor(c, -2); return 'The story spreads through the crew. Nobody sleeps well. Morale -2.'; } },
+    ],
+  },
+  {
+    id: 'price-war', title: 'Price War', where: 'docked',
+    text: (c, x) => `Two arms dealers on ${x.sysName} are undercutting each other. One offers to sell you everything in his stall at cost, if you buy today.`,
+    choices: [
+      { text: `Buy a crate of ammunition (${cb(30000)}).`, req: funds(30000), apply: (c) => { pay(c, 30000); for (const a of ['A-SRM', 'A-LRM', 'A-AC5', 'A-AC10']) c.inventory[a] = (c.inventory[a] ?? 0) + 2; return 'Eight tons of assorted ammunition are loaded aboard.'; } },
+      { text: `Buy his best laser (${cb(90000)}).`, req: funds(90000), apply: (c, x, r) => { pay(c, 90000); const id = r.pick(['ML+2d', 'LL+1d', 'ML+2a', 'LL+1a']); c.inventory[id] = (c.inventory[id] ?? 0) + 1; return `You acquire a ${id}.`; } },
+      { text: 'Walk on.', apply: () => 'The dealers are still shouting at each other as you leave.' },
+    ],
+  },
+  {
+    id: 'deserter', title: 'The Deserter', where: 'docked',
+    text: () => 'A young MechWarrior in a torn militia uniform asks to join. She deserted her unit rather than fire on civilians, and her former commander wants her back.',
+    choices: [
+      { text: 'Take her on and face the consequences.', apply: (c, x, r) => { c.rep['locals'] -= 6; mor(c, 3); const p = makePilot(r, 1); p.callsign = 'Maverick'; p.bio = 'Deserted her militia unit rather than fire on civilians.'; c.pilots.push(p); return 'Maverick joins the company. The locals are furious. Planetary rep -6, morale +3.'; } },
+      { text: 'Hand her over.', apply: (c) => { c.rep['locals'] += 4; mor(c, -4); return 'The militia thanks you. The crew does not. Planetary rep +4, morale -4.'; } },
+    ],
+  },
+  {
+    id: 'cracked-gyro', title: 'Cracked Gyro', where: 'any',
+    weight: (c) => (c.mechs.length ? 1 : 0),
+    text: (c, x) => `A routine scan finds a hairline crack in a 'Mech gyroscope. ${x.pilot.callsign} says it "feels fine".`,
+    choices: [
+      { text: `Replace it now (${cb(45000)}).`, req: funds(45000), apply: (c) => { pay(c, 45000); return 'The gyro is replaced. Better safe than knocked down.'; } },
+      { text: 'Patch it and hope.', apply: (c, x, r) => { if (r.chance(0.6)) return 'The patch holds. For now.'; const m = r.pick(c.mechs); for (const k in m.armor) m.armor[k] = Math.round(m.armor[k] * 0.7); return 'During a drill the gyro fails and the \'Mech topples into a gantry. Its armor needs repairs.'; } },
+    ],
+  },
+  {
+    id: 'holovid', title: 'Lights, Camera', where: 'docked',
+    text: (c, x) => `A holovid crew on ${x.sysName} wants to film a documentary about "real mercenaries". They'll pay, but they want access to everything.`,
+    choices: [
+      { text: 'Give them the tour.', apply: (c) => { c.funds += 60000; mor(c, 2); c.mrb += 5; return `The crew pays ${cb(60000)}. The company is famous, briefly. MRB +5, morale +2.`; } },
+      { text: 'No cameras on my ship.', apply: () => 'They leave, disappointed, to film a Solaris dueling stable instead.' },
+    ],
+  },
+  {
+    id: 'plague', title: 'Quarantine', where: 'docked',
+    text: () => 'A fever is spreading through the starport. Port authority offers vaccines for the crew, at a price, or you can seal the Argo and wait it out.',
+    choices: [
+      { text: `Vaccinate everyone (${cb(35000)}).`, req: funds(35000), apply: (c) => { pay(c, 35000); return 'Everyone gets a sore arm and nothing worse.'; } },
+      { text: 'Seal the ship.', apply: (c, x, r) => { if (r.chance(0.5)) { injure(c, x.pilot, 10); injure(c, x.pilot2, 10); return `${x.pilot.callsign} and ${x.pilot2.callsign} catch the fever. Both are off duty for 10 days.`; } return 'The fever passes the Argo by.'; } },
+    ],
+  },
+  {
+    id: 'rival-merc', title: 'Rival Company', where: 'docked',
+    text: (c, x) => `A rival mercenary commander in a ${x.sysName} bar challenges ${x.pilot.callsign} to a simulator duel. The stakes: a crate of spare parts.`,
+    choices: [
+      { text: 'Accept the challenge.', apply: (c, x, r) => { const win = r.next() < 0.35 + x.pilot.gun * 0.05; if (win) { c.inventory['HS'] = (c.inventory['HS'] ?? 0) + 2; c.inventory['ML'] = (c.inventory['ML'] ?? 0) + 1; mor(c, 3); return `${x.pilot.callsign} wins decisively. Two heat sinks and a medium laser change hands. Morale +3.`; } mor(c, -2); pay(c, 20000); return `${x.pilot.callsign} loses, and the company pays ${cb(20000)} in bets. Morale -2.`; } },
+      { text: 'Decline.', apply: () => 'The rival laughs all the way to the bar.' },
+    ],
+  },
+  {
+    id: 'jump-glitch', title: 'Misjump', where: 'travel',
+    text: () => 'The K-F drive hiccups during the jump. The Argo emerges off-course, and the navigator needs time to plot a correction.',
+    choices: [
+      { text: 'Burn extra fuel to catch up.', apply: (c) => { pay(c, 40000); return `The detour costs ${cb(40000)} in reaction mass.`; } },
+      { text: 'Take the slow way.', apply: (c) => { if (c.travel) c.travel.legLeft += 3; return 'The trip takes three days longer.'; } },
+    ],
+  },
+  {
+    id: 'medal', title: 'Recognition', where: 'docked',
+    weight: (c) => (c.stats.wins >= 3 ? 1 : 0),
+    text: (c, x) => `A local dignitary on ${x.sysName} wants to decorate ${x.pilot.callsign} for services to the planet. There will be speeches.`,
+    choices: [
+      { text: 'Attend the ceremony.', apply: (c, x) => { mor(c, 4); c.rep['locals'] += 3; xp(x.pilot, 250); return `${x.pilot.callsign} receives the Star of ${x.sysName}. Morale +4, planetary rep +3.`; } },
+      { text: 'We have work to do.', apply: (c) => { c.rep['locals'] -= 2; return 'The dignitary is offended. Planetary rep -2.'; } },
+    ],
+  },
+  {
+    id: 'lostech-map', title: 'The Map', where: 'any',
+    text: (c, x) => `${x.pilot.callsign} won a data chip in a card game. It claims to show a Star League supply cache — but the seller wants it back, badly.`,
+    choices: [
+      { text: `Pay the techs to decrypt it (${cb(70000)}).`, req: funds(70000), apply: (c, x, r) => { pay(c, 70000); if (r.chance(0.45)) { const id = r.pick(['DHS', 'GAUSS', 'TTS2', 'GYRO2', 'CMD']); c.inventory[id] = (c.inventory[id] ?? 0) + 1; return `It's real. A recovery team comes back with a ${id}!`; } return 'The chip is a clever fake. The seller must be laughing.'; } },
+      { text: 'Sell it back to the seller.', apply: (c) => { c.funds += 40000; return `The seller pays ${cb(40000)}, looking very relieved.`; } },
     ],
   },
 ];

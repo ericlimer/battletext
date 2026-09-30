@@ -7,7 +7,8 @@ import { COLS, ROWS } from '../engine/display';
 import type { ArgoScreen } from './argo';
 import { skulls } from './argo';
 import { company, saveGame, saveBackup } from '../game/save';
-import { Company, Contract, Negotiation, negotiate, maxContractDiff, sys, mechReady, mrbLevel, PARTS_NEEDED, maxSlider, contractDays, workQueueDays } from '../game/company';
+import { Company, Contract, Negotiation, negotiate, maxContractDiff, sys, mechReady, mrbLevel, PARTS_NEEDED, maxSlider, contractDays, workQueueDays, startTravel, travelMult } from '../game/company';
+import { route } from '../game/world';
 import { MISSION_INFO } from '../combat/missions';
 import { BIOME_INFO } from '../combat/terrain';
 import { faction, repLevel } from '../data/factions';
@@ -23,15 +24,19 @@ import { chassis } from '../data/mechs';
 
 export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: number, h: number): void {
   const d = ui.d, c = company!;
-  const st = (argo.st.contracts ??= { sel: 0, list: { scroll: 0 } });
+  const st = (argo.st.contracts ??= { sel: 0, list: { scroll: 0 }, travel: false });
   if (c.travel) {
     ui.panel(x + 1, y, w - 2, h, 'CONTRACTS');
     d.text(x + 4, y + 3, `The Argo is in transit to ${sys(c, c.travel.dest).name}. Contracts will be available on arrival.`, C.cyan);
     return;
   }
-  const list = c.contracts[c.location] ?? [];
-  ui.panel(x + 1, y, 62, h, `CONTRACTS · ${sys(c).name.toUpperCase()}`);
-  if (!list.length) d.text(x + 3, y + 2, 'No contracts on offer. Pass time or travel to another system.', C.dim);
+  const local = c.contracts[c.location] ?? [];
+  const offers = (c.travelOffers ?? []).filter((t) => t.expires > c.day);
+  const list = st.travel ? offers : local;
+  ui.panel(x + 1, y, 62, h, st.travel ? 'TRAVEL CONTRACTS' : `CONTRACTS · ${sys(c).name.toUpperCase()}`);
+  if (ui.button(x + 30, y, `Local ${local.length}`, { style: 'plain', active: !st.travel, tip: 'Contracts in this system.' })) { st.travel = false; st.sel = 0; }
+  if (ui.button(x + 42, y, `Travel ${offers.length}`, { style: 'plain', active: st.travel, key: 't', tip: 'Contracts in neighbouring systems (+20% pay). Accepting sets course; the terms are held for you.' })) { st.travel = true; st.sel = 0; }
+  if (!list.length) d.text(x + 3, y + 2, st.travel ? 'No travel contracts posted.' : 'No contracts on offer. Pass time, check Travel, or move on.', C.dim);
   const maxD = maxContractDiff(c);
   const clicked = ui.list(x + 2, y + 1, 60, h - 2, list, st.list, (k, i, lx, ly, lw, hov) => {
     const sel = st.sel === i;
@@ -45,7 +50,8 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
     d.text(lx + 34, ly, skulls(k.diff).padEnd(6), '#e8503a', bg);
     d.text(lx + 44, ly, cbk(k.pay).padStart(8), C.cbill, bg);
     d.ctext(lx + 2, ly + 1, `${mi.name} · {${emp.color}}${emp.short}{/} vs {${tgt.color}}${tgt.short}{/}`, C.dim, bg, lw - 4);
-    d.ctext(lx + 2, ly + 2, `${BIOME_INFO[k.biome].name}${k.night ? ' · night' : ''} · expires in ${k.expires - c.day}d${locked ? ' · {#e8503a}MRB TOO LOW{/}' : ''}`, C.faint, bg, lw - 4);
+    const where = k.sysId ? `{#5fd0e8}${sys(c, k.sysId).name} (${route(c.systems, c.location, k.sysId, travelMult(c))?.days ?? '?'}d){/} · ` : '';
+    d.ctext(lx + 2, ly + 2, `${where}${BIOME_INFO[k.biome].name}${k.night ? ' · night' : ''} · ${k.booked ? '{#6ad46a}BOOKED{/}' : `expires in ${k.expires - c.day}d`}${locked ? ' · {#e8503a}MRB TOO LOW{/}' : ''}`, C.faint, bg, lw - 4);
   }, 4);
   if (clicked >= 0) st.sel = clicked;
   const k = list[Math.min(st.sel, list.length - 1)];
@@ -72,7 +78,10 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   const locked = k.diff > maxD;
   if (locked) {
     d.text(dx + 3, yy, `The Mercenary Review Board will not bond you for a ${skulls(k.diff)} contract. MRB rating ${mrbLevel(c)} allows up to ${skulls(Math.floor(maxD))}.`, C.red, undefined, dw - 6);
-  } else if (ui.button(dx + 3, yy, 'NEGOTIATE', { key: 'Enter', style: 'block', w: 18, center: true })) {
+  } else if (k.booked) {
+    d.ctext(dx + 3, yy, `Terms agreed: {#f0c850}${cb(k.booked.cash)}{/} · ${k.booked.salvage} salvage (${k.booked.priority} priority)`, C.dim);
+    if (ui.button(dx + 3, yy + 2, 'DEPLOY', { key: 'Enter', style: 'block', w: 18, center: true })) app.push(new DropScreen(k, k.booked, argo));
+  } else if (ui.button(dx + 3, yy, k.sysId ? 'NEGOTIATE & TRAVEL' : 'NEGOTIATE', { key: 'Enter', style: 'block', w: 24, center: true })) {
     app.push(new NegotiateScreen(k, argo));
   }
 }
@@ -117,9 +126,20 @@ export class NegotiateScreen implements Screen {
     const tl = repLevel(c.rep[k.target] ?? 0);
     if (tl.idx >= 4) d.ctext(x + 3, y + 15, `{#f0a830}Warning:{/} you are {${tl.color}}${tl.name}{/} with ${tgt.name}. This contract will sour that.`, C.dim, undefined, w - 6);
     if (ui.button(x + 3, y + h - 3, 'Back', { key: 'Escape' })) app.pop();
-    if (ui.button(x + w - 28, y + h - 3, 'ACCEPT CONTRACT', { key: 'Enter', style: 'block', w: 24, center: true })) {
+    if (ui.button(x + w - 28, y + h - 3, k.sysId ? 'ACCEPT & SET COURSE' : 'ACCEPT CONTRACT', { key: 'Enter', style: 'block', w: 24, center: true })) {
       app.pop();
-      app.push(new DropScreen(k, n, this.argo));
+      if (k.sysId) {
+        const dest = k.sysId;
+        const days = route(c.systems, c.location, dest, travelMult(c))?.days ?? 10;
+        k.booked = n;
+        k.expires = c.day + days + 12;
+        c.travelOffers = (c.travelOffers ?? []).filter((t) => t !== k);
+        k.sysId = undefined;
+        (c.contracts[dest] ??= []).unshift(k);
+        const err = startTravel(c, dest);
+        if (err) this.argo.notify(err, C.red); else { this.argo.notify(`Contract booked: course set for ${sys(c, dest).name}`, C.cyan); this.argo.advancing = true; this.argo.watchKey = this.argo.stopWatch(); }
+        saveGame(c);
+      } else app.push(new DropScreen(k, n, this.argo));
     }
   }
 }

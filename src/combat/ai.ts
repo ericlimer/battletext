@@ -37,6 +37,7 @@ function targetValue(b: Battle, a: Unit, t: Unit): number {
   if (t.frame.kind === 'mech') v *= 1.15;
   if (t.tag === 'convoy') v *= 1.4;
   if (t.prone || t.shutdown) v *= 1.3;
+  if ((t as any)._hitRound === b.round) v *= 1.2; // focus fire on what the lance is already hitting
   const arc = attackArc(t, a.x, a.y);
   if (arc === 'rear') v *= 1.25;
   return v;

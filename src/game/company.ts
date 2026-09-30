@@ -31,6 +31,8 @@ export interface Contract {
   flavor: string;
   targetName?: string;
   maxTons?: number;
+  sysId?: string; // travel contract destination
+  booked?: Negotiation; // accepted travel contract: terms locked in
 }
 
 export interface Negotiation { slider: number; cash: number; salvage: number; priority: number; }
@@ -113,6 +115,8 @@ export interface Company {
   lastEventDay?: number;
   recentEvents?: string[];
   deployDays?: number; // days owed for the last deployment
+  travelOffers?: Contract[];
+  travelOffersDay?: number;
 }
 
 export function rngOf(c: Company): RNG {
@@ -378,6 +382,20 @@ export function refreshSystem(c: Company, force = false): void {
     s.contractsDay = c.day;
   }
   c.contracts[s.id] = valid;
+  // Travel contracts: employers in neighbouring systems post work through the local HPG
+  if (force || !c.travelOffers || c.day - (c.travelOffersDay ?? -99) > 12) {
+    const offers: Contract[] = [];
+    for (const l of r.shuffle([...s.links]).slice(0, 4)) {
+      const ts = sys(c, l);
+      const k = genContract(c, r, ts);
+      k.sysId = ts.id;
+      k.pay = Math.round((k.pay * 1.2) / 5000) * 5000;
+      k.expires = c.day + 25;
+      offers.push(k);
+    }
+    c.travelOffers = offers;
+    c.travelOffersDay = c.day;
+  }
   if (force || c.day - s.storeDay > 30 || !c.stores[s.id]) { c.stores[s.id] = genStore(c, r, s); s.storeDay = c.day; }
   if (force || c.day - s.hiresDay > 30 || !c.hires[s.id]) { c.hires[s.id] = genHires(c, r, s); s.hiresDay = c.day; }
   // Lifeline: a battered light 'Mech is always for sale when the company is short-handed

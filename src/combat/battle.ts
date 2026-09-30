@@ -698,6 +698,7 @@ export class Battle {
       total += dmg;
     }
     this.emit({ k: 'fire', u: a.id, t: t.id, tx: t.x, ty: t.y, w: w.id, shots: res, indirect: hc.indirect, total });
+    (t as any)._hitRound = this.round;
     const hits = res.filter((r) => r.hit);
     const locs = new Map<string, number>();
     for (const h of hits) locs.set(h.loc, (locs.get(h.loc) ?? 0) + h.dmg);
