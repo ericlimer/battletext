@@ -102,6 +102,18 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   // ---- Nothing known: advance on objective / last contact -------------------------------
   if (!known.length) {
     if (u.tag === 'guard' && dist(u.x, u.y, u.startX, u.startY) < 6) { b.finishActivation(u); return; }
+    // Objective structures in play: shoot one if possible, otherwise close on the nearest
+    const side0 = SIDE(u.team);
+    const objs = u.ai.goal ? m.structures.filter((st) => st.objective && !st.destroyed && SIDE(st.team) !== side0) : [];
+    if (objs.length && u.frame.kind !== 'turret') {
+      if (structureValue(b, u) > 0) { aiAttackStructure(b, u); b.finishActivation(u); return; }
+      let bt = objs[0].tiles[0], bd = Infinity;
+      for (const st of objs) for (const ti of st.tiles) { const dd = dist(u.x, u.y, ti % m.w, (ti / m.w) | 0); if (dd < bd) { bd = dd; bt = ti; } }
+      moveToward(b, u, bt % m.w, (bt / m.w) | 0, 'walk');
+      if (structureValue(b, u) > 0) aiAttackStructure(b, u);
+      b.finishActivation(u);
+      return;
+    }
     const goal = u.ai.goal ?? [Math.floor(m.w / 2), Math.floor(m.h / 2)];
     if (u.frame.kind !== 'turret') moveToward(b, u, goal[0], goal[1], dist(u.x, u.y, goal[0], goal[1]) > 14 ? 'sprint' : 'walk');
     b.finishActivation(u);
