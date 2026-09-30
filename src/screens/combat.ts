@@ -205,7 +205,7 @@ export class CombatScreen implements Screen {
         break;
       }
       case 'float':
-        if (this.tileVisibleXY(e.x, e.y) || this.unitVisibleAt(e.x, e.y)) {
+        if (this.tileVisibleXY(e.x, e.y) || this.unitVisibleAt(e.x, e.y) || this.ghostAt(e.y * this.b.map.w + e.x)) {
           this.fx.float(e.x, e.y, e.text, e.color, e.big);
           if (e.text.startsWith('CRIT')) sfx('crit');
         }
@@ -878,7 +878,7 @@ export class CombatScreen implements Screen {
         const vis = b.visibleTiles[i];
         let lr = ambient, lg = ambient, lb = ambient * (m.night ? 1.15 : 1);
         if (lights.length) { const L = lightAt(lights, x, y); lr += L[0] * 1.3; lg += L[1] * 1.3; lb += L[2] * 1.3; }
-        if (!vis) { lr *= 0.62; lg *= 0.62; lb *= 0.7; fg = desaturate(fg, 0.35); }
+        if (!vis) { const k = m.night ? 0.42 : 0.62; lr *= k; lg *= k; lb *= k * 1.1; fg = desaturate(fg, m.night ? 0.6 : 0.35); }
         fg = light(fg, lr, lg, lb);
         bg = light(bg, lr, lg, lb);
         // overlays
@@ -891,8 +891,8 @@ export class CombatScreen implements Screen {
         }
         if (facingU && Math.max(Math.abs(x - facingU.x), Math.abs(y - facingU.y)) <= 6 && (x !== facingU.x || y !== facingU.y)) {
           const arc = attackArc({ x: facingU.x, y: facingU.y, facing: this.facingDir }, x, y);
-          const fade = 1 - dist(x, y, facingU.x, facingU.y) / 7;
-          if (arc === 'front') bg = lerp(bg, '#e0a030', 0.3 * fade); else if (arc === 'rear') bg = lerp(bg, '#e03020', 0.35 * fade);
+          const fade = 1 - dist(x, y, facingU.x, facingU.y) / 8;
+          if (arc === 'front') bg = lerp(bg, '#ffb030', 0.45 * fade + 0.1); else if (arc === 'rear') bg = lerp(bg, '#ff3020', 0.5 * fade + 0.1);
         }
         const mk = markers.get(i);
         if (mk) { bg = lerp(bg, mk.color, 0.3 + 0.1 * Math.sin(this.time * 3)); if (ch === '·' || ch === '.') { ch = mk.glyph; fg = mk.color; } }
@@ -1242,8 +1242,8 @@ export class CombatScreen implements Screen {
       d.fill(x, yy, PW, 2, ' ', C.text, bg);
       const col = !u.alive ? C.faint : u.team === 0 ? C.player : C.ally;
       d.text(x + 1, yy, this.glyphOf(u), col, bg, 99, true);
-      d.text(x + 4, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 11), u.alive ? C.bright : C.faint, bg);
-      d.text(x + 16, yy, frameTitle(f).slice(0, 18), C.dim, bg);
+      d.text(x + 4, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 13), u.alive ? C.bright : C.faint, bg);
+      d.text(x + 18, yy, frameTitle(f).slice(0, 18), C.dim, bg);
       const status = !u.alive ? (u.fled ? 'EXITED' : u.destroyHow === 'eject' ? 'EJECTED' : 'DESTROYED') : u.acted ? 'done' : u.phase === b.phase ? 'READY' : `ph ${u.phase}`;
       d.text(x + PW - 1 - status.length, yy, status, !u.alive ? (u.fled ? C.green : C.red) : status === 'READY' ? C.accent : C.faint, bg);
       if (u.alive) {
@@ -1464,7 +1464,7 @@ export class CombatScreen implements Screen {
       const sx = spot % b.map.w, sy = (spot / b.map.w) | 0;
       const marc = attackArc(t, sx, sy);
       const mdmg = dfa ? a.stats.dfaDmg : a.stats.meleeDmg;
-      d.ctext(x + 1, y + 1, `Hit {#f2f6f8}${Math.round(mc.chance)}%{/} · damage {#f0d050}${t.guarded && marc !== 'rear' ? Math.round(mdmg * 0.6) : mdmg}{/} · arc {${marc === 'rear' ? '#6ad46a' : '#c8d2d8'}}${marc.toUpperCase()}{/}${spots.has(ht) ? ' {#6d7f8a}(this spot){/}' : ` {#6d7f8a}(from nearest spot ${sx},${sy} — hover orange tiles to compare){/}`}`, C.dim, undefined, PW - 2);
+      d.ctext(x + 1, y + 1, `Hit {#f2f6f8}${Math.round(mc.chance)}%{/} · damage {#f0d050}${t.guarded && marc !== 'rear' ? Math.round(mdmg * 0.6) : mdmg}{/} · arc {${marc === 'rear' ? '#6ad46a' : '#c8d2d8'}}${marc.toUpperCase()}{/}${spots.has(ht) ? ' {#6d7f8a}(this spot){/}' : ' {#6d7f8a}(nearest spot){/}'}`, C.dim, undefined, PW - 2);
       d.ctext(x + 1, y + 2, `Heavy stability damage${dfa ? ` · your legs take ~${Math.round(frameTons(a.frame) * 0.25)}` : ''}${b.weaponsOf(a).some((w) => item(w.id).hard === 'S') ? ' · support weapons fire too' : ''}`, C.faint, undefined, PW - 2);
       mc.mods.forEach(([l, v], k) => { if (y + 3 + k < ROWS) { d.text(x + 1, y + 3 + k, l.slice(0, 20), C.dim); d.text(x + 22, y + 3 + k, (k === 0 ? `${v}%` : `${v > 0 ? '+' : ''}${v}`).padStart(5), k === 0 ? C.text : v > 0 ? C.green : C.red); } });
       return;

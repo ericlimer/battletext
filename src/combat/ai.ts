@@ -121,6 +121,17 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     return;
   }
 
+  // ---- Raiders commit to the objective: sprint in unless an enemy is right on top of them ----
+  if (u.tag === 'raider' && u.ai.goal && u.frame.kind !== 'turret' && !u.cannotMove) {
+    const [gx, gy] = u.ai.goal;
+    const close = visible.some((e) => dist(u.x, u.y, e.x, e.y) <= 5);
+    if (dist(u.x, u.y, gx, gy) > 12 && !close) {
+      moveToward(b, u, gx, gy, 'sprint');
+      b.finishActivation(u);
+      return;
+    }
+  }
+
   // ---- Evaluate candidate positions -----------------------------------------------------
   const hp = unitHealth(u);
   const allies = b.alliesOf(u);
@@ -203,6 +214,8 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
         let v = (hc.chance / 100) * dmg * targetValue(b, u, t) * (dfa ? 0.85 : 1);
         // melee is attractive vs knocked-down / unsteady targets and for heavies
         if (t.unsteady) v *= 1.3;
+        // Punch back at whoever is standing next to us
+        if (dist(u.x, u.y, t.x, t.y) <= 1.5) v *= 1.6;
         let bestSpot = -1, bestS = -Infinity;
         for (const [i] of spots) {
           const x = i % m.w, y = (i / m.w) | 0;
@@ -276,7 +289,7 @@ export function aiAttack(b: Battle, u: Unit, visible: Unit[]): boolean {
     if (!usable.length) continue;
     const chosen = pickWithinHeat(b, u, usable, unitHealth(t) < 0.25);
     // Prefer targets that threaten us: adjacent brawlers and whoever can hurt us most
-    const threat = dist(u.x, u.y, t.x, t.y) <= 1.5 ? 1.5 : 1 + Math.min(0.5, b.expectedDamage(t, u, t) / 250);
+    const threat = dist(u.x, u.y, t.x, t.y) <= 1.5 ? 2.4 : 1 + Math.min(0.5, b.expectedDamage(t, u, t) / 250);
     const ev = chosen.reduce((a, c) => a + c[1], 0) * targetValue(b, u, t) * threat;
     if (ev > bestV) { bestV = ev; bestT = t; bestW = chosen.map((c) => c[0]); }
   }

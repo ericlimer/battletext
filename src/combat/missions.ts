@@ -188,7 +188,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       if (!spec.enemies) force[0] = tgtC;
       if (tgtC.pilot) { tgtC.pilot.callsign = spec.targetName ?? tgtC.pilot.callsign; tgtC.pilot.gun = Math.min(10, tgtC.pilot.gun + 2); }
       enemyUnits = place(b, force, 1, eStart[0], eStart[1], 6);
-      if (enemyUnits[0]) { enemyUnits[0].tag = 'target'; enemyUnits[0].ai.goal = [Math.floor(W * 0.45), eStart[1] > H / 2 ? H - 1 : 0]; }
+      if (enemyUnits[0]) { enemyUnits[0].tag = 'target'; enemyUnits[0].ai.goal = [Math.floor(W * 0.3), eStart[1] > H / 2 ? H - 1 : 0]; }
       objectives.push({ id: 'target', text: `Destroy ${enemyUnits[0]?.pilot?.callsign ?? 'the target'} (${enemyUnits[0] ? b.fullName(enemyUnits[0]) : ''})`, primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'escorts', text: 'Destroy all escorts', primary: false, status: 'active', bonus });
       briefing.push(`${tgt.short} commander "${enemyUnits[0]?.pilot?.callsign}" is overseeing operations here. ${emp.short} wants them dead. If the target escapes, the contract is void.`);
