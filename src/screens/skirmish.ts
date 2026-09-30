@@ -161,7 +161,7 @@ export function quickSkirmish(type: string, seed: number): void {
   const r = new RNG(seed);
   const taken = new Set<string>();
   const player: Combatant[] = ['HBK-4G', 'CN9-A', 'JR7-D', 'CPLT-C1'].map((id) => { const p = makePilot(r, 2); p.callsign = uniqueCallsign(r, taken); taken.add(p.callsign); return { frame: newMechFrame(id), pilot: p }; });
-  const rt = setupMission({ type: type as MissionType, difficulty: 4, biome: BIOMES[seed % BIOMES.length], seed, night: false, employer: 'davion', target: 'liao', player, basePay: 400000 });
+  const rt = setupMission({ type: type as MissionType, difficulty: 4, biome: BIOMES[seed % BIOMES.length], seed, night: new URLSearchParams(location.search).has('night'), employer: 'davion', target: 'liao', player, basePay: 400000 });
   const cs = new CombatScreen(rt, () => app.pop(), 'QUICK SKIRMISH');
   const q = new URLSearchParams(location.search);
   if (q.has('auto')) { cs.autoplay = true; cs.briefingOpen = false; cs.speed = +(q.get('speed') ?? 1); }

@@ -228,7 +228,13 @@ export class Display {
           this.prevKey[i + 1] = '';
           ctx.fillStyle = this.bg[i];
           ctx.fillRect(px, py, cw * 2, chh);
-          if (c !== ' ' && c !== '') {
+          if (c.length === 2) {
+            // Two-letter unit designation: one bold letter per cell
+            if (fBold !== curFont) { ctx.font = fBold; curFont = fBold; }
+            ctx.fillStyle = fg;
+            ctx.fillText(c[0], px + cw * 0.6, py + chh * 0.54);
+            ctx.fillText(c[1], px + cw * 1.4, py + chh * 0.54);
+          } else if (c !== ' ' && c !== '') {
             if (!this.drawSpecial(c, px, py, cw * 2, chh, fg, this.bg[i])) {
               const fnt = /[A-Za-z0-9@&%]/.test(c) ? fBig : fBigN;
               if (fnt !== curFont) { ctx.font = fnt; curFont = fnt; }
@@ -259,8 +265,8 @@ export class Display {
     const ctx = this.ctx;
     const dx = [0, 1, 1, 1, 0, -1, -1, -1][dir];
     const dy = [-1, -1, 0, 1, 1, 1, 0, -1][dir];
-    const cx = px + w / 2 + dx * w * 0.42, cy = py + h / 2 + dy * h * 0.42;
-    const s = w * 0.15;
+    const cx = px + w / 2 + dx * w * 0.47, cy = py + h / 2 + dy * h * 0.44;
+    const s = w * 0.12;
     const ang = Math.atan2(dy, dx);
     ctx.fillStyle = color;
     ctx.beginPath();

@@ -171,6 +171,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
       if (dmin > 10) pos -= (dmin - 10) * 0.8;
     }
     if (u.tag === 'target') pos -= Math.max(0, 12 - nearest) * 2; // assassination targets are timid
+    if (u.tag === 'raider' && u.ai.goal) pos -= Math.max(0, dist(x, y, u.ai.goal[0], u.ai.goal[1]) - 6) * 2.2;
     if (u.tag === 'guard' && u.ai.goal) pos -= Math.max(0, dist(x, y, u.ai.goal[0], u.ai.goal[1]) - 7) * 1.5;
     c.score = off * aggr * 1.0 - threat * (1 - aggr) * 0.35 + pos + b.rng.next() * 0.5;
     if (!best || c.score > best.score) best = c;
@@ -217,7 +218,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   }
   if (!u.alive) return;
   const visNow = b.enemiesOf(u).filter((e) => b.seen[side].has(e.id));
-  const preferStruct = objStructs.length > 0 && structureValue(b, u) > 0 && (visNow.length === 0 || b.rng.chance(0.55));
+  const preferStruct = objStructs.length > 0 && structureValue(b, u) > 0 && (visNow.length === 0 || u.tag === 'raider' || b.rng.chance(0.45));
   const attacked = preferStruct ? aiAttackStructure(b, u) || aiAttack(b, u, visNow) : aiAttack(b, u, visNow) || aiAttackStructure(b, u);
   if (!attacked && u.alive) {
     // No shot: sensor lock, vigilance or brace; face the nearest threat
@@ -261,7 +262,9 @@ export function aiAttack(b: Battle, u: Unit, visible: Unit[]): boolean {
     }
     if (!usable.length) continue;
     const chosen = pickWithinHeat(b, u, usable, unitHealth(t) < 0.25);
-    const ev = chosen.reduce((a, c) => a + c[1], 0) * targetValue(b, u, t);
+    // Prefer targets that threaten us: adjacent brawlers and whoever can hurt us most
+    const threat = dist(u.x, u.y, t.x, t.y) <= 1.5 ? 1.5 : 1 + Math.min(0.5, b.expectedDamage(t, u, t) / 250);
+    const ev = chosen.reduce((a, c) => a + c[1], 0) * targetValue(b, u, t) * threat;
     if (ev > bestV) { bestV = ev; bestT = t; bestW = chosen.map((c) => c[0]); }
   }
   if (!bestT || !bestW.length) return false;

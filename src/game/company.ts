@@ -44,6 +44,7 @@ export interface WorkOrder {
   hours: number;
   total: number;
   desc: string;
+  cost?: number; // C-Bills paid up front (refundable pro rata on cancel)
 }
 
 export interface LogEntry { day: number; text: string; color?: string; }
@@ -111,6 +112,7 @@ export interface Company {
   pendingSalvage?: { pool: { kind: 'part' | 'item'; id: string; label: string; value: number }[]; shares: number; priority: number; seed: number; name: string };
   lastEventDay?: number;
   recentEvents?: string[];
+  deployDays?: number; // days owed for the last deployment
 }
 
 export function rngOf(c: Company): RNG {
@@ -251,13 +253,15 @@ export function basePay(diff: number): number {
 
 export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   const types: MissionType[] = ['battle', 'battle', 'assassinate', 'destroybase', 'defendbase', 'ambush', 'escort'];
-  const type = r.pick(types);
+  const board0 = c.contracts[s.id] ?? [];
+  const type = r.weighted(types, (t) => 1 / (1 + board0.filter((k) => k.type === t).length * 1.2));
   // Employers: owner, locals, and neighbouring powers
   const neigh = new Set<string>([s.owner, 'locals']);
   for (const l of s.links) neigh.add(sys(c, l).owner);
   const employers = [...neigh].filter((f) => faction(f).employer);
   if (!employers.length) employers.push('locals');
-  const employer = r.weighted(employers, (f) => (f === s.owner ? 3 : f === 'locals' ? 0.8 : 1.5) * (c.rep[f] < -50 ? 0.1 : 1));
+  const board = c.contracts[s.id] ?? [];
+  const employer = r.weighted(employers, (f) => (f === s.owner ? 2 : f === 'locals' ? 0.9 : 1.4) * (c.rep[f] < -50 ? 0.1 : 1) / (1 + board.filter((k) => k.employer === f).length * 0.8));
   const enemies = faction(employer).enemies.filter((e) => e !== employer);
   let target = r.weighted(enemies, (e) => (neigh.has(e) ? 3 : 1) * (e === 'pirates' ? 1.5 : 1));
   if (!target) target = 'pirates';
@@ -376,6 +380,13 @@ export function refreshSystem(c: Company, force = false): void {
   c.contracts[s.id] = valid;
   if (force || c.day - s.storeDay > 30 || !c.stores[s.id]) { c.stores[s.id] = genStore(c, r, s); s.storeDay = c.day; }
   if (force || c.day - s.hiresDay > 30 || !c.hires[s.id]) { c.hires[s.id] = genHires(c, r, s); s.hiresDay = c.day; }
+  // Lifeline: a battered light 'Mech is always for sale when the company is short-handed
+  const st = c.stores[s.id];
+  if (c.mechs.length + c.storage.length < 3 && st && !st.some((x) => x.kind === 'mech' && x.qty > 0 && x.id.startsWith('USED:'))) {
+    const cand = CHASSIS.filter((ch) => ch.cls === 'L' && ch.rarity === 0);
+    const ch = r.pick(cand);
+    st.unshift({ kind: 'mech', id: 'USED:' + ch.id, qty: 1, price: Math.round((ch.cost * 0.45) / 5000) * 5000 });
+  }
   s.visited = true;
   saveRng(c, r);
 }
@@ -462,13 +473,8 @@ export function advanceDay(c: Company): DayReport {
       else say('WARNING: The company is in debt. Another month in the red and the creditors will seize the Argo.', '#e8503a');
     } else c.negativeMonths = 0;
   }
-  // Expired contracts at current system
-  if (!c.travel) {
-    const k = c.contracts[c.location] ?? [];
-    const before = k.length;
-    c.contracts[c.location] = k.filter((x) => x.expires > c.day);
-    if (c.contracts[c.location].length < before) refreshSystem(c);
-  }
+  // Contract boards refill while docked (refreshSystem applies its own cadence)
+  if (!c.travel) refreshSystem(c);
   if (c.day >= CAREER_DAYS && !c.gameOver) { c.gameOver = 'retired'; rep.gameOver = 'retired'; }
   // Out of 'Mechs with no way to get more: the company is finished
   if (!c.gameOver && c.mechs.length + c.storage.length === 0 && !Object.values(c.parts).some((n) => n >= PARTS_NEEDED)) {
@@ -515,7 +521,7 @@ export function queueRepair(c: Company, m: Frame): { cost: number; hours: number
   const e = repairEstimate(m);
   c.funds -= e.cost;
   c.stats.spent += e.cost;
-  c.work.push({ id: 'w' + Math.random().toString(36).slice(2), mechUid: m.uid, kind: 'repair', hours: e.hours, total: e.hours, desc: `Repair ${frameName(m)}` });
+  c.work.push({ id: 'w' + Math.random().toString(36).slice(2), mechUid: m.uid, kind: 'repair', hours: e.hours, total: e.hours, desc: `Repair ${frameName(m)}`, cost: e.cost });
   return { cost: e.cost, hours: e.hours };
 }
 

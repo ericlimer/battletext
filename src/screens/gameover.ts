@@ -18,7 +18,7 @@ export class GameOverScreen implements Screen {
     const bankrupt = c.gameOver === 'bankrupt';
     const title = bankrupt ? 'THE COMPANY IS BANKRUPT' : c.gameOver === 'destroyed' ? 'THE COMPANY IS DESTROYED' : 'CAREER COMPLETE';
     d.text((COLS - title.length) >> 1, 6, title, bankrupt ? C.red : C.accent, undefined, 99, true);
-    const sub = bankrupt ? `Creditors seized the Argo on ${dateStr(c.day)}. ${c.name} is no more.` : `After ${c.day} days, ${c.name} retires from active service.`;
+    const sub = bankrupt ? `Creditors seized the Argo on ${dateStr(c.day)}. ${c.name} is no more.` : c.gameOver === 'destroyed' ? `With no 'Mechs left to field, ${c.name} disbands on ${dateStr(c.day)}.` : `After ${c.day} days, ${c.name} retires from active service.`;
     d.text((COLS - sub.length) >> 1, 8, sub, C.text);
     const lines = [
       `Final funds            ${cb(c.funds)}`,

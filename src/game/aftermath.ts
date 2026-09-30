@@ -153,6 +153,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
         const dd = item(it.id);
         if (dd.kind === 'ammo') continue;
         if (dd.kind === 'heatsink' && ++hs > 2) continue;
+        if (pool.filter((pe) => pe.id === it.id).length >= 3) continue;
         if (f.kind !== 'mech' && r.chance(0.4)) continue;
         pool.push({ kind: 'item', id: it.id, label: dd.name, value: dd.cost });
       }
@@ -168,6 +169,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     res.pool = pool;
   }
   res.days = contractDays(k);
+  c.deployDays = (c.deployDays ?? 0) + res.days;
   if (res.pool.length) c.pendingSalvage = { pool: res.pool, shares: res.salvageShares, priority: res.priority, seed: k.seed, name: k.name };
   // Remove contract
   c.contracts[c.location] = (c.contracts[c.location] ?? []).filter((x) => x.id !== k.id);

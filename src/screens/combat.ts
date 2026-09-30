@@ -82,9 +82,13 @@ export class CombatScreen implements Screen {
     for (const side of [0, 1]) {
       const used = new Set<string>();
       for (const u of this.b.units.filter((x) => SIDE(x.team) === side)) {
-        if (u.frame.kind !== 'mech') { this.glyphs.set(u.id, frameGlyph(u.frame)); continue; }
-        const name = this.b.chassisName(u).toUpperCase().replace(/[^A-Z]/g, '');
-        let g = [...name].find((ch) => !used.has(ch)) ?? name[0];
+        if (u.frame.kind === 'turret') { this.glyphs.set(u.id, 'τ'); continue; }
+        if (u.frame.kind === 'vehicle') { this.glyphs.set(u.id, u.tag === 'convoy' ? '■' : '◆'); continue; }
+        // Two-letter designation from the BattleTech variant code (HBK-4G → HB, AS7-D → AS)
+        const code = u.frame.defId.toUpperCase().replace(/[^A-Z]/g, '');
+        let g = code.slice(0, 2);
+        for (let k = 2; used.has(g) && k < code.length; k++) g = code[0] + code[k];
+        for (let n = 2; used.has(g) && n < 10; n++) g = code[0] + String(n);
         used.add(g);
         this.glyphs.set(u.id, g);
       }
@@ -108,10 +112,18 @@ export class CombatScreen implements Screen {
     return out;
   }
 
+  wasSeen = new Set<number>();
+  ghostAt(i: number): boolean {
+    const m = this.b.map;
+    for (const id of this.ghosts) { const u = this.b.unit(id); if (u.y * m.w + u.x === i) return true; }
+    return false;
+  }
+
   glyphOf(u: Unit): string { return this.glyphs.get(u.id) ?? frameGlyph(u.frame); }
 
   // ---- Event plumbing --------------------------------------------------------------------
   pull(): void {
+    for (const id of this.b.seen[0]) this.wasSeen.add(id);
     const evs = this.b.events.splice(0);
     for (const e of evs) {
       if (e.k === 'move' && !this.shownPos.has(e.u)) this.shownPos.set(e.u, e.path[0]);
@@ -766,7 +778,9 @@ export class CombatScreen implements Screen {
     let fg = lerp(bg, scale(B.groundFg, 1 + e * 0.1), 0.28);
     let ch = m.glyph[i];
     // Sparse ground texture: a faint grid dot on most tiles, occasional detail
-    if (t === 'plain') ch = ((x * 7 + y * 13) % 5 === 0 && ch !== '.') ? ch : '·';
+    const calm = m.biome === 'martian' || m.biome === 'badlands' || m.biome === 'lunar' || m.biome === 'desert';
+    if (t === 'plain') ch = calm ? (((x * 7 + y * 13) % 3 === 0) ? '·' : ' ') : ((x * 7 + y * 13) % 5 === 0 && ch !== '.') ? ch : '·';
+    if (t === 'rough' && calm && (x * 5 + y * 11) % 3 !== 0) ch = ' ';
     const tt = this.time;
     switch (t) {
       case 'lforest': fg = lerp(B.forest[0], B.forest[1], s * 0.6); bg = lerp(bg, scale(B.forestBg, 1.6), 0.75); break;
@@ -811,7 +825,7 @@ export class CombatScreen implements Screen {
       else if (west < e) { ch = '▏'; fg = lerp(bg, '#000000', 0.45); }
     }
     if (m.scorch[i] > 0) bg = lerp(bg, '#0a0806', 0.5 * m.scorch[i]);
-    const wr = m.wrecks.get(i);
+    const wr = m.wrecks.get(i) && !this.ghostAt(i) ? m.wrecks.get(i) : undefined;
     if (wr) { ch = wr; fg = '#8a7060'; }
     return { ch, fg, bg };
   }
@@ -868,13 +882,14 @@ export class CombatScreen implements Screen {
         if (reach && act) {
           if (this.mode === 'jump') { if (reach.jump.has(i)) bg = lerp(bg, '#2a8a4a', 0.32); }
           else if (this.mode === 'move') {
-            if (reach.walk.has(i)) { bg = lerp(bg, '#3a7ac8', 0.24); fg = lerp(fg, '#9ac8ff', 0.3); }
-            else if (reach.sprint.has(i)) { bg = lerp(bg, '#b09a3a', 0.16); fg = lerp(fg, '#e8d890', 0.2); }
+            if (reach.walk.has(i)) { bg = lerp(bg, '#3a8ae8', 0.34); fg = lerp(fg, '#b0d8ff', 0.35); }
+            else if (reach.sprint.has(i)) { bg = lerp(bg, '#c0a030', 0.24); fg = lerp(fg, '#f0e090', 0.25); }
           }
         }
-        if (facingU && Math.max(Math.abs(x - facingU.x), Math.abs(y - facingU.y)) <= 4 && (x !== facingU.x || y !== facingU.y)) {
+        if (facingU && Math.max(Math.abs(x - facingU.x), Math.abs(y - facingU.y)) <= 6 && (x !== facingU.x || y !== facingU.y)) {
           const arc = attackArc({ x: facingU.x, y: facingU.y, facing: this.facingDir }, x, y);
-          if (arc === 'front') bg = lerp(bg, '#3a9ad0', 0.22); else if (arc === 'rear') bg = lerp(bg, '#d04020', 0.28);
+          const fade = 1 - dist(x, y, facingU.x, facingU.y) / 7;
+          if (arc === 'front') bg = lerp(bg, '#e0a030', 0.3 * fade); else if (arc === 'rear') bg = lerp(bg, '#e03020', 0.35 * fade);
         }
         const mk = markers.get(i);
         if (mk) { bg = lerp(bg, mk.color, 0.3 + 0.1 * Math.sin(this.time * 3)); if (ch === '·' || ch === '.') { ch = mk.glyph; fg = mk.color; } }
@@ -906,7 +921,7 @@ export class CombatScreen implements Screen {
       if (x < this.camX || y < this.camY || x >= this.camX + VW || y >= this.camY + VH) continue;
       const sx = MX + (x - this.camX) * 2, sy = MY + (y - this.camY);
       const side = SIDE(un.team);
-      const seen = side === 0 || b.seen[0].has(un.id) || this.animPos.has(un.id);
+      const seen = side === 0 || b.seen[0].has(un.id) || this.animPos.has(un.id) || (this.ghosts.has(un.id) && this.wasSeen.has(un.id));
       const blip = !seen && b.detected[0].has(un.id);
       if (!seen && !blip) continue;
       if (blip) {
@@ -920,6 +935,7 @@ export class CombatScreen implements Screen {
       if (un === this.sel) { bg = lerp(bg, '#3a8ab0', 0.5 + 0.2 * Math.sin(this.time * 5)); fg = '#ffffff'; }
       if (un === this.target || [...this.multi.values()].includes(un)) bg = lerp(bg, '#c04020', 0.55 + 0.25 * Math.sin(this.time * 6));
       else if (tgtOk.has(un.id)) bg = lerp(bg, '#a03020', 0.35);
+      if (this.mode === 'facing' && u && side === 1 && dist(u.x, u.y, un.x, un.y) < 16 && attackArc({ x: u.x, y: u.y, facing: this.facingDir }, un.x, un.y) === 'rear') { bg = lerp(bg, '#ff2010', 0.5 + 0.3 * Math.sin(this.time * 8)); }
       if (un === this.meleeTarget) bg = lerp(bg, '#e08030', 0.6);
       if (un.acted && un.alive && side === 0) fg = lerp(fg, '#405060', 0.4);
       if (un.shutdown) fg = lerp(fg, '#303030', 0.5);
@@ -960,13 +976,17 @@ export class CombatScreen implements Screen {
       }
     }
     // Floaters
+    const occ: [number, number, number][] = [];
     for (const f of this.fx.floats) {
       if (f.delay && f.delay > 0) continue;
       const k = f.life / f.max;
       const x = f.x, y = f.y - k * (f.big ? 2.2 : 1.6) - 0.6;
-      const sy = MY + Math.round(y - this.camY);
+      let sy = MY + Math.round(y - this.camY);
       const len = [...f.text].length;
       const sx = Math.max(MX, Math.min(MX + VW * 2 - len, MX + Math.round((x - this.camX) * 2 + 1 - len / 2)));
+      // Bump up until this label doesn't overlap another on the same row
+      for (let tries = 0; tries < 6 && occ.some(([ry, a, bb]) => ry === sy && sx < bb + 1 && sx + len > a - 1); tries++) sy--;
+      occ.push([sy, sx, sx + len]);
       if (sy < MY || sy >= MY + VH) continue;
       const col = k > 0.8 ? lerp(f.color, '#303030', (k - 0.8) / 0.2) : f.color;
       for (let c = 0; c < len; c++) {
@@ -1058,8 +1078,9 @@ export class CombatScreen implements Screen {
       x += 3;
       for (const u of us) {
         const col = u.team === 0 ? C.player : u.team === 2 ? C.ally : C.enemy;
-        d.set(x, 0, this.glyphOf(u), u.acted ? scale(col, 0.4) : col, '#0c1218', true);
-        x++;
+        const g = this.glyphOf(u);
+        d.text(x, 0, g, u.acted ? scale(col, 0.4) : col, '#0c1218', 99, true);
+        x += g.length + 1;
       }
       x++;
     }
@@ -1218,7 +1239,7 @@ export class CombatScreen implements Screen {
       d.fill(x, yy, PW, 2, ' ', C.text, bg);
       const col = !u.alive ? C.faint : u.team === 0 ? C.player : C.ally;
       d.text(x + 1, yy, this.glyphOf(u), col, bg, 99, true);
-      d.text(x + 3, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 12), u.alive ? C.bright : C.faint, bg);
+      d.text(x + 4, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 11), u.alive ? C.bright : C.faint, bg);
       d.text(x + 16, yy, frameTitle(f).slice(0, 18), C.dim, bg);
       const status = !u.alive ? (u.fled ? 'EXITED' : u.destroyHow === 'eject' ? 'EJECTED' : 'DESTROYED') : u.acted ? 'done' : u.phase === b.phase ? 'READY' : `ph ${u.phase}`;
       d.text(x + PW - 1 - status.length, yy, status, !u.alive ? (u.fled ? C.green : C.red) : status === 'READY' ? C.accent : C.faint, bg);
@@ -1308,7 +1329,8 @@ export class CombatScreen implements Screen {
       const off = this.weaponsOff.has(wc);
       const ammoOk = b.hasAmmo(u, wc);
       const from = mine && this.plan ? this.plan : u;
-      const hc = (t || s) && mine ? b.hitChance(u, t, w, from, undefined, !!this.calledLoc, s ?? undefined) : null;
+      const meleeMode = this.mode === 'melee' || this.mode === 'dfa';
+      const hc = (t || s) && mine && !meleeMode ? b.hitChance(u, t, w, from, undefined, !!this.calledLoc, s ?? undefined) : null;
       const multiT = this.multi.get(wc);
       const on = mine && !off && ammoOk && (!hc || hc.ok);
       const hov = mine && ui.hover(x, y, PW, 1);
@@ -1343,7 +1365,7 @@ export class CombatScreen implements Screen {
     });
     for (const wc of deadWs) { d.text(x + 5, y, `${item(wc.id).name} ✕`, '#5a3030'); y++; }
     // Expected damage summary
-    if (mine && (t || s)) {
+    if (mine && (t || s) && this.mode !== 'melee' && this.mode !== 'dfa') {
       const sel = this.selectedWeapons(u, t, s);
       let ev = 0, heat = 0;
       const from = this.plan ?? u;
@@ -1352,7 +1374,7 @@ export class CombatScreen implements Screen {
       for (const wc of sel) { const w = item(wc.id); const hc = b.hitChance(u, t, w, from, undefined, false, s ?? undefined); if (!hc.ok) continue; ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1) * red; heat += w.heat ?? 0; }
       d.ctext(x + 1, y, `Selected: {#f2f6f8}${sel.length}{/} · expected {#f0d050}${Math.round(ev)}{/} dmg${red < 1 ? ` {#6ad46a}(-${Math.round((1 - red) * 100)}% cover/guard){/}` : ''} · {#ff8a4a}+${heat}{/} heat`, C.dim, undefined, PW - 2);
       y++;
-      if (b.isMech(u) && b.projectedHeat(u, sel) >= u.stats.heatCap) { d.text(x + 1, y, this.heatConfirm ? '⚠ SHUTDOWN CONFIRMED NEXT — press [F] to fire anyway' : '⚠ THIS ATTACK WILL SHUT YOU DOWN', '#ff6a2a', undefined, PW - 2, true); y++; }
+      if (b.isMech(u) && b.projectedHeat(u, sel) >= u.stats.heatCap) { d.text(x + 1, y, this.heatConfirm ? '⚠ SHUTDOWN — press F again to fire' : '⚠ THIS ATTACK WILL SHUT YOU DOWN', '#ff6a2a', undefined, PW - 2, true); y++; }
       if (this.plan) { d.text(x + 1, y, `(odds shown from the planned destination)`, C.faint); y++; }
     }
     return y;
@@ -1439,7 +1461,7 @@ export class CombatScreen implements Screen {
       const sx = spot % b.map.w, sy = (spot / b.map.w) | 0;
       const marc = attackArc(t, sx, sy);
       const mdmg = dfa ? a.stats.dfaDmg : a.stats.meleeDmg;
-      d.ctext(x + 1, y + 1, `Hit {#f2f6f8}${Math.round(mc.chance)}%{/} · damage {#f0d050}${t.guarded && marc !== 'rear' ? Math.round(mdmg * 0.6) : mdmg}{/} · arc {${marc === 'rear' ? '#6ad46a' : '#c8d2d8'}}${marc.toUpperCase()}{/}${spots.has(ht) ? '' : ' {#6d7f8a}(default spot){/}'}`, C.dim, undefined, PW - 2);
+      d.ctext(x + 1, y + 1, `Hit {#f2f6f8}${Math.round(mc.chance)}%{/} · damage {#f0d050}${t.guarded && marc !== 'rear' ? Math.round(mdmg * 0.6) : mdmg}{/} · arc {${marc === 'rear' ? '#6ad46a' : '#c8d2d8'}}${marc.toUpperCase()}{/}${spots.has(ht) ? ' {#6d7f8a}(this spot){/}' : ` {#6d7f8a}(from nearest spot ${sx},${sy} — hover orange tiles to compare){/}`}`, C.dim, undefined, PW - 2);
       d.ctext(x + 1, y + 2, `Heavy stability damage${dfa ? ` · your legs take ~${Math.round(frameTons(a.frame) * 0.25)}` : ''}${b.weaponsOf(a).some((w) => item(w.id).hard === 'S') ? ' · support weapons fire too' : ''}`, C.faint, undefined, PW - 2);
       mc.mods.forEach(([l, v], k) => { if (y + 3 + k < ROWS) { d.text(x + 1, y + 3 + k, l.slice(0, 20), C.dim); d.text(x + 22, y + 3 + k, (k === 0 ? `${v}%` : `${v > 0 ? '+' : ''}${v}`).padStart(5), k === 0 ? C.text : v > 0 ? C.green : C.red); } });
       return;

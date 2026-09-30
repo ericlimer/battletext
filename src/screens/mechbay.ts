@@ -27,7 +27,8 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   rows.push({ kind: 'hdr', text: `SALVAGED PARTS` });
   for (const [id, n] of parts) rows.push({ kind: 'part', id, n });
   ui.panel(x + 1, y, 50, h, '\'MECH BAY');
-  const cl = ui.list(x + 2, y + 1, 48, h - 2, rows, st.list, (r, _i, lx, ly, lw, hov) => {
+  const qRows = c.work.length ? Math.min(8, c.work.length) + 2 : 0;
+  const cl = ui.list(x + 2, y + 1, 48, h - 2 - qRows, rows, st.list, (r, _i, lx, ly, lw, hov) => {
     if (r.kind === 'hdr') { d.text(lx + 1, ly, r.text, C.accent, undefined, lw, true); return; }
     if (r.kind === 'part') {
       const ch = chassis(r.id);
@@ -59,6 +60,24 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     simpleBar(d, lx + 38, ly, lw - 39, s.armorTotal / Math.max(1, s.armorMax), healthColor(s.armorTotal / Math.max(1, s.armorMax)), '#161c22');
   }, 1);
   if (cl >= 0) { const r = rows[cl]; if (r.kind === 'mech') { st.sel = r.m.uid; st.confirmSell = false; } }
+  // Work queue: reorder or cancel (repairs refund the unspent share)
+  if (c.work.length) {
+    const qy = y + h - 2 - Math.min(8, c.work.length) - 1;
+    d.hline(x + 2, qy, 48, C.border);
+    d.text(x + 3, qy, ' WORK QUEUE ', C.accent, C.panel, 99, true);
+    c.work.slice(0, 8).forEach((wo, i) => {
+      const yy = qy + 1 + i;
+      d.fill(x + 2, yy, 48, 1, ' ', C.text, C.panel);
+      d.text(x + 3, yy, wo.desc.slice(0, 26), C.text);
+      d.text(x + 30, yy, `${workQueueDays(c, wo.mechUid)}d`, C.dim);
+      if (i > 0 && ui.button(x + 35, yy, '▲', { style: 'plain', w: 2, tip: 'Move up' })) { [c.work[i - 1], c.work[i]] = [c.work[i], c.work[i - 1]]; saveGame(c); }
+      if (i < c.work.length - 1 && ui.button(x + 38, yy, '▼', { style: 'plain', w: 2, tip: 'Move down' })) { [c.work[i + 1], c.work[i]] = [c.work[i], c.work[i + 1]]; saveGame(c); }
+      if (wo.kind === 'repair' && ui.button(x + 42, yy, 'cancel', { style: 'plain', fg: C.dim, tip: 'Cancel and refund the unspent part of the repair cost.' })) {
+        const refund = Math.round((wo.cost ?? 0) * (wo.hours / Math.max(1, wo.total)));
+        c.funds += refund; c.work.splice(i, 1); saveGame(c); argo.notify(`Repair cancelled, refunded ${cbk(refund)}`, C.cbill);
+      }
+    });
+  }
   const all = [...c.mechs, ...c.storage];
   const m = all.find((q) => q.uid === st.sel) ?? all[0];
   if (!m) { d.text(x + 55, y + 3, 'No \'Mechs. Buy one in the Store, or assemble salvaged parts.', C.dim); return; }

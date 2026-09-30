@@ -20,13 +20,14 @@ export class SalvageScreen implements Screen {
   cut: number[] = [];
   got: SalvageEntry[] = [];
   listState = { scroll: 0 };
-  constructor(public argo: ArgoScreen) {}
+  name: string;
+  constructor(public argo: ArgoScreen) { this.name = company!.pendingSalvage?.name ?? ''; }
 
   render(ui: UI): void {
     const d = ui.d, c = company!;
     d.fill(0, 0, COLS, ROWS, ' ', C.text, C.bg);
     const ps = c.pendingSalvage;
-    ui.header(0, 0, COLS, `SALVAGE · ${(ps?.name ?? '').toUpperCase()}`, C.bg, C.accent);
+    ui.header(0, 0, COLS, `SALVAGE · ${this.name.toUpperCase()}`, C.bg, C.accent);
     if (this.stage === 'done' || !ps) {
       d.text(3, 2, 'SALVAGE RECOVERED', C.accent, undefined, 99, true);
       this.got.forEach((g, i) => d.text(5, 4 + i, `${g.kind === 'part' ? '⚙' : '▪'} ${g.label}`, g.kind === 'part' ? C.cyan : C.text));

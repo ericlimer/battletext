@@ -305,7 +305,6 @@ export class AftermathScreen implements Screen {
 
   finish(): void {
     const c = company!;
-    this.argo.queueDays += this.res.days;
     saveGame(c);
     this.argo.tab = 'COMMAND';
     if (c.pendingSalvage) app.replace(new SalvageScreen(this.argo));

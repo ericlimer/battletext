@@ -37,7 +37,7 @@ export function drawDoll(ui: UI, x: number, y: number, f: Frame, o: DollOpts = {
   const lab = (lx: number, ly: number, t: string, loc: string) => {
     const hl = o.highlight === loc;
     const p = o.pct?.[loc];
-    const txt = p !== undefined ? `${Math.round(p)}%` : t;
+    const txt = p !== undefined ? `${t}${Math.round(p)}%` : t;
     d.text(lx, ly, txt.slice(0, 6), hl ? C.accent : C.dim);
   };
   const loc = (l: string, bx: number, by: number, withRear: boolean) => {

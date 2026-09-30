@@ -231,7 +231,8 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       }
       const w3 = spec.enemies || d < 5 ? [] : place(b, generateForce(r, d, spec.target, 3), 1, W - 4, cy, 6, { deployRound: 7, deployed: false });
       enemyUnits = [...w1, ...w2, ...w3];
-      for (const e of enemyUnits) e.ai.goal = [cx, cy];
+      // Half of every wave are raiders who go straight for the facility
+      enemyUnits.forEach((e, k) => { e.ai.goal = [cx, cy]; if (k % 2 === 0) e.tag = 'raider'; });
       objectives.push({ id: 'defend', text: 'Destroy all attacking forces', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'base', text: 'Keep at least one primary structure standing', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'intact', text: 'Keep all primary structures intact', primary: false, status: 'active', bonus });
@@ -319,6 +320,7 @@ function installHooks(rt: MissionRuntime): void {
         const eo = obj(rt, 'escorts')!;
         if (eo.status === 'active' && esc.every((u) => !u.alive)) eo.status = 'done';
         if (tg && !tg.alive) { obj(rt, 'target')!.status = 'done'; return 'win'; }
+        if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `bolts at round 9 or when badly hurt (round ${b.round})`;
         if (tg && tg.fled) { obj(rt, 'target')!.status = 'failed'; return 'loss'; }
         break;
       }
@@ -378,7 +380,7 @@ function installHooks(rt: MissionRuntime): void {
   b.hooks.roundStart = () => {
     // Assassination targets bolt once hurt or after round 6
     const tg = rt.enemyUnits.find((u) => u.tag === 'target');
-    if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 8 || tg.dmgTaken > 250)) {
+    if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 9 || tg.dmgTaken > 300)) {
       (tg as any)._fleeing = true;
       b.say(`${tg.pilot?.callsign ?? 'The target'} is attempting to escape!`, '#f0a830');
     }

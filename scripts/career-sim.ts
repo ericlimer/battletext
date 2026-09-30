@@ -24,7 +24,7 @@ while (!c.gameOver && guard++ < 5000) {
   if (!c.travel && c.mechs.length < 4) {
     const st = c.stores[c.location] ?? [];
     const m = st.filter((x) => x.kind === 'mech' && x.qty > 0 && c.funds - x.price > monthlyExpenses(c).total).sort((a, b) => a.price - b.price)[0];
-    if (m) { c.funds -= m.price; m.qty--; c.mechs.push(newMechFrame(m.id)); if (verbose) console.log('bought', m.id, m.price); }
+    if (m) { c.funds -= m.price; m.qty--; c.mechs.push(newMechFrame(m.id.replace('USED:', ''))); if (verbose) console.log('bought', m.id, m.price); }
     const pt = st.filter((x) => x.kind === 'part' && x.qty > 0 && (c.parts[x.id] ?? 0) + x.qty >= PARTS_NEEDED && c.funds - x.price * x.qty > monthlyExpenses(c).total * 2)[0];
     if (pt) { while (pt.qty > 0) { c.funds -= pt.price; pt.qty--; c.parts[pt.id] = (c.parts[pt.id] ?? 0) + 1; } }
   }

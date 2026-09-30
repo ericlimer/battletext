@@ -70,7 +70,7 @@ export const BIOME_INFO: Record<Biome, BiomeInfo> = {
     forest: ['#9a8a4a', '#6a6a2a'], forestBg: '#241a10', water: ['#4a8ac0', '#102838'], rock: '#b0684a', road: '#9a7a5a',
     forestDensity: 0.12, waterLevel: 0.03, rockDensity: 0.12, roughDensity: 0.2, relief: 1.6, treeGlyphs: ['♣', '♣'] },
   lunar: { name: 'Lunar', heatMult: 0.75, desc: 'Airless moon. No convection: -25% heat dissipation.',
-    ground: ['#101114', '#16171b', '#1d1f24', '#26282e'], groundFg: '#5a5e68', groundGlyphs: ['.', '.', '.', '.'],
+    ground: ['#1a1c20', '#23262b', '#2d3036', '#393c43'], groundFg: '#6a6e78', groundGlyphs: ['.', '.', '.', '.'],
     forest: ['#7a8a9a', '#4a5a6a'], forestBg: '#101318', water: ['#6a7a9a', '#141820'], rock: '#9aa0aa', road: '#6a6e78',
     forestDensity: 0.0, waterLevel: 0.0, rockDensity: 0.08, roughDensity: 0.16, relief: 1.1, treeGlyphs: ['¤', '¤'] },
   martian: { name: 'Martian', heatMult: 0.9, desc: 'Thin, dusty atmosphere. -10% heat dissipation.',

@@ -44,7 +44,7 @@ export interface Unit {
   dmgDealt: number;
   dmgTaken: number;
   injuriesTaken: number;
-  tag: '' | 'convoy' | 'target' | 'escort' | 'guard';
+  tag: '' | 'convoy' | 'target' | 'escort' | 'guard' | 'raider';
   deployRound: number;
   deployed: boolean;
   fled: boolean;
@@ -786,6 +786,7 @@ export class Battle {
     const s = f.struct[sl];
     if (s === undefined) return;
     const sd = Math.min(s, dmg);
+    if (s === f.maxStruct[sl] && sd > 0 && s - sd > 0 && f.kind === 'mech') this.float(t.x, t.y, `${sl} BREACHED`, '#f08a30');
     f.struct[sl] = s - sd;
     const over = dmg - sd;
     if (f.struct[sl] > 0) {
@@ -840,7 +841,7 @@ export class Battle {
     }
     this.float(t.x, t.y, `${LOC_NAMES[sl].toUpperCase()} DESTROYED`, '#e8503a');
     this.say(`${this.displayName(t)}'s ${LOC_NAMES[sl]} is destroyed!`, '#e8503a');
-    this.resolve[1 - SIDE(t.team)] = Math.min(100, this.resolve[1 - SIDE(t.team)] + 10);
+    this.resolve[1 - SIDE(t.team)] = Math.min(this.resolveMax[1 - SIDE(t.team)], this.resolve[1 - SIDE(t.team)] + 10);
     if (sl === 'HD') { this.kill(t, 'head', by); return; }
     if (sl === 'CT') { this.kill(t, 'ct', by); return; }
     if (sl === 'LT' || sl === 'RT') {
@@ -861,7 +862,7 @@ export class Battle {
   }
 
   injure(t: Unit, why: string): void {
-    if (!t.pilot || !t.alive) return;
+    if (!t.pilot || !t.alive || t.frame.kind !== 'mech') return;
     if (t.stats.injuryResist > 0 && !t.cageUsed) {
       t.cageUsed = true;
       this.float(t.x, t.y, 'SAFETY CAGE', '#8ab4ff');
@@ -925,7 +926,7 @@ export class Battle {
     if (!t.alive) return;
     t.alive = false;
     t.destroyHow = how;
-    if (by) { by.kills++; this.resolve[SIDE(by.team)] = Math.min(100, this.resolve[SIDE(by.team)] + 20); }
+    if (by) { by.kills++; this.resolve[SIDE(by.team)] = Math.min(this.resolveMax[SIDE(by.team)], this.resolve[SIDE(by.team)] + 20); }
     this.emit({ k: 'boom', x: t.x, y: t.y, size: how === 'eject' || how === 'pilot' ? 1 : 3 });
     this.emit({ k: 'destroyed', u: t.id, how });
     this.map.wrecks.set(t.y * this.map.w + t.x, t.frame.kind === 'mech' ? '%' : '&');

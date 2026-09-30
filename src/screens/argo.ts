@@ -38,7 +38,6 @@ export class ArgoScreen implements Screen {
   st: Record<string, any> = {};
   logState = { scroll: 1e9 };
   logLen = -1;
-  queueDays = 0;
   confirmBuy = '';
 
   get c(): Company { return company!; }
@@ -83,9 +82,11 @@ export class ArgoScreen implements Screen {
     const d = ui.d;
     d.fill(0, 0, COLS, ROWS, ' ', C.text, C.bg);
     // Days spent on deployment pass once we're back aboard
-    if (this.queueDays > 0 && app.top() === this && !this.menuOpen) {
+    if ((c.deployDays ?? 0) > 0 && app.top() === this && !this.menuOpen) {
       this.advT += dt;
-      if (this.advT > 0.08) { this.advT = 0; this.queueDays--; if (!this.passDay()) this.queueDays = 0; }
+      // Deployment days are owed by the company: interruptions (events, month end) only pause them
+      if (this.advT > 0.08) { this.advT = 0; c.deployDays = (c.deployDays ?? 1) - 1; this.passDay(); }
+      d.text(1, ROWS - 1, ` Returning from deployment… ${c.deployDays} day${c.deployDays === 1 ? '' : 's'} `, C.bg, C.cyan);
     }
     // Continuous time advance
     if (this.advancing && !this.menuOpen) {
@@ -115,8 +116,8 @@ export class ArgoScreen implements Screen {
       const t = this.toast;
       const len = t.text.length + 4;
       const a = Math.min(1, t.t * 2);
-      d.fill(COLS - len - 2, ROWS - 3, len, 1, ' ', C.text, lerp(C.bg, '#14202a', a));
-      d.text(COLS - len, ROWS - 3, t.text, lerp(C.bg, t.color, a));
+      d.fill(COLS - len - 2, 2, len, 1, ' ', C.text, lerp(C.bg, '#14202a', a));
+      d.text(COLS - len, 2, t.text, lerp(C.bg, t.color, a));
       if (t.t <= 0) this.toast = null;
     }
     if (this.menuOpen) { ui.enabled = true; this.drawMenu(ui); }
@@ -137,9 +138,9 @@ export class ArgoScreen implements Screen {
     x += d.text(x, 0, `-${cbk(ex.total)}/mo`, runway < 2 ? C.red : C.dim) + 3;
     const m = morale(c);
     x += d.ctext(x, 0, `MORALE {${m >= 30 ? '#6ad46a' : m >= 15 ? '#f0c040' : '#e8503a'}}${m} ${moraleName(m)}{/}`, C.dim) + 3;
-    x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}{#3b4a54}(${c.mrb}){/}`, C.dim) + 2;
+    x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}{#6d7f8a}·${c.mrb}{/}`, C.dim) + 2;
     const s = sys(c);
-    const loc = c.travel ? `IN TRANSIT → ${sys(c, c.travel.dest).name} (${travelDaysLeft(c)}d)` : `${s.name}`;
+    const loc = c.travel ? `→ ${sys(c, c.travel.dest).name} ${travelDaysLeft(c)}d` : `${s.name}`;
     d.text(x, 0, loc, c.travel ? C.cyan : C.text, undefined, Math.max(0, COLS - 37 - x));
     // time controls
     const bx = COLS - 36;
@@ -283,7 +284,7 @@ export class ArgoScreen implements Screen {
     });
     const m = morale(c);
     d.ctext(x + 3, y + 14, `Current morale: {#f2f6f8}${m}{/} (${moraleName(m)})`, C.text);
-    d.text(x + 3, y + 15, 'Morale sets your starting and maximum Resolve and how fast it builds in combat.', C.faint, undefined, 66);
+    d.text(x + 3, y + 15, 'Morale sets starting/max Resolve and how fast it builds.', C.faint, undefined, 66);
     d.text(x + 3, y + 16, 'Below 12 at month end, unhappy MechWarriors may desert.', C.faint, undefined, 66);
     simpleBar(d, x + 3, y + 17, 50, m / 50, healthColor(m / 50));
     // Breakdown

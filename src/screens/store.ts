@@ -49,11 +49,12 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
       d.text(lx + 34, ly, `${dd.tons}t`, C.faint, bg);
       if (hov) ui.setTip([...weaponTip(si.id), `Owned: ${c.inventory[si.id] ?? 0}`]);
     } else {
-      const ch = chassis(si.id);
+      const used = si.id.startsWith('USED:');
+      const ch = chassis(si.id.replace('USED:', ''));
       d.text(lx + 1, ly, si.kind === 'mech' ? '▣' : '⚙', si.kind === 'mech' ? C.accent : C.cyan, bg);
-      d.text(lx + 3, ly, `${ch.name} ${ch.id}${si.kind === 'part' ? ' part' : ''}`, si.kind === 'mech' ? C.bright : C.cyan, bg, 30);
+      d.text(lx + 3, ly, `${used ? 'Used ' : ''}${ch.name} ${ch.id}${si.kind === 'part' ? ' part' : ''}`, si.kind === 'mech' ? C.bright : C.cyan, bg, 30);
       d.text(lx + 34, ly, `${ch.tons}t`, C.faint, bg);
-      if (hov) ui.setTip([`${ch.name} ${ch.id} · ${ch.tons}t`, si.kind === 'part' ? `One of ${PARTS_NEEDED} parts needed to assemble. You have ${c.parts[si.id] ?? 0}.` : 'Complete, combat-ready \'Mech with stock loadout.', ch.desc, weaponSummary(newMechFrame(si.id))]);
+      if (hov) ui.setTip([`${ch.name} ${ch.id} · ${ch.tons}t`, si.kind === 'part' ? `One of ${PARTS_NEEDED} parts needed to assemble. You have ${c.parts[si.id] ?? 0}.` : used ? 'Battered and half-stripped, but cheap. Needs armor repairs.' : 'Complete, combat-ready \'Mech with stock loadout.', ch.desc, weaponSummary(newMechFrame(ch.id))]);
     }
     d.text(lx + 40, ly, `x${si.qty}`, C.dim, bg);
     d.text(lx + lw - 10, ly, cbk(si.price).padStart(9), afford ? C.cbill : C.red, bg);
@@ -66,9 +67,15 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
       c.funds -= si.price; c.stats.spent += si.price; si.qty--;
       if (si.kind === 'item') c.inventory[si.id] = (c.inventory[si.id] ?? 0) + 1;
       else if (si.kind === 'part') c.parts[si.id] = (c.parts[si.id] ?? 0) + 1;
-      else { const f = newMechFrame(si.id); if (c.mechs.length < bays(c)) c.mechs.push(f); else c.storage.push(f); addLog(c, `Purchased ${chassis(si.id).name} ${si.id} for ${cb(si.price)}.`, '#f0c850'); }
+      else {
+        const cid = si.id.replace('USED:', '');
+        const f = newMechFrame(cid);
+        if (si.id.startsWith('USED:')) { for (const k in f.armor) f.armor[k] = Math.round(f.armor[k] * 0.4); f.items = f.items.filter((it, n) => item(it.id).kind !== 'weapon' || n % 2 === 0); }
+        if (c.mechs.length < bays(c)) c.mechs.push(f); else c.storage.push(f);
+        addLog(c, `Purchased ${chassis(cid).name} ${cid} for ${cb(si.price)}.`, '#f0c850');
+      }
       saveGame(c);
-      argo.notify(`Bought ${si.kind === 'item' ? item(si.id).name : chassis(si.id).name} for ${cbk(si.price)}`, C.cbill);
+      argo.notify(`Bought ${si.kind === 'item' ? item(si.id).name : chassis(si.id.replace('USED:', '')).name} for ${cbk(si.price)}`, C.cbill);
     }
   }
   // Sell

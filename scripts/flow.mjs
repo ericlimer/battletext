@@ -28,7 +28,11 @@ await key('Enter', 600); await shot('salvage');
 for (let r = 0; r < 3; r++) { await page.mouse.click(300, (5 + r) * 20 + 10); await page.waitForTimeout(200); }
 await shot('salvage2');
 await key('Enter', 600); await shot('salvage3');
-await key('Enter', 600); await shot('back');
+for (let r = 3; r < 12; r++) { await page.mouse.click(300, (5 + r) * 20 + 10); await page.waitForTimeout(120); }
+await key('Enter', 600); await shot('salvage4');
+await key('Enter', 600);
+for (let i = 0; i < 40; i++) { const dd = await page.evaluate(() => window.__app.stack[0].c.deployDays); if (!dd) break; await page.waitForTimeout(250); }
+await shot('back');
 await key('4', 500); await shot('mechbay');
 await key('5', 500); await shot('barracks');
 await key('6', 500); await shot('store');
