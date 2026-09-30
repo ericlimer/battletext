@@ -70,7 +70,12 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
       else {
         const cid = si.id.replace('USED:', '');
         const f = newMechFrame(cid);
-        if (si.id.startsWith('USED:')) { for (const k in f.armor) f.armor[k] = Math.round(f.armor[k] * 0.4); f.items = f.items.filter((it, n) => item(it.id).kind !== 'weapon' || n % 2 === 0); }
+        if (si.id.startsWith('USED:')) {
+          for (const k in f.armor) f.armor[k] = Math.round(f.armor[k] * 0.4);
+          for (const k in f.struct) f.struct[k] = Math.max(1, Math.round(f.struct[k] * 0.7));
+          f.items = f.items.filter((it, n) => item(it.id).kind !== 'weapon' || n % 2 === 0);
+          const w = f.items.find((it) => item(it.id).kind === 'weapon'); if (w) w.dead = true;
+        }
         if (c.mechs.length < bays(c)) c.mechs.push(f); else c.storage.push(f);
         addLog(c, `Purchased ${chassis(cid).name} ${cid} for ${cb(si.price)}.`, '#f0c850');
       }

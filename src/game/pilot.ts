@@ -50,10 +50,27 @@ export interface Pilot {
   color: string;
   hireCost?: number;
   timeline: string[];
+  quirks?: string[];
 }
 
+export interface QuirkDef { id: string; name: string; desc: string; good: boolean; }
+export const QUIRKS: QuirkDef[] = [
+  { id: 'sharpshooter', name: 'Sharpshooter', desc: '+5% accuracy at long range.', good: true },
+  { id: 'brawler', name: 'Brawler', desc: 'Melee attacks deal 15% more damage and are 5% more accurate.', good: true },
+  { id: 'coolhead', name: 'Cool Head', desc: 'Ignores the accuracy penalty for overheating.', good: true },
+  { id: 'nightowl', name: 'Night Owl', desc: 'Ignores the night-fighting accuracy penalty.', good: true },
+  { id: 'tough', name: 'Tough as Nails', desc: '+1 health.', good: true },
+  { id: 'jumpy', name: 'Jumpy', desc: '+1 maximum evasion.', good: true },
+  { id: 'loyal', name: 'Loyal', desc: 'Will never desert, however bad morale gets.', good: true },
+  { id: 'greedy', name: 'Greedy', desc: 'Demands 25% more salary.', good: false },
+  { id: 'fickle', name: 'Fickle', desc: 'The first to leave when morale drops.', good: false },
+  { id: 'reckless', name: 'Reckless', desc: '-5% accuracy after moving, but +5% melee accuracy.', good: false },
+];
+export function quirk(id: string): QuirkDef { return QUIRKS.find((q) => q.id === id)!; }
+export function hasQuirk(p: Pilot | null | undefined, id: string): boolean { return !!p?.quirks?.includes(id); }
+
 export function health(p: Pilot): number {
-  return 3 + (p.gut >= 4 ? 1 : 0) + (p.gut >= 7 ? 1 : 0) + (p.gut >= 10 ? 1 : 0);
+  return 3 + (p.gut >= 4 ? 1 : 0) + (p.gut >= 7 ? 1 : 0) + (p.gut >= 10 ? 1 : 0) + (p.quirks?.includes('tough') ? 1 : 0);
 }
 export function has(p: Pilot | undefined, ab: string): boolean {
   return !!p && p.abilities.includes(ab);
@@ -64,7 +81,7 @@ export function skillTotal(p: Pilot): number {
 export function salary(p: Pilot): number {
   if (p.commander) return 0;
   const t = skillTotal(p);
-  return Math.round((4000 + t * t * 38) / 500) * 500;
+  return Math.round(((4000 + t * t * 38) * (p.quirks?.includes('greedy') ? 1.25 : 1)) / 500) * 500;
 }
 export function xpCost(level: number): number {
   // cost to raise from level to level+1
@@ -163,6 +180,7 @@ export function makePilot(r: RNG, tier: number, opts: Partial<Pilot> = {}): Pilo
     sigil: r.pick(SIGILS),
     color: r.pick(COLORS),
     timeline: [],
+    quirks: r.shuffle([...QUIRKS]).slice(0, r.chance(0.35) ? 2 : r.chance(0.6) ? 1 : 0).map((q) => q.id),
     ...opts,
   };
   grantAbilities(p);

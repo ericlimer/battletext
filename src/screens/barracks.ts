@@ -5,7 +5,7 @@ import { C } from '../engine/color';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
 import { pilotCap, pilotStatus, addLog, sys } from '../game/company';
-import { Pilot, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal } from '../game/pilot';
+import { Pilot, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
 import { cb, cbk, wrap } from '../engine/util';
 import { skillLine, healthPips } from './widgets';
 
@@ -33,7 +33,8 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     d.text(lx + 4, ly + 1, p.name, C.dim, bg, 24);
     d.ctext(lx + 30, ly + 1, skillLine(p), C.text, bg);
     const ab = p.abilities.map((a) => ability(a).name).join(', ');
-    d.text(lx + 4, ly + 2, ab || (p.xp >= 1000 ? `${p.xp} XP unspent` : '—'), ab ? C.faint : p.xp >= 1000 ? C.accent : C.faint, bg, lw - 6);
+    const qs = (p.quirks ?? []).map((q) => quirk(q).name).join(', ');
+    d.text(lx + 4, ly + 2, [ab, qs].filter(Boolean).join(' · ') || (p.xp >= 1000 ? `${p.xp} XP unspent` : '—'), ab || qs ? C.faint : p.xp >= 1000 ? C.accent : C.faint, bg, lw - 6);
   }, 3);
   if (cl >= 0) { st.sel = cl; st.confirm = false; }
   const p = list[Math.min(st.sel, list.length - 1)];
@@ -69,6 +70,11 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     }
     if (ui.hover(dx + 3, yy, 32, 1)) ui.setTip(SKILL_DESC[s]);
     yy++;
+  }
+  if (p.quirks?.length) {
+    yy++;
+    d.text(dx + 3, yy++, 'QUIRKS', C.accent, undefined, 99, true);
+    for (const qid of p.quirks) { const q = quirk(qid); d.ctext(dx + 3, yy++, `{${q.good ? '#6ad46a' : '#e8a03a'}}${q.name}{/} {#6d7f8a}— ${q.desc}{/}`, C.text, undefined, dw - 6); }
   }
   yy++;
   d.text(dx + 3, yy++, 'ABILITIES', C.accent, undefined, 99, true);

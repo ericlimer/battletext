@@ -74,7 +74,15 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
       if (i < c.work.length - 1 && ui.button(x + 38, yy, '▼', { style: 'plain', w: 2, tip: 'Move down' })) { [c.work[i + 1], c.work[i]] = [c.work[i], c.work[i + 1]]; saveGame(c); }
       if (wo.kind === 'repair' && ui.button(x + 42, yy, 'cancel', { style: 'plain', fg: C.dim, tip: 'Cancel and refund the unspent part of the repair cost.' })) {
         const refund = Math.round((wo.cost ?? 0) * (wo.hours / Math.max(1, wo.total)));
-        c.funds += refund; c.work.splice(i, 1); saveGame(c); argo.notify(`Repair cancelled, refunded ${cbk(refund)}`, C.cbill);
+        // Keep the work already done: armor is patched first, then internal structure
+        const done = 1 - wo.hours / Math.max(1, wo.total);
+        const mm = [...c.mechs, ...c.storage].find((q) => q.uid === wo.mechUid);
+        if (mm) {
+          const fa = Math.min(1, done * 2), fs = Math.max(0, done * 2 - 1);
+          for (const k in mm.maxArmor) mm.armor[k] = Math.round((mm.armor[k] ?? 0) + (mm.maxArmor[k] - (mm.armor[k] ?? 0)) * fa);
+          for (const k in mm.maxStruct) mm.struct[k] = Math.round(mm.struct[k] + (mm.maxStruct[k] - mm.struct[k]) * fs);
+        }
+        c.funds += refund; c.work.splice(i, 1); saveGame(c); argo.notify(`Repair stopped (${Math.round(done * 100)}% done), refunded ${cbk(refund)}`, C.cbill);
       }
     });
   }

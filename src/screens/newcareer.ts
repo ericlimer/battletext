@@ -38,9 +38,9 @@ export class NewCareerScreen implements Screen {
     if (ui.button(18, 19, 'Hard', { active: this.hard, w: 12, center: true })) this.hard = true;
     d.text(5, 21, this.hard ? `Start with ${cb(900000)}. Every C-Bill counts.` : `Start with ${cb(1600000)}. A little breathing room.`, C.dim);
     if (ui.button(5, 23, this.ironman ? 'Ironman ■' : 'Ironman □', { tip: 'One save, no rewinds. The save is deleted when the career ends.' })) this.ironman = !this.ironman;
-    d.text(18, 23, this.ironman ? 'No second chances.' : 'You may rewind to the last pre-deployment save.', C.faint);
-    d.text(5, 25, 'Career length: 1,200 days. Score is based on company value,', C.faint);
-    d.text(5, 26, 'MRB rating, reputation and contracts completed.', C.faint);
+    d.text(5, 24, this.ironman ? 'No second chances.' : 'You may rewind to the last pre-deployment save.', C.faint, undefined, 56);
+    d.text(5, 26, 'Career: 1,200 days. Scored on company value, MRB rating,', C.faint, undefined, 56);
+    d.text(5, 27, 'reputation and contracts completed.', C.faint, undefined, 56);
     ui.panel(65, 4, COLS - 68, 39, 'BACKGROUND');
     BACKGROUNDS.forEach((b, i) => {
       const y = 6 + i * 7;

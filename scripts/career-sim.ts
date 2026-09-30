@@ -65,7 +65,7 @@ while (!c.gameOver && guard++ < 5000) {
         const u = nx.who === 'ai' ? nx.unit! : b.pending(0).find((x) => x.team === 0)!;
         aiTakeTurn(b, u);
         const lost = b.units.filter((x) => x.team === 0 && !x.alive).length;
-        if ((lost >= 1 && b.withdrawIn < 0 && rt.enemyUnits.filter((e) => e.alive).length > 1) || b.round > 25) b.withdraw();
+        const mine = b.units.filter((x) => x.team === 0 && x.alive).length, theirs = rt.enemyUnits.filter((e) => e.alive).length; if ((lost >= 2 && b.withdrawIn < 0 && theirs > mine + 1) || b.round > 25) b.withdraw();
       }
       if (hc) for (const l of lance) { l.pilot.gun -= 2; l.pilot.pil -= 1; }
       const r = resolveContract(c, k, neg, rt);

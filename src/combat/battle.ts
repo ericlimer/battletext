@@ -5,7 +5,7 @@ import { item, ItemDef, LOC_NAMES } from '../data/items';
 import { chassis, classOf } from '../data/mechs';
 import { vehicle } from '../data/vehicles';
 import { Frame, frameStats, FrameStats, frameShort, frameName, frameTons, Component } from '../game/frame';
-import { Pilot, has, health } from '../game/pilot';
+import { Pilot, has, health, hasQuirk } from '../game/pilot';
 import { BattleMap, TERRAIN, los, dist, dirTo, DIRS, inb, Structure, destroyStructure, BIOME_INFO } from './terrain';
 
 export type MoveMode = 'walk' | 'sprint' | 'jump';
@@ -370,7 +370,7 @@ export class Battle {
     if (u.frame.kind === 'turret') return 0;
     if (u.frame.kind === 'vehicle') return 4;
     const base = { L: 5, M: 4, H: 4, A: 3 }[classOf(frameTons(u.frame))];
-    return base + (has(u.pilot ?? undefined, 'evasive') ? 1 : 0);
+    return base + (has(u.pilot ?? undefined, 'evasive') ? 1 : 0) + (hasQuirk(u.pilot, 'jumpy') ? 1 : 0);
   }
 
   moveCost(u: Unit, fx: number, fy: number, tx: number, ty: number): number {
@@ -543,12 +543,13 @@ export class Battle {
     if (d < minR) { mods.push(['Minimum range', -Math.round((minR - d + 1) * 8)]); res.band = 'min'; }
     else if (d <= (w.sr ?? 0) + 0.01) res.band = 'short';
     else if (d <= (w.mr ?? 0) + 0.01) { mods.push(['Medium range', -5]); res.band = 'medium'; }
-    else { mods.push(['Long range', -15]); res.band = 'long'; }
+    else { mods.push(['Long range', -15]); res.band = 'long'; if (hasQuirk(pil, 'sharpshooter')) mods.push(['Sharpshooter', 5]); }
     if (from.moved === 'jump') mods.push(['Jumped', -10]);
     if (w.acc) mods.push(['Weapon accuracy', w.acc]);
     if (a.stats.accBonus) mods.push(['Targeting system', a.stats.accBonus]);
     if (a.accDebuff) mods.push(['Sensors scrambled', -a.accDebuff]);
-    if (this.isMech(a) && a.heat > a.stats.heatCap * 0.75) mods.push(['Overheated', -10]);
+    if (this.isMech(a) && a.heat > a.stats.heatCap * 0.75 && !hasQuirk(pil, 'coolhead')) mods.push(['Overheated', -10]);
+    if (hasQuirk(pil, 'reckless') && from.moved) mods.push(['Reckless', -5]);
     const eh = m.elev[from.y * m.w + from.x], th = m.elev[ty * m.w + tx];
     if (eh > th) mods.push(['Height advantage', 10]);
     else if (eh < th) mods.push(['Target elevated', -5]);
@@ -559,7 +560,7 @@ export class Battle {
       else if (t.prone) mods.push(['Target prone', 20]);
       if (t.frame.kind === 'turret') mods.push(['Stationary target', 10]);
     } else if (struct) mods.push(['Structure', 30]);
-    if (m.night) mods.push(['Night', -5]);
+    if (m.night && !hasQuirk(pil, 'nightowl')) mods.push(['Night', -5]);
     if (called) mods.push(['Precision Strike', 0]);
     let c = 0;
     for (const [, v] of mods) c += v;
@@ -573,6 +574,7 @@ export class Battle {
     const pil = a.pilot?.pil ?? 3;
     mods.push([`Piloting ${pil}`, 60 + pil * 3]);
     if (dfa) mods.push(['Death From Above', -10]);
+    if (hasQuirk(a.pilot, 'brawler') || hasQuirk(a.pilot, 'reckless')) mods.push([hasQuirk(a.pilot, 'brawler') ? 'Brawler' : 'Reckless', 5]);
     const pips = Math.max(0, t.pips - (t.sensorLocked > 0 ? 2 : 0));
     if (pips > 0) mods.push([`Evasion ${'◆'.repeat(pips)}`, -5 * pips]);
     if (t.shutdown) mods.push(['Target shut down', 40]);
@@ -962,7 +964,7 @@ export class Battle {
     const hc = this.meleeChance(a, t, dfa);
     const hit = this.rng.next() * 100 < hc.chance;
     const tons = frameTons(a.frame);
-    let dmg = dfa ? a.stats.dfaDmg : a.stats.meleeDmg;
+    let dmg = Math.round((dfa ? a.stats.dfaDmg : a.stats.meleeDmg) * (hasQuirk(a.pilot, 'brawler') ? 1.15 : 1));
     const arc = attackArc(t, a.x, a.y);
     let loc = '';
     if (hit) {

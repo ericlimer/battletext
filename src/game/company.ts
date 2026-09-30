@@ -117,6 +117,7 @@ export interface Company {
   deployDays?: number; // days owed for the last deployment
   travelOffers?: Contract[];
   travelOffersDay?: number;
+  installing?: { id: string; doneDay: number }[];
 }
 
 export function rngOf(c: Company): RNG {
@@ -135,8 +136,8 @@ export function dateStr(day: number): string {
   return `${d.getUTCDate().toString().padStart(2, '0')} ${mon} ${START_YEAR + d.getUTCFullYear() - 2025}`;
 }
 
-export function addLog(c: Company, text: string, color?: string): void {
-  c.log.push({ day: c.day, text, color });
+export function addLog(c: Company, text: string, color?: string, day = c.day): void {
+  c.log.push({ day, text, color });
   if (c.log.length > 300) c.log.splice(0, c.log.length - 300);
 }
 
@@ -377,6 +378,7 @@ export function refreshSystem(c: Company, force = false): void {
   const k = c.contracts[s.id] ?? [];
   const valid = k.filter((x) => x.expires > c.day);
   const want = 5 + (has(c, 'comms') ? 1 : 0) + (s.tags.includes('capital') ? 1 : 0);
+  c.contracts[s.id] = valid; // genContract reads the board it is filling (variety, name dedupe)
   if (force || valid.length < want - 2 || c.day - s.contractsDay > 12) {
     while (valid.length < want) valid.push(genContract(c, r, s));
     s.contractsDay = c.day;
@@ -400,7 +402,9 @@ export function refreshSystem(c: Company, force = false): void {
   if (force || c.day - s.hiresDay > 30 || !c.hires[s.id]) { c.hires[s.id] = genHires(c, r, s); s.hiresDay = c.day; }
   // Lifeline: a battered light 'Mech is always for sale when the company is short-handed
   const st = c.stores[s.id];
-  if (c.mechs.length + c.storage.length < 3 && st && !st.some((x) => x.kind === 'mech' && x.qty > 0 && x.id.startsWith('USED:'))) {
+  const lastUsed = (s as any).usedDay ?? -999;
+  if (c.mechs.length + c.storage.length < 3 && st && c.day - lastUsed >= 30 && !st.some((x) => x.kind === 'mech' && x.id.startsWith('USED:'))) {
+    (s as any).usedDay = c.day;
     const cand = CHASSIS.filter((ch) => ch.cls === 'L' && ch.rarity === 0);
     const ch = r.pick(cand);
     st.unshift({ kind: 'mech', id: 'USED:' + ch.id, qty: 1, price: Math.round((ch.cost * 0.45) / 5000) * 5000 });
@@ -432,6 +436,12 @@ export function advanceDay(c: Company): DayReport {
       else if (w.kind === 'assemble' && m) say(`Assembly complete: ${frameName(m)} is ready for duty.`, '#6ad46a');
       else if (w.kind === 'ready' && m) say(`${frameName(m)} readied from storage.`, '#6ad46a');
     }
+  }
+  // Argo refits under way
+  for (const ins of [...(c.installing ?? [])]) if (c.day >= ins.doneDay) {
+    c.installing = (c.installing ?? []).filter((x) => x !== ins);
+    c.upgrades.push(ins.id);
+    say(`Argo refit complete: ${UPGRADES.find((u) => u.id === ins.id)?.name ?? ins.id} is online.`, '#6ad46a');
   }
   // Healing & training
   const trainXP = has(c, 'train2') ? 60 : has(c, 'train1') ? 25 : 0;
@@ -477,8 +487,9 @@ export function advanceDay(c: Company): DayReport {
     const mor = morale(c);
     if (mor < 12) {
       const cands = c.pilots.filter((p) => !p.dead && !p.commander);
-      if (cands.length && r.chance(mor < 6 ? 0.6 : 0.3)) {
-        const p = r.pick(cands);
+      const flight = cands.filter((p) => !p.quirks?.includes('loyal'));
+      if (flight.length && r.chance(mor < 6 ? 0.6 : 0.3)) {
+        const p = r.weighted(flight, (q) => (q.quirks?.includes('fickle') ? 3 : 1));
         c.pilots = c.pilots.filter((q) => q !== p);
         c.lancePilots = c.lancePilots.map((id) => (id === p.id ? null : id));
         say(`Morale is ${moraleName(mor).toLowerCase()}: ${p.callsign} has deserted the company.`, '#e8503a');
@@ -496,7 +507,8 @@ export function advanceDay(c: Company): DayReport {
   if (c.day >= CAREER_DAYS && !c.gameOver) { c.gameOver = 'retired'; rep.gameOver = 'retired'; }
   // Out of 'Mechs with no way to get more: the company is finished
   if (!c.gameOver && c.mechs.length + c.storage.length === 0 && !Object.values(c.parts).some((n) => n >= PARTS_NEEDED)) {
-    const cheapest = Math.min(...CHASSIS.map((ch) => ch.cost));
+    const onSale = (c.stores[c.location] ?? []).filter((x) => x.kind === 'mech' && x.qty > 0).map((x) => x.price);
+    const cheapest = Math.min(...onSale, Math.round(Math.min(...CHASSIS.filter((ch) => ch.cls === 'L').map((ch) => ch.cost)) * 0.45));
     if (c.funds < cheapest) { c.gameOver = 'destroyed'; rep.gameOver = 'destroyed'; say('With no \'Mechs left and no money to buy one, the company dissolves.', '#e8503a'); }
   }
   saveRng(c, r);

@@ -116,8 +116,8 @@ export class ArgoScreen implements Screen {
       const t = this.toast;
       const len = t.text.length + 4;
       const a = Math.min(1, t.t * 2);
-      d.fill(COLS - len - 2, 2, len, 1, ' ', C.text, lerp(C.bg, '#14202a', a));
-      d.text(COLS - len, 2, t.text, lerp(C.bg, t.color, a));
+      d.fill(COLS - len - 2, 1, len + 2, 1, ' ', C.text, lerp(C.bg, '#14202a', a));
+      d.text(COLS - len - 1, 1, t.text, lerp(C.bg, t.color, a));
       if (t.t <= 0) this.toast = null;
     }
     if (this.menuOpen) { ui.enabled = true; this.drawMenu(ui); }
@@ -223,7 +223,8 @@ export class ArgoScreen implements Screen {
       const pl = pi >= 0 ? c.pilots.find((p) => p.id === c.lancePilots[pi]) : undefined;
       d.text(x + 3, yy, `${ch.name} ${ch.id}`.slice(0, 20), C.text);
       d.text(x + 24, yy, `${ch.tons}t`, C.faint);
-      simpleBar(d, x + 29, yy, 10, st.armorTotal / Math.max(1, st.armorMax), healthColor(st.armorTotal / Math.max(1, st.armorMax)));
+      const af = st.armorTotal / Math.max(1, st.armorMax);
+      d.text(x + 29, yy, `${Math.round(af * 100)}%`.padStart(4) + ' armor', healthColor(af));
       d.text(x + 41, yy, wo ? `${wo.kind} ${workQueueDays(c, m.uid)}d` : pl ? pl.callsign.slice(0, 14) : 'ready', wo ? C.warn : pl ? C.cyan : C.green, undefined, 16);
       yy++;
     }
@@ -320,15 +321,21 @@ export class ArgoScreen implements Screen {
       const col = i % 2, row = Math.floor(i / 2);
       const bx = x + 3 + col * 73, by = y + 3 + row * 6;
       const owned = has(c, u.id);
+      const inst = (c.installing ?? []).find((x) => x.id === u.id);
       const locked = u.requires && !has(c, u.requires);
       d.box(bx, by, 71, 5, owned ? '#2a6a4a' : locked ? '#2a2a2a' : C.border, owned ? '#0c1a14' : C.panel);
       d.text(bx + 2, by + 1, u.name, owned ? C.green : locked ? C.faint : C.bright, undefined, 99, true);
       d.text(bx + 2, by + 2, u.desc, C.dim, undefined, 66);
       d.ctext(bx + 2, by + 3, `{#f0c850}${cb(u.cost)}{/} · upkeep ${cb(u.upkeep)}/mo${locked ? `  {#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}` : ''}`, C.dim);
       if (owned) d.text(bx + 60, by + 1, 'INSTALLED', C.green);
-      else if (!locked && ui.button(bx + 56, by + 3, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : 'Click twice to purchase.' })) {
+      else if (inst) d.text(bx + 52, by + 1, `INSTALLING ${Math.max(0, inst.doneDay - c.day)}d`, C.warn);
+      else if (!locked && !inst && ui.button(bx + 56, by + 3, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : 'Click twice to purchase.' })) {
         if (this.confirmBuy !== u.id) this.confirmBuy = u.id;
-        else { c.funds -= u.cost; c.stats.spent += u.cost; c.upgrades.push(u.id); saveGame(c); this.notify(`${u.name} installed`, C.green); this.confirmBuy = ''; }
+        else {
+          const days = Math.max(3, Math.round(u.cost / 180000));
+          c.funds -= u.cost; c.stats.spent += u.cost; (c.installing ??= []).push({ id: u.id, doneDay: c.day + days });
+          saveGame(c); this.notify(`${u.name}: refit crews need ${days} days`, C.cyan); this.confirmBuy = '';
+        }
       }
     });
     void scale; void pilotCap;

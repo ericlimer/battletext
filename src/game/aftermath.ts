@@ -111,7 +111,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     const m = u.frame;
     if (!u.alive && (u.destroyHow === 'ct' || u.destroyHow === 'ammo')) {
       // Recovery team: likely when the field is held, possible on a withdrawal, never when wiped out
-      const recovered = !wiped && r.chance(win ? 0.7 : 0.35);
+      const recovered = !wiped && r.chance(win ? 0.85 : 0.5);
       if (recovered) {
         (m as any).wreck = true;
         res.mechsLost.push(`${frameName(m)} was cored, but the recovery team hauled the wreck aboard. It needs a full rebuild.`);
@@ -174,9 +174,10 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   // Remove contract
   c.contracts[c.location] = (c.contracts[c.location] ?? []).filter((x) => x.id !== k.id);
   const summary = win ? `Contract "${k.name}" completed for ${faction(emp).short}: ${cb(res.pay + res.bonus)}.` : outcome === 'withdraw' ? `Withdrew from "${k.name}".` : `Contract "${k.name}" failed.`;
-  addLog(c, summary, win ? '#6ad46a' : '#e8503a');
-  for (const x of res.casualties) addLog(c, x, '#f08a30');
-  for (const x of res.mechsLost) addLog(c, x, '#e8503a');
+  const back = c.day + res.days;
+  addLog(c, summary, win ? '#6ad46a' : '#e8503a', back);
+  for (const x of res.casualties) addLog(c, x, '#f08a30', back);
+  for (const x of res.mechsLost) addLog(c, x, '#e8503a', back);
   void sys;
   return res;
 }
