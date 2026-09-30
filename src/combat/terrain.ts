@@ -180,6 +180,21 @@ export function generateMap(r: RNG, o: MapGenOpts): BattleMap {
   }
   // Remove isolated elevation spikes of 2+ between neighbours to keep terrain walkable-ish
   smoothElevation(m);
+  // Airless and dusty worlds are pocked with impact craters: a rough rim around a sunken bowl
+  if (biome === 'lunar' || biome === 'martian') {
+    const nC = r.int(4, 8);
+    for (let k = 0; k < nC; k++) {
+      const cx = r.int(6, w - 7), cy = r.int(4, h - 5), rad = r.range(2, 4.5);
+      for (let y = Math.floor(cy - rad - 1); y <= cy + rad + 1; y++) for (let x = Math.floor(cx - rad - 1); x <= cx + rad + 1; x++) {
+        if (!inb(m, x, y)) continue;
+        const i = y * w + x;
+        const d = Math.hypot(x - cx, y - cy);
+        if (m.terr[i] === 'rock') continue;
+        if (Math.abs(d - rad) < 0.7) { m.terr[i] = 'rough'; (m as any).rim = (m as any).rim ?? new Set<number>(); (m as any).rim.add(i); }
+        else if (d < rad - 0.7) { m.terr[i] = 'plain'; m.elev[i] = Math.max(0, m.elev[Math.round(cy) * w + Math.round(cx)] - 1); }
+      }
+    }
+  }
   // Roads
   if (o.road) carveRoad(m, r, o.road);
   // Base compound
@@ -199,7 +214,7 @@ export function generateMap(r: RNG, o: MapGenOpts): BattleMap {
     const s = m.shade[i];
     switch (t) {
       case 'plain': m.glyph[i] = B.groundGlyphs[Math.floor(s * 997) % B.groundGlyphs.length]; break;
-      case 'rough': m.glyph[i] = biome === 'lunar' ? (s > 0.72 ? 'o' : '∙') : ['∙', ',', '∴', '\'', '∙'][Math.floor(s * 4999) % 5]; break;
+      case 'rough': m.glyph[i] = (m as any).rim?.has(i) ? 'o' : biome === 'lunar' ? '∙' : ['∙', ',', '∴', '\'', '∙'][Math.floor(s * 4999) % 5]; break;
       case 'lforest': m.glyph[i] = B.treeGlyphs[0]; break;
       case 'hforest': m.glyph[i] = B.treeGlyphs[1]; break;
       case 'water': m.glyph[i] = '~'; break;

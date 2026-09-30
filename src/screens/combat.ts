@@ -208,6 +208,7 @@ export class CombatScreen implements Screen {
         if (this.tileVisibleXY(e.x, e.y) || this.unitVisibleAt(e.x, e.y) || this.ghostAt(e.y * this.b.map.w + e.x)) {
           this.fx.float(e.x, e.y, e.text, e.color, e.big);
           if (e.text.startsWith('CRIT')) sfx('crit');
+          if (e.text === 'KNOCKDOWN') { this.fx.sparks(e.x, e.y, 12, ['#c0b090', '#403a30'], 2.2, 0, 0.9); this.fx.shake = Math.max(this.fx.shake, 0.3); sfx('melee', 0, 0.6); }
         }
         this.wait = 0.02;
         break;
@@ -235,6 +236,7 @@ export class CombatScreen implements Screen {
         this.wait = 0.15 / sp;
         break;
       case 'status':
+        if (e.text === 'KNOCKDOWN') this.fx.sparks(this.b.unit(e.u).x, this.b.unit(e.u).y, 10, ['#b0a080', '#403a30'], 2, 0, 0.8);
         this.fx.float(b.unit(e.u).x, b.unit(e.u).y, e.text, e.color);
         this.wait = 0.05;
         break;
@@ -511,6 +513,13 @@ export class CombatScreen implements Screen {
     for (const a of doneA) a.done();
     this.anims = this.anims.filter((a) => (a.t ?? 0) < a.dur);
     if (this.banner) { this.banner.t -= dt; if (this.banner.t <= 0) this.banner = null; }
+    // Heat shimmer on overheating 'Mechs, smoke from shut-down reactors
+    for (const u of this.b.live()) {
+      if (!this.b.isMech(u) || !(SIDE(u.team) === 0 || this.b.seen[0].has(u.id))) continue;
+      const hf = u.heat / u.stats.heatCap;
+      if (hf > 0.6 && Math.random() < dt * 6 * hf) this.fx.parts.push({ x: u.x + (Math.random() - 0.5) * 0.8, y: u.y - 0.3, vx: (Math.random() - 0.5) * 0.3, vy: -0.9, life: 0, max: 0.6, glyph: ['~', '≈', '\''], c0: '#ff8a3a', c1: '#401808' });
+      if (u.shutdown && Math.random() < dt * 4) this.fx.smoke(u.x, u.y);
+    }
     // lingering fires/smoke on wrecks
     if (Math.random() < 0.6 * dt * 10) {
       for (const [i] of this.b.map.wrecks) {
@@ -783,7 +792,8 @@ export class CombatScreen implements Screen {
     // Sparse ground texture: a faint grid dot on most tiles, occasional detail
     const calm = m.biome === 'martian' || m.biome === 'badlands' || m.biome === 'lunar' || m.biome === 'desert';
     if (t === 'plain') ch = calm ? (((x * 7 + y * 13) % 3 === 0) ? '·' : ' ') : ((x * 7 + y * 13) % 5 === 0 && ch !== '.') ? ch : '·';
-    if (t === 'rough' && calm && (x * 5 + y * 11) % 3 !== 0) ch = ' ';
+    if (t === 'rough' && calm && ch !== 'o' && (x * 5 + y * 11) % 3 !== 0) ch = ' ';
+    if (t === 'plain' && m.biome === 'desert') { const band = Math.sin(x * 0.5 + y * 0.9 + s * 3); if (band > 0.82) { ch = '~'; fg = lerp(bg, '#d8a860', 0.35); } }
     const tt = this.time;
     switch (t) {
       case 'lforest': fg = lerp(B.forest[0], B.forest[1], s * 0.6); bg = lerp(bg, scale(B.forestBg, 1.6), 0.75); break;
