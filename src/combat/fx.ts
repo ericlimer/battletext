@@ -114,8 +114,8 @@ export class FX {
 
   float(x: number, y: number, text: string, color: string, big = false, delay = 0): void {
     // Stack floaters that start at the same tile
-    const same = this.floats.filter((f) => Math.abs(f.x - x) < 1 && f.life < 0.5 && Math.abs(f.y - y) < 3).length;
-    this.floats.push({ x, y: y - same * 0.9, text, color, life: 0, max: big ? 2.0 : 1.5, big, delay: delay + same * 0.05 });
+    const same = this.floats.filter((f) => Math.abs(f.x - x) < 1.5 && f.life < f.max * 0.6 && Math.abs(f.y - y) < 4).length;
+    this.floats.push({ x, y: y - same * 1.0, text, color, life: 0, max: big ? 2.0 : 1.6, big, delay: delay + same * 0.12 });
   }
 
   /** Bolt/shell travelling from a to b. Returns travel time. */

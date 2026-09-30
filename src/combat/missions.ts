@@ -217,7 +217,9 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       const base = mo.base!;
       const cx = Math.floor(base.x + base.w / 2), cy = Math.floor(base.y + base.h / 2);
       playerUnits = place(b, spec.player, 0, cx + 10, cy, 2);
-      const w1 = place(b, enemyLance(4), 1, W - 5, cy + r.int(-10, 10), 6);
+      // Hardened employer facilities
+      for (const st of map.structures) if (st.objective) { st.maxHp *= 2; st.hp = st.maxHp; }
+      const w1 = place(b, enemyLance(d <= 4 ? 3 : 4), 1, W - 5, cy + r.int(-10, 10), 6);
       const w2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, d >= 5 ? 3 : 2), 1, W - 4, r.chance(0.5) ? 4 : H - 5, 6, { deployRound: 4, deployed: false });
       // The employer's base has its own light defenses
       for (const off of [-5, 5]) {
@@ -274,14 +276,12 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
   if (spec.night) briefing.push('Night operation: visual range reduced to 360m. Sensors unaffected.');
 
   // Unique callsigns within each side keep the combat log readable
-  for (const side of [0, 1]) {
-    const taken = new Set<string>();
-    for (const u of b.units) {
-      if ((u.team === 0) !== (side === 0) || !u.pilot) continue;
-      if (taken.has(u.pilot.callsign) && u.team !== 0) { u.pilot.callsign = uniqueCallsign(r, taken); }
-      taken.add(u.pilot.callsign);
-      if (u.team === 0) u.name = u.pilot.callsign;
-    }
+  const taken = new Set<string>();
+  for (const u of b.units) if (u.team === 0 && u.pilot) { taken.add(u.pilot.callsign); u.name = u.pilot.callsign; }
+  for (const u of b.units) {
+    if (u.team === 0 || !u.pilot) continue;
+    if (taken.has(u.pilot.callsign)) u.pilot.callsign = uniqueCallsign(r, taken);
+    taken.add(u.pilot.callsign);
   }
   const rt: MissionRuntime = { spec, battle: b, objectives, enemyUnits, playerUnits, briefing };
   installHooks(rt);

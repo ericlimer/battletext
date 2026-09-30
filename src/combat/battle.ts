@@ -143,7 +143,7 @@ export class Battle {
     this.explored = new Uint8Array(map.w * map.h);
     this.visibleTiles = new Uint8Array(map.w * map.h);
     this.heatMult = BIOME_INFO[map.biome].heatMult;
-    this.visualRange = map.night ? 12 : 20;
+    this.visualRange = map.night ? 10 : 16;
   }
 
   // ---- Units -----------------------------------------------------------------------------
@@ -652,18 +652,19 @@ export class Battle {
       const ty = first.target ? first.target.y : first.struct ? (first.struct.tiles[0] / this.map.w) | 0 : a.y;
       if (a.frame.kind === 'mech') this.setFacing(a, dirTo(a.x, a.y, tx, ty));
     }
-    for (const p of plan) {
+    for (const [pi, p] of plan.entries()) {
+      const pc = pi === 0 ? called : undefined;
       const t = p.target;
       if (t && !t.alive) continue;
       for (const wc of p.weapons) {
         if (wc.dead) continue;
         const w = item(wc.id);
-        const hc = this.hitChance(a, t, w, a, undefined, !!called, p.struct ?? undefined);
+        const hc = this.hitChance(a, t, w, a, undefined, !!pc, p.struct ?? undefined);
         if (!hc.ok) continue;
         if (!this.hasAmmo(a, wc)) continue;
         const shots = this.useAmmo(a, w);
         a.heat += w.heat ?? 0;
-        if (t) this.fireAtUnit(a, t, w, shots, hc, called, breaching);
+        if (t) this.fireAtUnit(a, t, w, shots, hc, pc, breaching);
         else if (p.struct) this.fireAtStructure(a, p.struct, w, shots, hc);
         if (t && !t.alive) break;
       }
@@ -730,6 +731,8 @@ export class Battle {
       total += dmg;
     }
     this.emit({ k: 'fire', u: a.id, t: -1 - s.id, tx: tile % m.w, ty: (tile / m.w) | 0, w: w.id, shots: res, indirect: hc.indirect, total, struct: true });
+    const hits = res.filter((r) => r.hit).length;
+    this.say(`${this.displayName(a)}: ${w.name} → ${s.name} ${hits}/${res.length} hit${total ? ` (${total})` : ''}`, SIDE(a.team) === 0 ? '#9fd8ef' : '#f0a898');
     if (total > 0) this.damageStructureObj(s, total, a);
   }
 
@@ -867,7 +870,7 @@ export class Battle {
     t.pilot.injuries++;
     t.injuriesTaken++;
     this.float(t.x, t.y, 'PILOT INJURED', '#f08a30');
-    this.say(`${t.pilot.callsign} injured (${why}). Health ${Math.max(0, health(t.pilot) - t.pilot.injuries)}/${health(t.pilot)}.`, '#f08a30');
+    this.say(`${this.displayName(t)}'s pilot injured (${why}). Health ${Math.max(0, health(t.pilot) - t.pilot.injuries)}/${health(t.pilot)}.`, '#f08a30');
     if (t.pilot.injuries >= health(t.pilot)) {
       this.say(`${t.pilot.callsign} is incapacitated!`, '#e8503a');
       this.kill(t, 'pilot', null);
@@ -883,6 +886,7 @@ export class Battle {
     t.guarded = false;
     this.float(t.x, t.y, 'KNOCKDOWN', '#f0d050', true);
     this.say(`${this.displayName(t)} is knocked down!`, '#f0d050');
+    this.injure(t, 'Knockdown');
   }
 
   applyStability(t: Unit, amt: number): void {
@@ -969,11 +973,12 @@ export class Battle {
     }
     this.emit({ k: 'melee', u: a.id, t: t.id, hit, dmg: hit ? dmg : 0, dfa, loc });
     if (hit) {
-      this.say(`${this.displayName(a)} ${dfa ? 'DEATH FROM ABOVE' : 'melee'} → ${this.displayName(t)}: ${dmg} (${loc})`, '#f0a830');
       // Split into two blows for the damage model
       const half = Math.ceil(dmg / 2);
+      const loc2 = dfa ? this.rng.weighted(Object.keys(HIT_DFA), (k) => HIT_DFA[k]) : loc;
+      this.say(`${this.displayName(a)} ${dfa ? 'DEATH FROM ABOVE' : 'melee'} → ${this.displayName(t)}: ${dmg} (${loc2 === loc ? `${loc} ${dmg}` : `${loc} ${half}, ${loc2} ${dmg - half}`})`, '#f0a830');
       this.damage(t, loc, half, a, 1);
-      if (t.alive) this.damage(t, dfa ? this.rng.weighted(Object.keys(HIT_DFA), (k) => HIT_DFA[k]) : loc, dmg - half, a, 1);
+      if (t.alive) this.damage(t, loc2, dmg - half, a, 1);
       a.dmgDealt += dmg;
       const jug = has(a.pilot ?? undefined, 'juggernaut');
       if (t.alive) {
@@ -985,9 +990,22 @@ export class Battle {
     } else {
       this.say(`${this.displayName(a)} ${dfa ? 'DFA' : 'melee'} misses ${this.displayName(t)}.`, '#889');
     }
+    // Support weapons fire alongside a melee attack, as in BATTLETECH
+    if (t.alive && a.alive) {
+      const sup = this.weaponsOf(a).filter((w) => item(w.id).hard === 'S' && this.hasAmmo(a, w));
+      for (const wc of sup) {
+        const w = item(wc.id);
+        const shc = this.hitChance(a, t, w);
+        if (!shc.ok || !t.alive) continue;
+        const shots = this.useAmmo(a, w);
+        a.heat += w.heat ?? 0;
+        this.fireAtUnit(a, t, w, shots, shc, undefined, false);
+      }
+    }
     if (dfa) {
       // The attacker's legs take a beating either way
       const legDmg = Math.round(tons * (hit ? 0.25 : 0.4));
+      this.say(`${this.displayName(a)}'s legs take ${legDmg} damage from the landing.`, '#9ab');
       for (const l of ['LL', 'RL']) if (a.frame.struct[l] > 0) this.damage(a, l, Math.round(legDmg / 2), null, 0.5);
       if (a.alive) this.applyStability(a, hit ? 20 : 60);
     }

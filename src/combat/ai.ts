@@ -116,11 +116,14 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   aggr = Math.max(0.2, Math.min(0.9, aggr));
   const pref = roleRange(b, u);
   const cands: Cand[] = [];
+  const objStructs = u.ai.goal ? m.structures.filter((st) => st.objective && !st.destroyed && SIDE(st.team) !== side) : [];
   const cur = u.y * m.w + u.x;
   cands.push({ i: cur, mode: null, score: 0 });
   if (u.frame.kind !== 'turret' && !u.cannotMove) {
     for (const [i] of b.reachable(u, 'walk')) cands.push({ i, mode: 'walk', score: 0 });
     if (u.stats.jump > 0) for (const [i] of b.reachable(u, 'jump')) if (!cands.some((c) => c.i === i)) cands.push({ i, mode: 'jump', score: 0 });
+    // Badly hurt units consider sprinting out of danger
+    if (hp < 0.4) for (const [i] of b.reachable(u, 'sprint')) if (!cands.some((c) => c.i === i)) cands.push({ i, mode: 'sprint', score: 0 });
   }
   const heatRoom = u.frame.kind === 'mech' ? Math.max(0.35, Math.min(1, (u.stats.heatCap * 0.8 + b.dissipation(u) * 0.3 - u.heat) / Math.max(1, u.stats.alphaHeat))) : 1;
   let best: Cand | null = null;
@@ -131,15 +134,34 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     const from = { x, y, moved: c.mode };
     let off = 0;
     let nearest = Infinity;
-    for (const t of visible) {
+    if (c.mode !== 'sprint') for (const t of visible) {
       const ed = b.expectedDamage(u, t, from) * heatRoom;
       const v = ed * targetValue(b, { ...u, x, y } as Unit, t);
       if (v > off) off = v;
     }
-    for (const t of known) nearest = Math.min(nearest, dist(x, y, t.x, t.y));
+    let nearT: Unit | null = null;
+    for (const t of known) { const dd = dist(x, y, t.x, t.y); if (dd < nearest) { nearest = dd; nearT = t; } }
+    // Objective pressure: raiders value positions that let them hit enemy objective structures
+    if (objStructs.length && c.mode !== 'sprint') {
+      let sev = 0;
+      for (const st of objStructs) {
+        let dmin = Infinity;
+        for (const ti of st.tiles) dmin = Math.min(dmin, dist(x, y, ti % m.w, (ti / m.w) | 0));
+        let e = 0;
+        for (const wc of b.weaponsOf(u)) { const w = item(wc.id); if (dmin <= (w.lr ?? 0) && dmin >= (w.min ?? 0)) e += (w.dmg ?? 0) * (w.shots ?? 1) * 0.55; }
+        sev = Math.max(sev, e);
+      }
+      off = Math.max(off, sev * 0.8);
+    }
     const threat = threatAt(b, u, x, y, pips, known);
     const T = TERRAIN[m.terr[c.i]];
-    let pos = T.cover * 22 + m.elev[c.i] * 3.5 - Math.abs(nearest - pref) * 1.2;
+    // Rear exposure: enemies behind us once we turn to face the closest threat
+    let exposure = 0;
+    if (nearT && u.frame.kind !== 'turret') {
+      const f = dirTo(x, y, nearT.x, nearT.y);
+      for (const t of known) if (t !== nearT && dist(x, y, t.x, t.y) < 12 && attackArc({ x, y, facing: f }, t.x, t.y) === 'rear') exposure += 7;
+    }
+    let pos = -exposure + T.cover * 22 + m.elev[c.i] * 3.5 - Math.abs(nearest - pref) * 1.2;
     if (c.mode === 'jump') pos -= (steps * 3 + u.heat > u.stats.heatCap * 0.6 ? 10 : 2);
     if (T.cool > 0 && u.heat > 40) pos += T.cool * 0.4;
     // cohesion
@@ -195,7 +217,8 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   }
   if (!u.alive) return;
   const visNow = b.enemiesOf(u).filter((e) => b.seen[side].has(e.id));
-  const attacked = aiAttack(b, u, visNow) || aiAttackStructure(b, u);
+  const preferStruct = objStructs.length > 0 && structureValue(b, u) > 0 && (visNow.length === 0 || b.rng.chance(0.55));
+  const attacked = preferStruct ? aiAttackStructure(b, u) || aiAttack(b, u, visNow) : aiAttack(b, u, visNow) || aiAttackStructure(b, u);
   if (!attacked && u.alive) {
     // No shot: sensor lock, vigilance or brace; face the nearest threat
     const lockT = visNow.find((t) => t.pips >= 3);
@@ -245,10 +268,11 @@ export function aiAttack(b: Battle, u: Unit, visible: Unit[]): boolean {
   let called: string | undefined;
   if (u.frame.kind === 'mech' && b.resolve[side] >= b.resolveCost() && bestT.frame.kind === 'mech') {
     if (bestT.prone || bestT.shutdown) called = 'HD';
-    else if (b.rng.chance(0.5)) {
-      // Focus the most damaged torso
+    else {
+      // Only spend Resolve to finish a badly damaged torso
       const f = bestT.frame;
-      called = ['CT', 'LT', 'RT'].reduce((a, l) => (f.struct[l] > 0 && f.struct[l] + (f.armor[l] ?? 0) < f.struct[a] + (f.armor[a] ?? 0) ? l : a), 'CT');
+      const weak = ['CT', 'LT', 'RT'].filter((l) => f.struct[l] > 0 && (f.struct[l] + (f.armor[l] ?? 0)) < (f.maxStruct[l] + (f.maxArmor[l] ?? 0)) * 0.35);
+      if (weak.length) called = weak.reduce((a, l) => (f.struct[l] + (f.armor[l] ?? 0) < f.struct[a] + (f.armor[a] ?? 0) ? l : a));
     }
     if (called) { b.resolve[side] -= b.resolveCost(); b.say(`${b.displayName(u)} uses PRECISION STRIKE on the ${called}.`, '#f0a830'); }
   }
@@ -294,4 +318,16 @@ export function aiAttackStructure(b: Battle, u: Unit): boolean {
   if (!best) return false;
   b.attack(u, [{ target: null, struct: best.s, weapons: best.w }]);
   return true;
+}
+
+function structureValue(b: Battle, u: Unit): number {
+  const side = SIDE(u.team);
+  let best = 0;
+  for (const st of b.map.structures) {
+    if (st.destroyed || !st.objective || SIDE(st.team) === side) continue;
+    let ev = 0;
+    for (const wc of b.weaponsOf(u)) { const w = item(wc.id); const hc = b.hitChance(u, null, w, u, undefined, false, st); if (hc.ok) ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1); }
+    best = Math.max(best, ev);
+  }
+  return best;
 }

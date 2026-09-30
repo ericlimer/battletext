@@ -260,7 +260,7 @@ export class Display {
     const dx = [0, 1, 1, 1, 0, -1, -1, -1][dir];
     const dy = [-1, -1, 0, 1, 1, 1, 0, -1][dir];
     const cx = px + w / 2 + dx * w * 0.42, cy = py + h / 2 + dy * h * 0.42;
-    const s = w * 0.11;
+    const s = w * 0.15;
     const ang = Math.atan2(dy, dx);
     ctx.fillStyle = color;
     ctx.beginPath();
