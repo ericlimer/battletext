@@ -15,7 +15,7 @@ export type MissionType = 'battle' | 'assassinate' | 'destroybase' | 'defendbase
 export const MISSION_INFO: Record<MissionType, { name: string; desc: string; glyph: string }> = {
   battle: { name: 'Battle', glyph: '⚔', desc: 'Engage and destroy all hostile forces in the area.' },
   assassinate: { name: 'Assassinate', glyph: '◎', desc: 'Locate and destroy a high-value target before it escapes.' },
-  destroybase: { name: 'Destroy Base', glyph: '▓', desc: 'Raze the enemy installation. Expect turrets and a defending lance.' },
+  destroybase: { name: 'Destroy Base', glyph: '■', desc: 'Raze the enemy installation. Expect turrets and a defending lance.' },
   defendbase: { name: 'Defend Base', glyph: '⌂', desc: 'Protect the employer\'s facility from waves of attackers.' },
   ambush: { name: 'Ambush Convoy', glyph: '»', desc: 'Intercept and destroy a supply convoy before it leaves the map.' },
   escort: { name: 'Escort Convoy', glyph: '«', desc: 'Protect a friendly convoy until it reaches the extraction point.' },

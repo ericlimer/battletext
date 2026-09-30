@@ -106,7 +106,9 @@ export class UI {
     const style = o.style ?? 'bracket';
     const keyLabel = o.keyLabel ?? (o.key ? (o.key.length === 1 ? o.key.toUpperCase() : o.key) : '');
     let inner = label;
-    let w = o.w ?? (style === 'bracket' ? vlen(inner) + (keyLabel ? keyLabel.length + 1 : 0) + 2 : vlen(inner) + (keyLabel ? keyLabel.length + 1 : 0) + 2);
+    const natural = vlen(inner) + (keyLabel ? keyLabel.length + 1 : 0) + 2;
+    let w = Math.max(o.w ?? 0, natural);
+    if (o.w && style === 'bracket' && o.center === undefined) o = { ...o, center: true };
     const hov = !o.disabled && this.hover(x, y, w, 1);
     if (hov) this.cursor = 'pointer';
     let fg = o.disabled ? C.faint : o.fg ?? C.text;
