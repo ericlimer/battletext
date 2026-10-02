@@ -18,6 +18,7 @@ import { Pilot, isAvailable, health } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
+import { surveyOf, drawSurvey, oppositionEstimate } from './survey';
 import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
@@ -33,7 +34,7 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   const local = c.contracts[c.location] ?? [];
   const offers = (c.travelOffers ?? []).filter((t) => t.expires > c.day);
   const list = st.travel ? offers : local;
-  ui.panel(x + 1, y, 62, h, st.travel ? 'TRAVEL CONTRACTS' : `CONTRACTS · ${sys(c).name.toUpperCase()}`);
+  ui.panel(x + 1, y, 62, h, st.travel ? 'TRAVEL CONTRACTS' : `CONTRACTS · ${sys(c).name.toUpperCase().slice(0, 13)}`);
   if (ui.button(x + 30, y, `Local ${local.length}`, { style: 'plain', active: !st.travel, tip: 'Contracts in this system.' })) { st.travel = false; st.sel = 0; }
   if (ui.button(x + 42, y, `Travel ${offers.length}`, { style: 'plain', active: st.travel, key: 't', tip: 'Contracts in neighbouring systems (+20% pay). Accepting sets course; the terms are held for you.' })) { st.travel = true; st.sel = 0; }
   if (!list.length) d.text(x + 3, y + 2, st.travel ? 'No travel contracts posted.' : 'No contracts on offer. Pass time, check Travel, or move on.', C.dim);
@@ -69,20 +70,44 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   d.ctext(dx + 3, yy++, `Target    {${tgt.color}}${tgt.name}{/}  {#6d7f8a}(${repLevel(c.rep[k.target] ?? 0).name}){/}`, C.dim);
   d.ctext(dx + 3, yy++, `Mission   {#f2f6f8}${mi.name}{/} — ${mi.desc}`, C.dim, undefined, dw - 6);
   d.ctext(dx + 3, yy++, `Terrain   {#f2f6f8}${BIOME_INFO[k.biome].name}{/} — ${BIOME_INFO[k.biome].desc}${k.night ? ' {#b27ae8}Night.{/}' : ''}`, C.dim, undefined, dw - 6);
-  yy++;
   for (const l of wrap(k.flavor, dw - 8)) d.text(dx + 3, yy++, l, C.text);
   yy++;
   d.ctext(dx + 3, yy++, `Maximum payment {#f0c850}${cb(k.pay)}{/}   Salvage up to {#f2f6f8}${k.salvageMax}{/} shares`, C.dim);
-  d.ctext(dx + 3, yy++, `Enemy forces: ${threatText(k.diff)}`, C.dim);
+  const rt = surveyOf(c, k);
+  const est = oppositionEstimate(rt);
+  const lanceT = c.mechs.filter((m) => c.lance.includes(m.uid)).reduce((a, m) => a + frameTons(m), 0);
+  d.ctext(dx + 3, yy++, `Enemy forces: ${threatText(k.diff)}  {#6d7f8a}· intel: ~${est.units} units, ~${est.tons}t{/}`, C.dim, undefined, dw - 6);
+  const ratio = lanceT / Math.max(1, est.tons);
+  d.ctext(dx + 3, yy++, `Your lance: {#f2f6f8}${lanceT}t{/}  {${ratio >= 1.1 ? '#6ad46a' : ratio >= 0.8 ? '#f0c040' : '#e8503a'}}${ratio >= 1.1 ? 'favourable odds' : ratio >= 0.8 ? 'an even fight' : 'outgunned'}{/}`, C.dim);
+  yy += 1;
+  for (const o of rt.objectives) {
+    d.ctext(dx + 3, yy++, `${o.primary ? '{#f0a830}■ PRIMARY{/} ' : '{#6d7f8a}◇ OPTIONAL{/}'} ${o.text}${o.bonus ? ` {#f0c850}(+${cbk(o.bonus)}){/}` : ''}`, C.text, undefined, dw - 6);
+  }
   yy += 1;
   const locked = k.diff > maxD;
   if (locked) {
     d.text(dx + 3, yy, `The Mercenary Review Board will not bond you for a ${skulls(k.diff)} contract. MRB rating ${mrbLevel(c)} allows up to ${skulls(Math.floor(maxD))}.`, C.red, undefined, dw - 6);
   } else if (k.booked) {
-    d.ctext(dx + 3, yy, `Terms agreed: {#f0c850}${cb(k.booked.cash)}{/} · ${k.booked.salvage} salvage (${k.booked.priority} priority)`, C.dim);
-    if (ui.button(dx + 3, yy + 2, 'DEPLOY', { key: 'Enter', style: 'block', w: 18, center: true })) app.push(new DropScreen(k, k.booked, argo));
+    d.ctext(dx + 24, yy, `Terms agreed: {#f0c850}${cb(k.booked.cash)}{/} · ${k.booked.salvage} salvage (${k.booked.priority} priority)`, C.dim);
+    if (ui.button(dx + 3, yy, 'DEPLOY', { key: 'Enter', style: 'block', w: 18, center: true })) app.push(new DropScreen(k, k.booked, argo));
   } else if (ui.button(dx + 3, yy, k.sysId ? 'NEGOTIATE & TRAVEL' : 'NEGOTIATE', { key: 'Enter', style: 'block', w: 24, center: true })) {
     app.push(new NegotiateScreen(k, argo));
+  }
+  // Battlefield survey
+  const sm = rt.battle.map, sy = Math.max(yy + 3, y + h - sm.h / 2 - 1), sx = dx + 3;
+  if (sy + sm.h / 2 <= y + h - 1) {
+    d.text(sx, sy - 1, 'BATTLEFIELD SURVEY', C.accent, undefined, 99, true);
+    drawSurvey(d, rt, sx, sy);
+    const lx = sx + sm.w + 3;
+    const legend = ['{#5fd0e8}▲{/} drop zone'];
+    if (k.type !== 'battle' && k.type !== 'destroybase' && k.type !== 'defendbase') legend.push('{#f0c040}×{/} exit');
+    if (k.type === 'escort') legend.push('{#6ad46a}■{/} convoy');
+    if (k.type === 'destroybase') legend.push('{#e8603a}■{/} target');
+    if (k.type === 'defendbase') legend.push('{#3aa8d8}■{/} protect');
+    if (k.type === 'escort' || k.type === 'ambush') legend.push('{#d8d0b8}─{/} road');
+    legend.forEach((l, i) => d.ctext(lx, sy + 1 + i, l, C.dim, undefined, dw - (lx - dx) - 2));
+    d.text(lx, sy + 6, `${sm.w}×${sm.h} tiles`, C.faint, undefined, dw - (lx - dx) - 2);
+    if (k.night) d.text(lx, sy + 7, 'Night: sight 10', '#b27ae8');
   }
 }
 

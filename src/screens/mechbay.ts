@@ -57,7 +57,9 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     else if (isFrameDamaged(m) && !r.stored) { status = 'Damaged'; col = C.orange; }
     d.text(lx + 27, ly, status, col, bg);
     const s = frameStats(m);
-    simpleBar(d, lx + 38, ly, lw - 39, s.armorTotal / Math.max(1, s.armorMax), healthColor(s.armorTotal / Math.max(1, s.armorMax)), '#161c22');
+    const af = s.armorTotal / Math.max(1, s.armorMax), bw = lw - 39;
+    for (let i = 0; i < bw; i++) d.set(lx + 38 + i, ly, '▄', (i + 0.5) / bw <= af ? healthColor(af) : '#1e262e', bg);
+    if (hov) ui.setTip([`${ch.name} ${ch.id}`, `Armor ${s.armorTotal}/${s.armorMax} (${Math.round(af * 100)}%)`]);
   }, 1);
   if (cl >= 0) { const r = rows[cl]; if (r.kind === 'mech') { st.sel = r.m.uid; st.confirmSell = false; } }
   // Work queue: reorder or cancel (repairs refund the unspent share)
