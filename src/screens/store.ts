@@ -4,7 +4,7 @@ import { UI } from '../engine/ui';
 import { C } from '../engine/color';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
-import { sys, sellPrice, bays, addLog, priceMult, PARTS_NEEDED, hasBlackMarket, blackStore, BLACK_MARKET_FEE } from '../game/company';
+import { sys, sellPrice, bays, addLog, priceMult, PARTS_NEEDED, hasBlackMarket, blackStore, BLACK_MARKET_FEE, partSellPrice } from '../game/company';
 import { item, HARD_COLORS } from '../data/items';
 import { chassis } from '../data/mechs';
 import { newMechFrame, weaponSummary } from '../game/frame';
@@ -16,7 +16,7 @@ type Cat = 'all' | 'weapon' | 'equip' | 'ammo' | 'mech' | 'black';
 
 export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: number, h: number): void {
   const d = ui.d, c = company!;
-  const st = (argo.st.store ??= { cat: 'all' as Cat, buy: { scroll: 0 }, sell: { scroll: 0 }, confirmPart: '' });
+  const st = (argo.st.store ??= { cat: 'all' as Cat, buy: { scroll: 0 }, sell: { scroll: 0 }, confirmPart: '', confirmBuy: '' });
   if (c.travel) {
     ui.panel(x + 1, y, w - 2, h, 'STORE');
     d.text(x + 4, y + 3, 'Markets are only accessible while docked.', C.cyan);
@@ -58,7 +58,8 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
   const half = Math.floor((w - 3) / 2);
   ui.panel(x + 1, y + 2, half, h - 2, st.cat === 'black' ? `BLACK MARKET · ${s.name.toUpperCase()}` : `BUY · ${s.name.toUpperCase()}`);
   const bl = ui.list(x + 2, y + 3, half - 2, h - 4, stock, st.buy, (si, _i, lx, ly, lw, hov) => {
-    const bg = hov ? '#16222c' : '#0a0e13';
+    const pend = st.confirmBuy === si.id;
+    const bg = pend ? '#3a2a10' : hov ? '#16222c' : '#0a0e13';
     d.fill(lx, ly, lw, 1, ' ', C.text, bg);
     const afford = c.funds >= si.price;
     if (si.kind === 'item') {
@@ -80,9 +81,15 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
   });
   if (bl >= 0) {
     const si = stock[bl];
+    const big = si.kind !== 'item' || si.price > c.funds * 0.1;
     if (c.funds < si.price) argo.notify('Not enough C-Bills', C.red);
+    else if (big && st.confirmBuy !== si.id) {
+      st.confirmBuy = si.id;
+      argo.notify(`Click again to buy for ${cbk(si.price)} (leaves ${cbk(c.funds - si.price)})`, C.warn);
+    }
     else if (si.kind === 'mech' && c.mechs.length >= bays(c) && false) argo.notify('No free bays', C.red);
     else {
+      st.confirmBuy = '';
       c.funds -= si.price; c.stats.spent += si.price; si.qty--;
       if (st.cat === 'black') c.rep['pirates'] = (c.rep['pirates'] ?? 0) + 1;
       if (si.kind === 'item') c.inventory[si.id] = (c.inventory[si.id] ?? 0) + 1;
@@ -114,7 +121,7 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
     d.fill(lx, ly, lw, 1, ' ', C.text, bg);
     let name: string, price: number;
     if (e.kind === 'item') { name = item(e.id).name; price = sellPrice(c, e.id); if (hov) ui.setTip(weaponTip(e.id)); }
-    else { name = `${chassis(e.id).name} ${e.id} part`; price = Math.round(chassis(e.id).cost * 0.12 / 1000) * 1000; }
+    else { name = `${chassis(e.id).name} ${e.id} part`; price = partSellPrice(e.id); }
     d.text(lx + 1, ly, name, e.kind === 'part' ? C.cyan : C.text, bg, 34);
     d.text(lx + 38, ly, `x${e.n}`, C.dim, bg);
     d.text(lx + lw - 10, ly, cbk(price).padStart(9), C.cbill, bg);
@@ -127,7 +134,7 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
     const e = sellList[sl];
     let price: number;
     if (e.kind === 'item') { price = sellPrice(c, e.id); c.inventory[e.id]--; }
-    else { price = Math.round(chassis(e.id).cost * 0.12 / 1000) * 1000; c.parts[e.id]--; }
+    else { price = partSellPrice(e.id); c.parts[e.id]--; }
     c.funds += price;
     saveGame(c);
     argo.notify(`Sold for ${cbk(price)}`, C.cbill);

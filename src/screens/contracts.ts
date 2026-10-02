@@ -14,7 +14,7 @@ import { BIOME_INFO } from '../combat/terrain';
 import { faction, repLevel } from '../data/factions';
 import { cb, cbk, wrap } from '../engine/util';
 import { Frame, frameName, frameTons, weaponSummary, frameStats, repairEstimate } from '../game/frame';
-import { Pilot, isAvailable, health } from '../game/pilot';
+import { Pilot, isAvailable, health, skillTotal } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
@@ -35,8 +35,8 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   const offers = (c.travelOffers ?? []).filter((t) => t.expires > c.day);
   const list = st.travel ? offers : local;
   ui.panel(x + 1, y, 62, h, st.travel ? 'TRAVEL CONTRACTS' : `CONTRACTS · ${sys(c).name.toUpperCase().slice(0, 13)}`);
-  if (ui.button(x + 30, y, `Local ${local.length}`, { style: 'plain', active: !st.travel, tip: 'Contracts in this system.' })) { st.travel = false; st.sel = 0; }
-  if (ui.button(x + 42, y, `Travel ${offers.length}`, { style: 'plain', active: st.travel, key: 't', tip: 'Contracts in neighbouring systems (+20% pay). Accepting sets course; the terms are held for you.' })) { st.travel = true; st.sel = 0; }
+  if (ui.button(x + 30, y, `Local ${local.length}`, { style: 'plain', active: !st.travel, tip: 'Contracts in this system.' })) { st.travel = false; st.sel = 0; st.list.scroll = 0; }
+  if (ui.button(x + 42, y, `Travel ${offers.length}`, { style: 'plain', active: st.travel, key: 't', tip: 'Contracts in neighbouring systems (+20% pay). Accepting sets course; the terms are held for you.' })) { st.travel = true; st.sel = 0; st.list.scroll = 0; }
   if (!list.length) d.text(x + 3, y + 2, st.travel ? 'No travel contracts posted.' : 'No contracts on offer. Pass time, check Travel, or move on.', C.dim);
   const maxD = maxContractDiff(c);
   const clicked = ui.list(x + 2, y + 1, 60, h - 2, list, st.list, (k, i, lx, ly, lw, hov) => {
@@ -138,11 +138,13 @@ export class NegotiateScreen implements Screen {
     d.text(x + w - 11, y + 6, 'SALVAGE', C.bright, undefined, 99, true);
     const sw = w - 25;
     this.slider = Math.min(cap, ui.slider(x + 12, y + 6, sw, this.slider, 0, 10));
-    for (let i = Math.round((cap / 10) * (sw - 1)) + 1; i < sw; i++) d.set(x + 12 + i, y + 6, '─', '#5a2020');
+    const capX = Math.round((cap / 10) * (sw - 1));
+    for (let i = capX + 1; i < sw; i++) d.set(x + 12 + i, y + 6, '╌', '#8a3030');
+    if (cap < 10) { d.set(x + 12 + capX + 1, y + 5, '▼', C.red); if (ui.hover(x + 12 + capX + 1, y + 5, 1, 1)) ui.setTip(['Negotiation cap', 'Better standing with the employer and a higher MRB rating let you ask for more salvage.']); }
     if (ui.key('ArrowLeft')) this.slider = Math.max(0, this.slider - 1);
     if (ui.key('ArrowRight')) this.slider = Math.min(cap, this.slider + 1);
     const lv = repLevel(c.rep[k.employer] ?? 0);
-    if (cap < 10) d.ctext(x + 12, y + 7, `{#6d7f8a}Your standing ({${lv.color}}${lv.name}{/}{#6d7f8a}) and MRB cap salvage.{/}`, C.dim, undefined, sw);
+    if (cap < 10) d.ctext(x + 12, y + 7, `{#e8503a}▼{/} {#6d7f8a}Your standing ({${lv.color}}${lv.name}{/}{#6d7f8a}) and MRB cap salvage.{/}`, C.dim, undefined, sw);
     d.ctext(x + 3, y + 9, `Payment on completion  {#f0c850}${cb(n.cash)}{/}`, C.dim);
     d.ctext(x + 3, y + 10, `Salvage shares        {#f2f6f8}${n.salvage}{/} {#6d7f8a}(${n.priority} priority, the rest chosen after the employer's cut){/}`, C.dim, undefined, w - 6);
     d.ctext(x + 3, y + 11, `Optional objectives   {#f0c850}~${cb(k.pay * 0.25)}{/} bonus each`, C.dim);
@@ -184,10 +186,13 @@ export class DropScreen implements Screen {
       let p = c.lancePilots[i] && readyP.find((x) => x.id === c.lancePilots[i]) ? c.lancePilots[i] : null;
       return { mech: m, pilot: p };
     });
-    // Fill blanks
+    // Fill blanks in pairs: heaviest ready 'Mechs first, best available MechWarriors into them
+    const byTons = [...readyM].sort((a, b) => frameTons(b) - frameTons(a) || frameStats(b).alphaDmg - frameStats(a).alphaDmg);
+    const bySkill = [...readyP].sort((a, b) => skillTotal(b) - skillTotal(a));
     for (const s of this.slots) {
-      if (!s.mech) { const m = readyM.find((x) => !this.slots.some((o) => o.mech === x.uid)); if (m) s.mech = m.uid; }
-      if (!s.pilot) { const p = readyP.find((x) => !this.slots.some((o) => o.pilot === x.id)); if (p) s.pilot = p.id; }
+      if (!s.mech) { const m = byTons.find((x) => !this.slots.some((o) => o.mech === x.uid)); if (m) s.mech = m.uid; }
+      if (s.mech && !s.pilot) { const p = bySkill.find((x) => !this.slots.some((o) => o.pilot === x.id)); if (p) s.pilot = p.id; }
+      if (!s.mech) s.pilot = null;
     }
   }
   render(ui: UI): void {
@@ -212,6 +217,7 @@ export class DropScreen implements Screen {
         d.text(4, y + 3, weaponSummary(m).slice(0, 48), C.text);
         const e = repairEstimate(m);
         if (e.armorPts || e.structPts) d.text(4, y + 5, `Damaged: ${e.armorPts} armor, ${e.structPts} structure missing`, C.warn);
+        if (!st.weapons.length) d.text(4, y + 6, '⚠ NO WEAPONS MOUNTED — refit in the Mech Lab', C.red);
       } else d.text(4, y + 2, '— click to assign a \'Mech —', C.faint);
       // Pilot
       if (ui.click(55, y + 1, 32, 6)) this.pick = { i, what: 'pilot' };

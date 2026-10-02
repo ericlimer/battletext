@@ -26,6 +26,8 @@ export function loadGame(): Company | null {
     if (!s) return null;
     const c = JSON.parse(s);
     if (!valid(c)) return null;
+    // Older saves could keep fallen MechWarriors assigned to the lance
+    c.lancePilots = c.lancePilots.map((id: string | null) => (id && c.pilots.some((p: { id: string; dead?: boolean }) => p.id === id && !p.dead) ? id : null));
     company = c;
     return c;
   } catch { return null; }

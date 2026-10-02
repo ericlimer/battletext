@@ -173,7 +173,10 @@ export function dateStr(day: number): string {
 }
 
 export function addLog(c: Company, text: string, color?: string, day = c.day): void {
-  c.log.push({ day, text, color });
+  // Keep the log in date order: deployment reports are dated ahead of the days that pass in transit
+  let i = c.log.length;
+  while (i > 0 && c.log[i - 1].day > day) i--;
+  c.log.splice(i, 0, { day, text, color });
   if (c.log.length > 300) c.log.splice(0, c.log.length - 300);
 }
 
@@ -291,12 +294,12 @@ export function careerScore(c: Company): number {
 
 // ---- Contracts ----------------------------------------------------------------------------
 const CONTRACT_NAMES: Record<MissionType, string[]> = {
-  battle: ['Clean Sweep', 'Hold the Line', 'Scorched Earth', 'Iron Rain', 'Border Dispute', 'Show of Force', 'Burning Bridges'],
-  assassinate: ['Cut the Head', 'Silent Knife', 'Blood Money', 'Last Rites', 'Decapitation Strike', 'The Long Goodbye'],
-  destroybase: ['Demolition Crew', 'Wrecking Ball', 'Leveled', 'Foundation Crack', 'Fire Sale', 'Urban Renewal'],
-  defendbase: ['Siege Breaker', 'Stand Fast', 'Bulwark', 'The Alamo', 'Garrison Duty', 'Walls of Iron'],
-  ambush: ['Highway Robbery', 'Road Toll', 'Supply Cut', 'Dead End', 'Hijack', 'Toll Booth'],
-  escort: ['Precious Cargo', 'Shepherd', 'Safe Passage', 'Special Delivery', 'Milk Run', 'Caravan'],
+  battle: ['Clean Sweep', 'Hold the Line', 'Scorched Earth', 'Iron Rain', 'Border Dispute', 'Show of Force', 'Burning Bridges', 'Hammer Fall', 'Pest Control', 'Line in the Sand', 'Thunder Road', 'Brushfire'],
+  assassinate: ['Cut the Head', 'Silent Knife', 'Blood Money', 'Last Rites', 'Decapitation Strike', 'The Long Goodbye', 'Kingslayer', 'Paper Tiger', 'Retirement Plan', 'Black Mark'],
+  destroybase: ['Demolition Crew', 'Wrecking Ball', 'Leveled', 'Foundation Crack', 'Fire Sale', 'Urban Renewal', 'Scrap Heap', 'Eviction Notice', 'Ground Zero', 'Salt the Earth'],
+  defendbase: ['Siege Breaker', 'Stand Fast', 'Bulwark', 'The Alamo', 'Garrison Duty', 'Walls of Iron', 'Night Watch', 'Gatekeeper', 'Iron Curtain', 'Last Bastion'],
+  ambush: ['Highway Robbery', 'Road Toll', 'Supply Cut', 'Dead End', 'Hijack', 'Toll Booth', 'Ambuscade', 'Trip Wire', 'Broken Axle', 'Detour'],
+  escort: ['Precious Cargo', 'Shepherd', 'Safe Passage', 'Special Delivery', 'Milk Run', 'Caravan', 'Long Haul', 'Convoy Duty', 'Overwatch', 'Mother Hen'],
   capture: ['Data Mine', 'Signal Fire', 'Lighthouse', 'Breadcrumbs', 'Ping', 'Dead Drop'],
 };
 
@@ -323,25 +326,38 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   const pay = Math.round((basePay(diff) * r.range(0.9, 1.15) * repF * (s.tags.includes('capital') ? 1.15 : 1)) / 5000) * 5000;
   const salvageMax = Math.min(14, 5 + Math.floor(diff / 2) + (repLevel(c.rep[employer] ?? 0).idx >= 5 ? 2 : repLevel(c.rep[employer] ?? 0).idx >= 4 ? 1 : 0));
   const tgtF = faction(target), empF = faction(employer);
-  const flavors: Record<MissionType, string> = {
-    battle: `${tgtF.short} forces are operating on ${s.name} without authorization. ${empF.short} wants them driven off.`,
-    assassinate: `A ${tgtF.short} field commander has become a problem for ${empF.short}. Make it permanent.`,
-    destroybase: `${tgtF.short} has established a forward base on ${s.name}. ${empF.short} will pay to see it burn.`,
-    defendbase: `${empF.short} intelligence expects a ${tgtF.short} raid on a critical facility. Hold it.`,
-    ambush: `A ${tgtF.short} supply convoy is moving through the ${s.name} highlands. Intercept it.`,
-    escort: `${empF.short} needs a supply convoy escorted through contested territory on ${s.name}.`,
-    capture: `${tgtF.short} sensor beacons on ${s.name} are feeding targeting data to their artillery. ${empF.short} wants them taken intact.`,
+  const biome = r.pick(s.biomes);
+  const pl = (f: { id: string }) => f.id === 'pirates' || f.id === 'locals';
+  const has_ = (f: { id: string }) => (pl(f) ? 'have' : 'has'), wants = (f: { id: string }) => (pl(f) ? 'want' : 'wants'), is_ = (f: { id: string }) => (pl(f) ? 'are' : 'is');
+  const land = ({ lowlands: 'lowlands', highlands: 'highlands', desert: 'dune seas', badlands: 'badlands', lunar: 'crater fields', martian: 'red wastes', polar: 'ice fields', tundra: 'tundra' } as Record<string, string>)[biome] ?? 'wilds';
+  const flavors: Record<MissionType, string[]> = {
+    battle: [`${tgtF.short} forces are operating on ${s.name} without authorization. ${empF.short} ${wants(empF)} them driven off.`,
+      `A ${tgtF.short} lance has been raiding outposts in the ${land} of ${s.name}. ${empF.short} ${wants(empF)} it destroyed.`,
+      `${empF.short} ${is_(empF)} tired of ${tgtF.short} patrols probing the ${land}. Send a message.`],
+    assassinate: [`A ${tgtF.short} field commander has become a problem for ${empF.short}. Make it permanent.`,
+      `${empF.short} intelligence has located a ${tgtF.short} officer inspecting positions in the ${land}. They are not to leave.`],
+    destroybase: [`${tgtF.short} ${has_(tgtF)} established a forward base on ${s.name}. ${empF.short} will pay to see it burn.`,
+      `A ${tgtF.short} supply depot hidden in the ${land} is feeding their operations. Level it.`],
+    defendbase: [`${empF.short} intelligence expects a ${tgtF.short} raid on a critical facility. Hold it.`,
+      `A ${empF.short} relay station in the ${land} is the next target for ${tgtF.short} raiders. Make sure it is still standing tomorrow.`],
+    ambush: [`A ${tgtF.short} supply convoy is moving through the ${land} of ${s.name}. Intercept it.`,
+      `${tgtF.short} haulers are running supplies across the ${land}. ${empF.short} ${wants(empF)} the cargo burned.`],
+    escort: [`${empF.short} needs a supply convoy escorted through contested ${land} on ${s.name}.`,
+      `A ${empF.short} medical convoy has to cross the ${land}, and ${tgtF.short} knows it is coming.`],
+    capture: [`${tgtF.short} sensor beacons in the ${land} are feeding targeting data to their artillery. ${empF.short} ${wants(empF)} them taken intact.`,
+      `${empF.short} ${wants(empF)} the data cores from three ${tgtF.short} survey beacons on ${s.name}.`],
   };
+
   return {
     id: 'k' + r.int(0, 1e9).toString(36),
     name: (() => { const used = new Set((c.contracts[s.id] ?? []).map((x) => x.name)); const opts = CONTRACT_NAMES[type].filter((n) => !used.has(n)); return r.pick(opts.length ? opts : CONTRACT_NAMES[type]); })(),
     type, employer, target, diff,
-    biome: r.pick(s.biomes),
+    biome,
     night: r.chance(0.18),
     seed: r.seed(),
     pay, salvageMax,
     expires: c.day + r.int(12, 28) + (has(c, 'comms') ? 10 : 0),
-    flavor: flavors[type],
+    flavor: r.pick(flavors[type]),
     targetName: type === 'assassinate' ? r.pick(['Red Baron', 'The Butcher', 'Iron Duke', 'Cobra', 'Warlord', 'Grendel', 'Mad Dog', 'The Colonel', 'Vulture']) : undefined,
   };
 }
@@ -367,6 +383,8 @@ export function priceMult(c: Company, s: StarSystem): number {
   return Math.max(0.8, Math.min(1.35, 1.1 - rep / 400)) * (s.tags.includes('industrial') ? 0.92 : 1);
 }
 export function sellPrice(c: Company, id: string): number { return Math.round((item(id).cost * 0.35) / 100) * 100; }
+/** What a single salvaged chassis part fetches on the market. */
+export function partSellPrice(chId: string): number { return Math.round((chassis(chId).cost * 0.07) / 1000) * 1000; }
 
 function genStore(c: Company, r: RNG, s: StarSystem): StoreItem[] {
   const out: StoreItem[] = [];
@@ -456,7 +474,7 @@ export function refreshSystem(c: Company, force = false): void {
     (s as any).usedDay = c.day;
     const cand = CHASSIS.filter((ch) => ch.cls === 'L' && ch.rarity === 0);
     const ch = r.pick(cand);
-    st.unshift({ kind: 'mech', id: 'USED:' + ch.id, qty: 1, price: Math.round((ch.cost * 0.45) / 5000) * 5000 });
+    st.unshift({ kind: 'mech', id: 'USED:' + ch.id, qty: 1, price: Math.round(Math.min(ch.cost * 0.45, Math.max(150000, c.funds * 0.6)) / 5000) * 5000 });
   }
   s.visited = true;
   saveRng(c, r);
@@ -489,7 +507,11 @@ export function advanceDay(c: Company): DayReport {
   // Argo refits under way
   for (const ins of [...(c.installing ?? [])]) if (c.day >= ins.doneDay) {
     c.installing = (c.installing ?? []).filter((x) => x !== ins);
+    const oldHeal = healMult(c);
     c.upgrades.push(ins.id);
+    // A new medbay speeds up injuries that are already healing
+    const k = healMult(c) / oldHeal;
+    if (k < 1) for (const p of c.pilots) if (!p.dead && p.healDays > 0) p.healDays = Math.max(1, Math.round(p.healDays * k));
     say(`Argo refit complete: ${UPGRADES.find((u) => u.id === ins.id)?.name ?? ins.id} is online.`, '#6ad46a');
   }
   // Healing & training
@@ -529,8 +551,8 @@ export function advanceDay(c: Company): DayReport {
         say(`Jump complete: ${sys(c).name}. Next jump to ${next.name}.`, '#5fd0e8');
       }
     }
-    if (r.chance(0.045)) rep.event = 'travel';
-  } else if (r.chance(0.012)) rep.event = 'docked';
+    if (r.chance(0.09)) rep.event = 'travel';
+  } else if (r.chance(0.045)) rep.event = 'docked';
   // Month end
   if (c.day % 30 === 0) {
     const e = monthlyExpenses(c);
@@ -575,7 +597,7 @@ export function advanceDay(c: Company): DayReport {
 function liquidate(c: Company, say: (t: string, col?: string) => void): void {
   let raised = 0;
   for (const [id, n] of Object.entries(c.inventory)) { if (c.funds >= 0) break; const v = sellPrice(c, id) * n; c.funds += v; raised += v; c.inventory[id] = 0; }
-  for (const [id, n] of Object.entries(c.parts)) { if (c.funds >= 0) break; const v = Math.round(chassis(id).cost * 0.12) * n; c.funds += v; raised += v; c.parts[id] = 0; }
+  for (const [id, n] of Object.entries(c.parts)) { if (c.funds >= 0) break; const v = partSellPrice(id) * n; c.funds += v; raised += v; c.parts[id] = 0; }
   const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const v = Math.round(frameValue(m) * 0.35); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); say(`Creditors seized ${frameName(m)}.`, '#e8503a'); } };
   sellM(c.storage);
   if (c.funds < 0 && c.mechs.length > 1) { const keep = c.mechs.slice(0, 1); const rest = c.mechs.slice(1); sellM(rest); c.mechs = [...keep, ...rest]; }
@@ -617,7 +639,12 @@ export function assembleMech(c: Company, chassisId: string): string | null {
   const f = newMechFrame(chassisId);
   // Salvaged 'Mechs arrive stripped of some weapons, like in BATTLETECH
   const rr = rngOf(c);
-  f.items = f.items.filter((it) => item(it.id).kind !== 'weapon' || rr.chance(0.5));
+  const stockWeapons = f.items.filter((it) => item(it.id).kind === 'weapon');
+  const biggest = stockWeapons.reduce<typeof stockWeapons[0] | null>((a, it) => (!a || (item(it.id).dmg ?? 0) * (item(it.id).shots ?? 1) > (item(a.id).dmg ?? 0) * (item(a.id).shots ?? 1) ? it : a), null);
+  f.items = f.items.filter((it) => item(it.id).kind !== 'weapon' || it === biggest || rr.chance(0.5));
+  // Ammo for weapons that didn't survive is useless; drop it too
+  const ammoKept = new Set(f.items.filter((it) => item(it.id).kind === 'weapon').map((it) => item(it.id).ammo).filter(Boolean));
+  f.items = f.items.filter((it) => item(it.id).kind !== 'ammo' || ammoKept.has(it.id));
   saveRng(c, rr);
   const hrs = 24 + Math.round(chassis(chassisId).tons * 0.6);
   if (c.mechs.length < bays(c)) c.mechs.push(f); else c.storage.push(f);

@@ -6,7 +6,7 @@ import { C, lerp, scale, healthColor } from '../engine/color';
 import { COLS, ROWS } from '../engine/display';
 import { company, saveGame, exportSave } from '../game/save';
 import {
-  Company, dateStr, monthlyExpenses, morale, moraleName, moraleBreakdown, mrbLevel, MRB_LEVELS, EXPENSE_LEVELS, UPGRADES, sys, advanceDay,
+  Company, dateStr, monthlyExpenses, morale, moraleName, moraleBreakdown, maxContractDiff, mrbLevel, MRB_LEVELS, EXPENSE_LEVELS, UPGRADES, sys, advanceDay,
   bays, pilotCap, techHours, CAREER_DAYS, careerScore, companyValue, travelDaysLeft, rngOf, saveRng, mechReady, has,
 } from '../game/company';
 import { FACTIONS, repLevel, faction } from '../data/factions';
@@ -208,7 +208,7 @@ export class ArgoScreen implements Screen {
       const f = 1 - wo.hours / Math.max(1, wo.total);
       d.text(x + 3, yy, wo.desc.slice(0, 30), C.text);
       simpleBar(d, x + 35, yy, 14, f, '#4a8ee8');
-      d.text(x + 50, yy, `${Math.ceil(wo.hours / techHours(c))}d`, C.dim);
+      d.text(x + 50, yy, `${workQueueDays(c, wo.mechUid)}d`, C.dim);
       yy++;
     }
     if (!c.work.length) d.text(x + 3, yy++, 'No work orders pending.', C.faint);
@@ -236,7 +236,8 @@ export class ArgoScreen implements Screen {
     d.ctext(x + 62, y + 1, `Mercenary Review Board rating {#f0a830}${lvl}{/}/5`, C.text);
     const nxt = MRB_LEVELS[Math.min(5, lvl + 1)];
     simpleBar(d, x + 62, y + 2, 38, lvl >= 5 ? 1 : (c.mrb - MRB_LEVELS[lvl]) / (nxt - MRB_LEVELS[lvl]), '#d89a30');
-    d.text(x + 62, y + 3, lvl >= 5 ? 'Maximum rating' : `${c.mrb}/${nxt} to next rating · max contract ${skulls(Math.floor(4 + lvl * 1.5))}`, C.faint, undefined, 40);
+    d.text(x + 62, y + 3, lvl >= 5 ? 'Maximum rating' : `${c.mrb}/${nxt} to next rating`, C.faint, undefined, 40);
+    d.ctext(x + 62, y + 4, `Bonded for contracts up to {#e8503a}${skulls(Math.floor(maxContractDiff(c)))}{/}`, C.faint, undefined, 40);
     let ry = y + 5;
     for (const f of FACTIONS) {
       const v = c.rep[f.id] ?? 0;
@@ -349,7 +350,7 @@ export class ArgoScreen implements Screen {
       d.box(bx, by, 71, 5, owned ? '#2a6a4a' : locked ? '#2a2a2a' : C.border, owned ? '#0c1a14' : C.panel);
       d.text(bx + 2, by + 1, u.name, owned ? C.green : locked ? C.faint : C.bright, undefined, 99, true);
       d.text(bx + 2, by + 2, u.desc, C.dim, undefined, 66);
-      d.ctext(bx + 2, by + 3, `{#f0c850}${cb(u.cost)}{/} · upkeep ${cb(u.upkeep)}/mo${locked ? `  {#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}` : ''}`, C.dim);
+      d.ctext(bx + 2, by + 3, `{#f0c850}${cb(u.cost)}{/} · upkeep ${cb(u.upkeep)}/mo${!owned && !inst && !locked ? ` · ${Math.max(3, Math.round(u.cost / 180000))}d install` : ''}${locked ? `  {#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}` : ''}`, C.dim, undefined, locked ? 67 : 52);
       if (owned) d.text(bx + 60, by + 1, 'INSTALLED', C.green);
       else if (inst) d.text(bx + 52, by + 1, `INSTALLING ${Math.max(0, inst.doneDay - c.day)}d`, C.warn);
       else if (!locked && !inst && ui.button(bx + 56, by + 3, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : 'Click twice to purchase.' })) {

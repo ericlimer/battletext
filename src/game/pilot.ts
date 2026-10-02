@@ -46,6 +46,8 @@ export interface Pilot {
   origin: string;
   kills: number;
   missions: number;
+  diedDay?: number;
+  memorial?: boolean;
   sigil: string;
   color: string;
   hireCost?: number;

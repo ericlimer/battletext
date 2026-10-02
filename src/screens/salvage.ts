@@ -7,7 +7,7 @@ import { C } from '../engine/color';
 import { COLS, ROWS } from '../engine/display';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
-import { PARTS_NEEDED } from '../game/company';
+import { PARTS_NEEDED, partSellPrice, sellPrice } from '../game/company';
 import { claimSalvage, employerCut, SalvageEntry } from '../game/aftermath';
 import { chassis } from '../data/mechs';
 import { cbk } from '../engine/util';
@@ -54,8 +54,10 @@ export class SalvageScreen implements Screen {
       d.text(lx + 3, ly, e.kind === 'part' ? '⚙' : '▪', e.kind === 'part' ? C.cyan : C.dim, bg);
       d.text(lx + 5, ly, e.label + (cut ? '  (employer)' : ''), cut ? '#5a4a4a' : sel || pri ? C.bright : C.text, bg, 50);
       if (e.kind === 'part') d.text(lx + 58, ly, `have ${c.parts[e.id] ?? 0}/${PARTS_NEEDED}`, C.dim, bg);
-      d.text(lx + lw - 10, ly, cbk(e.value).padStart(9), cut ? '#5a4a30' : C.cbill, bg);
-      if (hov && e.kind === 'item') ui.setTip(weaponTip(e.id));
+      const sell = e.kind === 'part' ? partSellPrice(e.id) : sellPrice(c, e.id);
+      d.text(lx + lw - 10, ly, cbk(sell).padStart(9), cut ? '#5a4a30' : C.cbill, bg);
+      if (hov && e.kind === 'item') ui.setTip([...weaponTip(e.id), `Sells for ${cbk(sell)} · market price ${cbk(e.value)}`]);
+      else if (hov) ui.setTip([e.label, `Sells for ${cbk(sell)}. ${PARTS_NEEDED} parts assemble a 'Mech worth ${cbk(chassis(e.id).cost)}.`]);
     });
     if (cl >= 0 && !this.cut.includes(cl) && !(this.stage === 'rest' && this.picks.includes(cl))) {
       const k = mine.indexOf(cl);

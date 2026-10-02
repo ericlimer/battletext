@@ -42,7 +42,13 @@ const FLAVOR = ['A dusty world of dwindling mines and proud, stubborn people.', 
   'Famous for its vineyards, and for the feuds they start.', 'Rich in germanium, poor in everything else.',
   'Ice sheets cover most of the surface; the equator is habitable.', 'A crossroads of trade lanes and smugglers\' routes.',
   'The locals still speak of the Star League in reverent tones.', 'Contested for decades; every hill has a name and a grave.',
-  'Its moons host abandoned SLDF depots, mostly looted.', 'A red desert world with sprawling hydroponic domes.'];
+  'Its moons host abandoned SLDF depots, mostly looted.', 'A red desert world with sprawling hydroponic domes.',
+  'Tidally locked: one face burns, the other freezes, and everyone lives on the line between.', 'Its orbital elevator collapsed a century ago; the wreckage is still a landmark.',
+  'Mostly ocean, with a handful of crowded volcanic archipelagos.', 'Home to a once-famous \'Mech factory, now a scrapyard with a gift shop.'];
+const FLAVOR2 = ['The militia is underpaid and knows it.', 'Off-worlders are tolerated, barely.', 'Water is rationed and fights over it are common.',
+  'A noble house claims it, but nobody has seen the duke in years.', 'The spaceport bars are full of out-of-work MechWarriors.', 'Local legends speak of a buried Star League cache.',
+  'Bandits raid the outer settlements every harvest.', 'Its people are fiercely proud of their single surviving \'Mech.', 'The planetary council changes hands every few months.',
+  'Smuggling is the only industry that never closes.'];
 
 export function generateStarMap(r: RNG): { systems: StarSystem[]; start: string } {
   const W = 100, H = 40;
@@ -58,12 +64,14 @@ export function generateStarMap(r: RNG): { systems: StarSystem[]; start: string 
     ['canopus', W * 0.9, H * 0.85], ['marik', W * 0.45, H * 0.05], ['locals', W * 0.3, H * 0.55], ['locals', W * 0.7, H * 0.45],
   ];
   const names = r.shuffle([...NAMES]);
+  const descs = r.shuffle(FLAVOR.flatMap((a) => FLAVOR2.map((b) => `${a} ${b}`)));
+  const firsts = new Set<string>();
   const systems: StarSystem[] = pts.map(([x, y], i) => {
     let best = caps[0], bd = Infinity;
     for (const c of caps) { const d = Math.hypot(c[1] - x, (c[2] - y) * 1.6) * r.range(0.85, 1.15); if (d < bd) { bd = d; best = c; } }
     const tags = r.shuffle([...TAG_KEYS]).slice(0, r.int(1, 2));
     const biomes = r.shuffle([...BIOMES]).slice(0, r.int(2, 3));
-    return { id: 's' + i, name: names[i % names.length], x, y, owner: best[0], diff: 1, tags, desc: r.pick(FLAVOR), links: [], biomes, visited: false, contractsDay: -999, storeDay: -999, hiresDay: -999 };
+    return { id: 's' + i, name: names[i % names.length], x, y, owner: best[0], diff: 1, tags, desc: (() => { const d0 = descs.find((d) => !firsts.has(d.split('. ')[0])) ?? descs[i % descs.length]; firsts.add(d0.split('. ')[0]); return d0; })(), links: [], biomes, visited: false, contractsDay: -999, storeDay: -999, hiresDay: -999 };
   });
   if (r.chance(0.5)) systems[r.int(0, systems.length - 1)].owner = 'pirates';
   systems[r.int(0, systems.length - 1)].owner = 'pirates';

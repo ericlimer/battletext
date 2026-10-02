@@ -55,8 +55,9 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     if (r.stored) { status = 'Stored'; col = C.faint; }
     if (wo) { status = `${wo.kind === 'repair' ? 'Repair' : wo.kind === 'refit' ? 'Refit' : wo.kind === 'assemble' ? 'Build' : 'Ready'} ${workQueueDays(c, m.uid)}d`; col = C.warn; }
     else if (isFrameDamaged(m) && !r.stored) { status = 'Damaged'; col = C.orange; }
-    d.text(lx + 27, ly, status, col, bg);
     const s = frameStats(m);
+    if (!wo && !r.stored && !s.weapons.length) { status = 'Unarmed'; col = C.red; }
+    d.text(lx + 27, ly, status, col, bg);
     const af = s.armorTotal / Math.max(1, s.armorMax), bw = lw - 39;
     for (let i = 0; i < bw; i++) d.set(lx + 38 + i, ly, '▄', (i + 0.5) / bw <= af ? healthColor(af) : '#1e262e', bg);
     if (hov) ui.setTip([`${ch.name} ${ch.id}`, `Armor ${s.armorTotal}/${s.armorMax} (${Math.round(af * 100)}%)`]);

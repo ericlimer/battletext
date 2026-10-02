@@ -96,7 +96,9 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     }
     if (died && !p.commander) {
       p.dead = true;
+      p.diedDay = c.day;
       c.stats.pilotsLost++;
+      c.lancePilots = c.lancePilots.map((id) => (id === p.id ? null : id));
       res.casualties.push(`${p.callsign} (${p.name}) was killed in action.`);
       p.timeline.push(`Killed in action during "${k.name}".`);
     } else if (died && p.commander) {
