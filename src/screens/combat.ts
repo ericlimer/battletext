@@ -213,7 +213,7 @@ export class CombatScreen implements Screen {
         this.wait = 0.02;
         break;
       case 'log':
-        this.logLines.push({ text: e.text, color: e.color });
+        if (!this.mergeLog(e.text)) this.logLines.push({ text: e.text, color: e.color });
         if (this.logLines.length > 400) this.logLines.splice(0, 100);
         this.logScroll.scroll = 1e9;
         this.wait = 0;
@@ -776,6 +776,27 @@ export class CombatScreen implements Screen {
     // Frame lines
     d.vline(PX - 1 + 0, MY, ROWS - MY, C.border);
     void COLS;
+  }
+
+  /** Folds repeated volleys of the same weapon at the same target into one log line. */
+  mergeLog(text: string): boolean {
+    const RE = /^(.+?): (?:(\d+)× )?(.+?) → (.+?) (\d+)\/(\d+) hit(?: \((.*)\))?$/;
+    const prev = this.logLines[this.logLines.length - 1];
+    const a = prev && RE.exec(prev.text), b = RE.exec(text);
+    if (!a || !b || a[1] !== b[1] || a[3] !== b[3] || a[4] !== b[4]) return false;
+    const n = (+(a[2] ?? 1)) + 1;
+    const hits = +a[5] + +b[5], shots = +a[6] + +b[6];
+    const locs = new Map<string, number>();
+    for (const part of [a[7], b[7]]) {
+      if (!part) continue;
+      for (const seg of part.split(', ')) {
+        const m = /^(.*?) ?(\d+)$/.exec(seg);
+        if (m) locs.set(m[1], (locs.get(m[1]) ?? 0) + +m[2]);
+      }
+    }
+    const ls = [...locs.entries()].map(([l, d]) => (l ? `${l} ${d}` : `${d}`)).join(', ');
+    prev.text = `${a[1]}: ${n}× ${a[3]} → ${a[4]} ${hits}/${shots} hit${ls ? ` (${ls})` : ''}`;
+    return true;
   }
 
   tileColors(i: number, x: number, y: number): { ch: string; fg: string; bg: string } {
