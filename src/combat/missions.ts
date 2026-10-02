@@ -285,7 +285,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       const a1 = place(b, enemyLance(3), 1, Math.floor(W * 0.6), r.chance(0.5) ? 5 : H - 6, 4);
       const a2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, 2), 1, W - 5, rd.ey + (r.chance(0.5) ? -12 : 12), 6, { deployRound: 4, deployed: false });
       enemyUnits = [...a1, ...a2];
-      for (const e of enemyUnits) e.ai.goal = [Math.floor(W * 0.6), rd.ey];
+      for (const e of enemyUnits) e.ai.goal = [Math.floor(W * 0.4), rd.ey];
       for (const pu of playerUnits) { pu.tag = 'guard'; pu.ai.goal = [cu[0]?.x ?? 6, cu[0]?.y ?? rd.wy]; }
       objectives.push({ id: 'escort', text: 'At least 2 convoy vehicles reach the east edge', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'allsafe', text: 'All convoy vehicles survive', primary: false, status: 'active', bonus });
