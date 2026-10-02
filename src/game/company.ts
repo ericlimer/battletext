@@ -1,7 +1,7 @@
 // Career state and rules: time, finances, reputation, contracts, markets, hiring, repairs.
 
 import { RNG } from '../engine/rng';
-import { Frame, newMechFrame, frameTons, repairEstimate, repairFully, frameValue, refillAmmo, frameName, isFrameDamaged } from './frame';
+import { Frame, newMechFrame, frameTons, repairEstimate, repairFully, frameValue, frameSellPrice, refillAmmo, frameName, isFrameDamaged } from './frame';
 import { Pilot, makePilot, salary, health, uniqueCallsign, grantAbilities } from './pilot';
 import { StarSystem, generateStarMap, route } from './world';
 import { MissionType, MISSION_INFO, pilotTier } from '../combat/missions';
@@ -612,7 +612,7 @@ function liquidate(c: Company, say: (t: string, col?: string) => void): void {
   let raised = 0;
   for (const [id, n] of Object.entries(c.inventory)) { if (c.funds >= 0) break; const v = sellPrice(c, id) * n; c.funds += v; raised += v; c.inventory[id] = 0; }
   for (const [id, n] of Object.entries(c.parts)) { if (c.funds >= 0) break; const v = partSellPrice(id) * n; c.funds += v; raised += v; c.parts[id] = 0; }
-  const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const v = Math.round(frameValue(m) * 0.35); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); say(`Creditors seized ${frameName(m)}.`, '#e8503a'); } };
+  const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const v = Math.min(Math.round(frameValue(m) * 0.35), frameSellPrice(m)); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); say(`Creditors seized ${frameName(m)}.`, '#e8503a'); } };
   sellM(c.storage);
   if (c.funds < 0 && c.mechs.length > 1) { const keep = c.mechs.slice(0, 1); const rest = c.mechs.slice(1); sellM(rest); c.mechs = [...keep, ...rest]; }
   if (raised) say(`Forced liquidation raised ${cb(raised)} to cover debts.`, '#f0a830');

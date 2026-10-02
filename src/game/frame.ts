@@ -22,6 +22,7 @@ export interface Frame {
   struct: Record<string, number>;
   maxStruct: Record<string, number>;
   nickname?: string;
+  usedPrice?: number; // bought cheap off a used lot: resale can never beat what was paid
 }
 
 let uidCounter = 0;
@@ -284,6 +285,13 @@ export function frameValue(f: Frame): number {
   const liveItemCost = f.items.filter((i) => !i.dead).reduce((a, i) => a + item(i.id).cost, 0);
   void curItemCost;
   return Math.max(Math.round(c.cost * 0.1), Math.round(c.cost - stockItemCost * 0.8 + liveItemCost * 0.8 - repairEstimate(f).cost));
+}
+
+/** What a 'Mech fetches on the market. */
+export function frameSellPrice(f: Frame): number {
+  let v = frameValue(f) * 0.45;
+  if (f.usedPrice !== undefined) v = Math.min(v, f.usedPrice * 0.8);
+  return Math.round(v / 1000) * 1000;
 }
 
 export function maxArmorPer(f: Frame): Record<Loc, number> {

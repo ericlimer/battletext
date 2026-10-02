@@ -388,7 +388,7 @@ function structureValue(b: Battle, u: Unit): number {
   for (const st of b.map.structures) {
     if (st.destroyed || !st.objective || SIDE(st.team) === side) continue;
     let ev = 0;
-    for (const wc of b.weaponsOf(u)) { const w = item(wc.id); const hc = b.hitChance(u, null, w, u, undefined, false, st); if (hc.ok) ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1); }
+    for (const wc of b.weaponsOf(u)) { if (!b.hasAmmo(u, wc)) continue; const w = item(wc.id); const hc = b.hitChance(u, null, w, u, undefined, false, st); if (hc.ok) ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1); }
     best = Math.max(best, ev);
   }
   return best;

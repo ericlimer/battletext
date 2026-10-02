@@ -7,7 +7,7 @@ import type { ArgoScreen } from './argo';
 import { app } from './app';
 import { company, saveGame } from '../game/save';
 import { bays, mechBusy, queueRepair, assembleMech, PARTS_NEEDED, workQueueDays, techHours, addLog } from '../game/company';
-import { Frame, frameName, frameStats, repairEstimate, frameValue, isFrameDamaged, weaponSummary } from '../game/frame';
+import { Frame, frameName, frameStats, repairEstimate, frameValue, isFrameDamaged, weaponSummary, frameSellPrice } from '../game/frame';
 import { chassis, CLASS_NAMES } from '../data/mechs';
 import { item, MECH_LOCS, LOC_NAMES, HARD_COLORS } from '../data/items';
 import { cb, cbk } from '../engine/util';
@@ -148,7 +148,7 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     saveGame(c);
   }
   bx += 16;
-  const price = Math.round(frameValue(m) * 0.45 / 1000) * 1000;
+  const price = frameSellPrice(m);
   if (!st.confirmSell) {
     if (ui.button(bx, by, `SELL ${cbk(price)}`, { style: 'block', w: 16, center: true, disabled: !!wo || !!c.travel, tip: c.travel ? 'Must be docked.' : 'Sell this \'Mech and everything installed in it.' })) st.confirmSell = true;
   } else if (ui.button(bx, by, 'CONFIRM SELL', { style: 'block', w: 16, center: true, fg: C.red })) {

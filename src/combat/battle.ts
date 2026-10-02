@@ -131,6 +131,7 @@ export class Battle {
   seen: [Set<number>, Set<number>] = [new Set(), new Set()];
   detected: [Set<number>, Set<number>] = [new Set(), new Set()];
   lastAttackRound = 0;
+  lastDamageRound = 0;
   active: Unit | null = null;
   heatMult: number;
   hooks: { roundStart?: (b: Battle) => void; check?: (b: Battle) => '' | 'win' | 'loss'; destroyed?: (b: Battle, u: Unit) => void; structDestroyed?: (b: Battle, s: Structure) => void } = {};
@@ -271,6 +272,11 @@ export class Battle {
   endRound(): void {
     for (const u of this.live()) if (u.sensorLocked > 0) u.sensorLocked--;
     this.check();
+    // Stalemate guard: if nobody has damaged anything for a long time, both sides disengage
+    if (!this.result && this.round - this.lastDamageRound >= 12) {
+      this.say('Neither side can make progress. Both forces disengage.', '#f0a830');
+      this.finish('withdraw');
+    }
   }
 
   beginActivation(u: Unit): boolean {
@@ -775,6 +781,7 @@ export class Battle {
 
   damageStructureObj(s: Structure, dmg: number, by: Unit | null): void {
     if (s.destroyed) return;
+    if (dmg > 0) this.lastDamageRound = this.round;
     s.hp -= dmg;
     const m = this.map;
     const tile = s.tiles[0];
@@ -791,6 +798,7 @@ export class Battle {
 
   // ---- Damage ----------------------------------------------------------------------------
   damage(t: Unit, loc: string, dmg: number, by: Unit | null, critMult = 1): void {
+    if (dmg > 0) this.lastDamageRound = this.round;
     if (!t.alive || dmg <= 0) return;
     const f = t.frame;
     t.dmgTaken += dmg;
