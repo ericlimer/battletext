@@ -53,12 +53,16 @@ function tileColor(rt: MissionRuntime, i: number): string {
 }
 
 /** Draws the survey at (x, y): w = map width columns, map height / 2 rows. */
+const colorCache = new WeakMap<MissionRuntime, string[]>();
 export function drawSurvey(d: Display, rt: MissionRuntime, x: number, y: number): void {
   const m = rt.battle.map;
+  let cols = colorCache.get(rt);
+  if (!cols) { cols = []; for (let i = 0; i < m.w * m.h; i++) cols.push(tileColor(rt, i)); colorCache.set(rt, cols); }
+  const tileColorC = (_rt: MissionRuntime, i: number) => cols![i];
   for (let row = 0; row < m.h / 2; row++) {
     for (let col = 0; col < m.w; col++) {
-      const top = tileColor(rt, row * 2 * m.w + col);
-      const bot = row * 2 + 1 < m.h ? tileColor(rt, (row * 2 + 1) * m.w + col) : top;
+      const top = tileColorC(rt, row * 2 * m.w + col);
+      const bot = row * 2 + 1 < m.h ? tileColorC(rt, (row * 2 + 1) * m.w + col) : top;
       d.set(x + col, y + row, '▀', m.night ? scale(top, 0.6) : top, m.night ? scale(bot, 0.6) : bot);
     }
   }
