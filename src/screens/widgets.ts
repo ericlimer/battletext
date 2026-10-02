@@ -151,7 +151,7 @@ export function weaponTip(id: string): string[] {
     if (w.acc) out.push(`Accuracy {#6ad46a}+${w.acc}%{/}`);
     if (w.bonusText) out.push(`{#f0a830}${w.bonusText}{/}`);
   }
-  if (w.kind === 'ammo') out.push(`${w.ammoShots} shots · explodes for ${w.explode}/shot if critted`);
+  if (w.kind === 'ammo') out.push(w.explode ? `${w.ammoShots} shots · explodes for ${w.explode}/shot if critted` : `${w.ammoShots} shots`);
   out.push(`{#6d7f8a}${w.desc}{/}`);
   return out;
 }

@@ -1,7 +1,7 @@
 // Contract execution: build the mission from career state and resolve the results.
 
 import { RNG } from '../engine/rng';
-import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED, monthlyExpenses, dateStr, morale, contractDays, has } from './company';
+import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED, monthlyExpenses, dateStr, morale, contractDays, has, genContract, maxContractDiff } from './company';
 import { Frame, frameName, refillAmmo, isFrameDamaged, repairEstimate } from './frame';
 import { Pilot, health } from './pilot';
 import { setupMission, MissionRuntime, objectivesSummary } from '../combat/missions';
@@ -72,7 +72,15 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   for (const [f, v] of res.repChanges) c.rep[f] = Math.max(-100, Math.min(100, (c.rep[f] ?? 0) + v));
   const oldMrb = mrbLevel(c);
   c.mrb += res.mrbGain;
-  if (mrbLevel(c) > oldMrb) lines.push(`MRB rating increased to ${mrbLevel(c)}! Higher-difficulty contracts are now available.`);
+  if (mrbLevel(c) > oldMrb) {
+    lines.push(`MRB rating increased to ${mrbLevel(c)}! Higher-difficulty contracts are now available.`);
+    // Word gets around: a bigger job is waiting on the local board
+    const board = (c.contracts[c.location] ??= []);
+    const big = genContract(c, r, sys(c), { minDiff: Math.min(10, Math.floor(maxContractDiff(c)) - 1) });
+    big.expires = c.day + contractDays(k) + 20;
+    board.push(big);
+    lines.push(`A high-stakes contract has been posted for the newly bonded company: "${big.name}".`);
+  }
   // ---- Pilots & mechs
   // Wrecks are recovered unless the whole lance was lost
   const wiped = rt.playerUnits.every((u) => !u.alive);
@@ -91,7 +99,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
       // HBS-style: a cored 'Mech wounds its pilot; death comes from a destroyed cockpit or
       // from wounds exceeding the pilot's health.
       if (u.destroyHow === 'head') died = true;
-      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') { p.injuries++; if (p.injuries > health(p)) died = true; }
+      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') { p.injuries++; if (p.injuries > health(p) || r.chance(u.destroyHow === 'ammo' ? 0.3 : 0.12)) died = true; }
       else if (u.destroyHow === 'pilot') died = r.chance(0.2);
     }
     if (died && !p.commander) {
@@ -110,11 +118,11 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
       p.healDays = healDaysFor(c, p.injuries);
       res.casualties.push(`${p.callsign} injured: ${p.injuries} wound${p.injuries > 1 ? 's' : ''}, ${p.healDays} days to recover.`);
     }
-    if (!p.dead) p.timeline.push(`${dateStr(c.day)}: "${k.name}" (${win ? 'success' : 'failure'}), ${u.kills} kill${u.kills === 1 ? '' : 's'}.`);
+    if (!p.dead) p.timeline.push(`${dateStr(c.day + contractDays(k))}: "${k.name}" (${win ? 'success' : 'failure'}), ${u.kills} kill${u.kills === 1 ? '' : 's'}.`);
     const m = u.frame;
     if (!u.alive && (u.destroyHow === 'ct' || u.destroyHow === 'ammo')) {
       // Recovery team: likely when the field is held, possible on a withdrawal, never when wiped out
-      const recovered = !wiped && r.chance(win ? 0.85 : 0.5);
+      const recovered = r.chance(wiped ? 0.3 : win ? 0.85 : 0.6);
       if (recovered) {
         (m as any).wreck = true;
         res.mechsLost.push(`${frameName(m)} was cored, but the recovery team hauled the wreck aboard. It needs a full rebuild.`);
@@ -210,7 +218,7 @@ export function claimSalvage(c: Company, pool: SalvageEntry[], picks: number[]):
     if (g.kind === 'part') c.parts[g.id] = (c.parts[g.id] ?? 0) + 1;
     else c.inventory[g.id] = (c.inventory[g.id] ?? 0) + 1;
   }
-  if (got.length) addLog(c, `Salvage recovered: ${got.map((g) => g.label).join(', ')}.`, '#f0c850');
+  if (got.length) addLog(c, `Salvage recovered: ${got.map((g) => g.label).join(', ')}.`, '#f0c850', c.day + (c.deployDays ?? 0));
   c.pendingSalvage = undefined;
   return got;
 }

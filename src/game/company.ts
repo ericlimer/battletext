@@ -311,7 +311,7 @@ export function basePay(diff: number): number {
   return Math.round((240000 + diff * 100000 + diff * diff * 9000) / 5000) * 5000;
 }
 
-export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
+export function genContract(c: Company, r: RNG, s: StarSystem, opts: { minDiff?: number } = {}): Contract {
   const types: MissionType[] = ['battle', 'battle', 'assassinate', 'destroybase', 'defendbase', 'ambush', 'escort', 'capture'];
   const board0 = c.contracts[s.id] ?? [];
   const type = r.weighted(types, (t) => 1 / (1 + board0.filter((k) => k.type === t).length * 1.2));
@@ -327,7 +327,7 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   if (!target) target = 'pirates';
   // Some boards carry a high-stakes job pitched at the top of what the MRB will bond
   const stakes = r.chance(0.2) && maxContractDiff(c) >= s.diff + 2 ? 2 : 0;
-  const diff = Math.max(1, Math.min(10, s.diff + r.int(-1, 1) + (type === 'assassinate' ? 1 : 0) + stakes));
+  const diff = Math.max(opts.minDiff ?? 1, Math.min(10, s.diff + r.int(-1, 1) + (type === 'assassinate' ? 1 : 0) + stakes));
   const repF = 1 + Math.max(-0.2, Math.min(0.25, (c.rep[employer] ?? 0) / 300));
   const pay = Math.round((basePay(diff) * r.range(0.9, 1.15) * repF * (s.tags.includes('capital') ? 1.15 : 1)) / 5000) * 5000;
   const salvageMax = Math.min(14, 5 + Math.floor(diff / 2) + (repLevel(c.rep[employer] ?? 0).idx >= 5 ? 2 : repLevel(c.rep[employer] ?? 0).idx >= 4 ? 1 : 0));
@@ -496,7 +496,8 @@ export function advanceDay(c: Company): DayReport {
   const r = rngOf(c);
   c.day++;
   // Work orders
-  let hours = techHours(c);
+  // The techs travel with the 'Mechs: nothing gets fixed until the lance is back aboard
+  let hours = (c.deployDays ?? 0) > 0 ? 0 : techHours(c);
   for (const w of [...c.work]) {
     if (hours <= 0) break;
     const use = Math.min(hours, w.hours);

@@ -18,7 +18,7 @@ import { Pilot, isAvailable, health, skillTotal } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
-import { surveyOf, drawSurvey, oppositionEstimate } from './survey';
+import { surveyOf, drawSurvey, oppositionEstimate, likelyLance } from './survey';
 import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
@@ -34,7 +34,7 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   const local = c.contracts[c.location] ?? [];
   const offers = (c.travelOffers ?? []).filter((t) => t.expires > c.day);
   const list = st.travel ? offers : local;
-  ui.panel(x + 1, y, 62, h, st.travel ? 'TRAVEL CONTRACTS' : `CONTRACTS · ${sys(c).name.toUpperCase().slice(0, 13)}`);
+  ui.panel(x + 1, y, 62, h, st.travel ? 'TRAVEL CONTRACTS' : `CONTRACTS · ${sys(c).name.toUpperCase().slice(0, 12)}`);
   if (ui.button(x + 30, y, `Local ${local.length}`, { style: 'plain', active: !st.travel, tip: 'Contracts in this system.' })) { st.travel = false; st.sel = 0; st.list.scroll = 0; }
   if (ui.button(x + 42, y, `Travel ${offers.length}`, { style: 'plain', active: st.travel, key: 't', tip: 'Contracts in neighbouring systems (+20% pay). Accepting sets course; the terms are held for you.' })) { st.travel = true; st.sel = 0; st.list.scroll = 0; }
   if (!list.length) d.text(x + 3, y + 2, st.travel ? 'No travel contracts posted.' : 'No contracts on offer. Pass time, check Travel, or move on.', C.dim);
@@ -68,14 +68,14 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   yy += 2;
   d.ctext(dx + 3, yy++, `Employer  {${emp.color}}${emp.name}{/}  {#6d7f8a}(${repLevel(c.rep[k.employer] ?? 0).name}){/}`, C.dim);
   d.ctext(dx + 3, yy++, `Target    {${tgt.color}}${tgt.name}{/}  {#6d7f8a}(${repLevel(c.rep[k.target] ?? 0).name}){/}`, C.dim);
-  d.ctext(dx + 3, yy++, `Mission   {#f2f6f8}${mi.name}{/} — ${mi.desc}`, C.dim, undefined, dw - 6);
+  wrap(`${mi.name} — ${mi.desc}`, dw - 16).forEach((l, i) => d.ctext(dx + 3, yy++, i ? `          ${l}` : `Mission   {#f2f6f8}${l.replace(mi.name, `${mi.name}{/}`)}`, C.dim));
   d.ctext(dx + 3, yy++, `Terrain   {#f2f6f8}${BIOME_INFO[k.biome].name}{/} — ${BIOME_INFO[k.biome].desc}${k.night ? ' {#b27ae8}Night.{/}' : ''}`, C.dim, undefined, dw - 6);
   for (const l of wrap(k.flavor, dw - 8)) d.text(dx + 3, yy++, l, C.text);
   yy++;
   d.ctext(dx + 3, yy++, `Maximum payment {#f0c850}${cb(k.pay)}{/}   Salvage up to {#f2f6f8}${k.salvageMax}{/} shares`, C.dim);
   const rt = surveyOf(c, k);
   const est = oppositionEstimate(rt);
-  const lanceT = c.mechs.filter((m) => c.lance.includes(m.uid)).reduce((a, m) => a + frameTons(m), 0);
+  const lanceT = likelyLance(c).reduce((a, m) => a + frameTons(m), 0);
   d.ctext(dx + 3, yy++, `Enemy forces: ${threatText(k.diff)}  {#6d7f8a}· intel: ~${est.units} units, ~${est.tons}t{/}`, C.dim, undefined, dw - 6);
   const ratio = lanceT / Math.max(1, est.tons);
   d.ctext(dx + 3, yy++, `Your lance: {#f2f6f8}${lanceT}t{/}  {${ratio >= 1.1 ? '#6ad46a' : ratio >= 0.8 ? '#f0c040' : '#e8503a'}}${ratio >= 1.1 ? 'favourable odds' : ratio >= 0.8 ? 'an even fight' : 'outgunned'}{/}`, C.dim);
@@ -147,7 +147,8 @@ export class NegotiateScreen implements Screen {
     if (cap < 10) d.ctext(x + 12, y + 7, `{#e8503a}▼{/} {#6d7f8a}Your standing ({${lv.color}}${lv.name}{/}{#6d7f8a}) and MRB cap salvage.{/}`, C.dim, undefined, sw);
     d.ctext(x + 3, y + 9, `Payment on completion  {#f0c850}${cb(n.cash)}{/}`, C.dim);
     d.ctext(x + 3, y + 10, `Salvage shares        {#f2f6f8}${n.salvage}{/} {#6d7f8a}(${n.priority} priority, the rest chosen after the employer's cut){/}`, C.dim, undefined, w - 6);
-    d.ctext(x + 3, y + 11, `Optional objectives   {#f0c850}~${cb(k.pay * 0.25)}{/} bonus each`, C.dim);
+    const opts = surveyOf(c, k).objectives.filter((o) => !o.primary);
+    d.ctext(x + 3, y + 11, opts.length ? `Optional objectives   ${opts.map((o) => `${o.text} {#f0c850}+${cbk(o.bonus)}{/}`).join(' · ')}` : 'Optional objectives   none', C.dim, undefined, w - 6);
     d.ctext(x + 3, y + 12, `Deployment            {#f2f6f8}${contractDays(k)}{/} days`, C.dim);
     const eRep = Math.round(3 + k.diff * 0.9), tRep = Math.round(2 + k.diff * 0.5), fRep = Math.round(3 + k.diff * 0.5);
     d.ctext(x + 3, y + 14, `Success: {${emp.color}}${emp.short}{/} {#6ad46a}+${eRep}{/}, {${tgt.color}}${tgt.short}{/} {#e8503a}-${tRep}{/}   Failure: {${emp.color}}${emp.short}{/} {#e8503a}-${fRep}{/}`, C.dim, undefined, w - 6);

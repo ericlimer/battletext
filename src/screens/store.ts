@@ -35,10 +35,10 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
     d.text(x + 4, y + 5, 'A pirate fixer watches you from the back of a dockside bar.', C.text, undefined, half0 - 6);
     d.text(x + 4, y + 7, '"Membership is for life. Rare kit, Star League salvage, the', '#c8a8f0', undefined, half0 - 6);
     d.text(x + 4, y + 8, ' good stuff. Prices are what they are."', '#c8a8f0', undefined, half0 - 6);
-    d.ctext(x + 4, y + 10, `Membership fee {#f0c850}${cb(BLACK_MARKET_FEE)}{/}. Pirate reputation +5, ${own.short} reputation -3.`, C.dim, undefined, half0 - 6);
+    d.ctext(x + 4, y + 10, `Membership fee {#f0c850}${cb(BLACK_MARKET_FEE)}{/}. Pirate reputation +5${s.owner !== 'pirates' ? `, ${own.short} reputation -3` : ''}.`, C.dim, undefined, half0 - 6);
     if (ui.button(x + 4, y + 12, 'BUY MEMBERSHIP', { style: 'block', w: 22, center: true, disabled: c.funds < BLACK_MARKET_FEE })) {
       c.funds -= BLACK_MARKET_FEE; c.stats.spent += BLACK_MARKET_FEE; c.blackMarket = true;
-      c.rep['pirates'] = (c.rep['pirates'] ?? 0) + 5; c.rep[s.owner] = (c.rep[s.owner] ?? 0) - 3;
+      c.rep['pirates'] = (c.rep['pirates'] ?? 0) + 5; if (s.owner !== 'pirates') c.rep[s.owner] = (c.rep[s.owner] ?? 0) - 3;
       addLog(c, `Bought black market membership on ${s.name} for ${cb(BLACK_MARKET_FEE)}.`, '#b27ae8');
       saveGame(c);
       argo.notify('Welcome to the black market', '#b27ae8');
@@ -110,7 +110,7 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
         addLog(c, `Purchased ${chassis(cid).name} ${cid} for ${cb(si.price)}.`, '#f0c850');
       }
       saveGame(c);
-      argo.notify(`Bought ${si.kind === 'item' ? item(si.id).name : chassis(si.id.replace('USED:', '')).name} for ${cbk(si.price)}`, C.cbill);
+      argo.notify(`Bought ${si.kind === 'item' ? item(si.id).name : `${chassis(si.id.replace('USED:', '')).name}${si.kind === 'part' ? ' part' : ''}`} for ${cbk(si.price)}`, C.cbill);
     }
   }
   // Sell

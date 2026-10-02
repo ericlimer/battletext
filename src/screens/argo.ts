@@ -117,8 +117,8 @@ export class ArgoScreen implements Screen {
       const t = this.toast;
       const len = t.text.length + 4;
       const a = Math.min(1, t.t * 2);
-      d.fill(COLS - len - 2, 1, len + 2, 1, ' ', C.text, lerp(C.bg, '#14202a', a));
-      d.text(COLS - len - 1, 1, t.text, lerp(C.bg, t.color, a));
+      d.fill(COLS - len - 2, ROWS - 1, len + 2, 1, ' ', C.text, lerp(C.bg, '#14202a', a));
+      d.text(COLS - len - 1, ROWS - 1, t.text, lerp(C.bg, t.color, a));
       if (t.t <= 0) this.toast = null;
     }
     if (this.menuOpen) { ui.enabled = true; this.drawMenu(ui); }
@@ -330,18 +330,22 @@ export class ArgoScreen implements Screen {
     const hi = Math.max(1, ...hist), lo = Math.min(0, ...hist);
     d.text(x + 75, cy - 2, 'FUNDS · LAST ' + Math.max(1, (hist.length - 1) * 3) + ' DAYS', C.accent, undefined, 99, true);
     d.text(x + 75, cy - 1, cbk(hi), C.faint);
-    d.text(x + 75, cy + ch, cbk(lo), C.faint);
-    const bw = Math.max(1, Math.floor(cw / Math.max(1, hist.length)));
-    for (let i = 0; i < hist.length; i++) {
+    d.text(x + 75, cy + ch - 1, cbk(lo), C.faint);
+    // Stretch whatever history exists across the full chart width
+    for (let col = 0; col < cw; col++) {
+      const i = Math.min(hist.length - 1, Math.floor((col * hist.length) / cw));
       const v = hist[i], top = ((v - lo) / (hi - lo || 1)) * ch * 8;
       for (let r = 0; r < ch; r++) {
         const fill = Math.max(0, Math.min(8, Math.round(top - (ch - 1 - r) * 8)));
-        for (let k = 0; k < bw; k++) {
-          const col = cx + 6 + i * bw + k;
-          if (fill > 0) d.set(col, cy + r, ' ▁▂▃▄▅▆▇█'[fill], v < 0 ? C.red : i === hist.length - 1 ? C.accent : '#8a7a3a');
-          else d.set(col, cy + r, r === ch - 1 ? '·' : ' ', '#23303a');
-        }
+        if (fill > 0) d.set(cx + 6 + col, cy + r, ' ▁▂▃▄▅▆▇█'[fill], v < 0 ? C.red : i === hist.length - 1 ? C.accent : '#8a7a3a');
+        else d.set(cx + 6 + col, cy + r, r === ch - 1 ? '·' : ' ', '#23303a');
       }
+    }
+    // Month ticks under the chart
+    const span = Math.max(1, (hist.length - 1) * 3), startDay = c.day - span;
+    for (let day = Math.ceil(startDay / 30) * 30; day <= c.day; day += 30) {
+      const col = Math.round(((day - startDay) / span) * (cw - 1));
+      if (col >= 0 && col < cw - 6) d.text(cx + 6 + col, cy + ch, `┴${dateStr(day + 1).slice(3, 6)}`, C.faint);
     }
     const st = c.stats;
     const ly = cy + ch + 2;

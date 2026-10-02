@@ -28,10 +28,11 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     d.text(lx + 4, ly, p.callsign, p.dead ? C.red : C.bright, bg, 16, true);
     d.text(lx + 21, ly, pilotRank(p), C.dim, bg);
     const s = pilotStatus(c, p);
-    if (st.mode === 'roster') d.text(lx + lw - 1 - s.text.length, ly, s.text, s.color, bg);
-    const canTrain = !p.dead && SKILLS.some((k) => p[k] < 10 && p.xp >= xpCost(p[k]));
-    if (st.mode === 'roster' && canTrain) d.text(lx + lw - 4 - s.text.length, ly, '▲XP', C.accent, bg);
-    else d.text(lx + lw - 9, ly, cbk(p.hireCost ?? 0).padStart(8), C.cbill, bg);
+    if (st.mode === 'roster') {
+      d.text(lx + lw - 1 - s.text.length, ly, s.text, s.color, bg);
+      const canTrain = !p.dead && SKILLS.some((k) => p[k] < 10 && p.xp >= xpCost(p[k]));
+      if (canTrain) d.text(lx + lw - 6 - s.text.length, ly, '▲XP', C.accent, bg);
+    } else d.text(lx + lw - 9, ly, cbk(p.hireCost ?? 0).padStart(8), C.cbill, bg);
     d.text(lx + 4, ly + 1, p.name, C.dim, bg, 24);
     d.ctext(lx + 30, ly + 1, skillLine(p), C.text, bg);
     const ab = p.abilities.map((a) => ability(a).name).join(', ');
@@ -102,7 +103,7 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
   yy++;
   if (p.timeline.length && st.mode === 'roster') {
     d.text(dx + 3, yy++, 'SERVICE RECORD', C.accent, undefined, 99, true);
-    for (const t of p.timeline.slice(-4)) d.text(dx + 3, yy++, t, C.faint, undefined, dw - 6);
+    for (const t of p.timeline.slice(-Math.max(2, Math.min(8, y0 + h - 7 - yy)))) d.text(dx + 3, yy++, t, C.faint, undefined, dw - 6);
   }
   // Actions
   const by = y0 + h - 5;

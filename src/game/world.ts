@@ -69,12 +69,15 @@ export function generateStarMap(r: RNG): { systems: StarSystem[]; start: string 
   const systems: StarSystem[] = pts.map(([x, y], i) => {
     let best = caps[0], bd = Infinity;
     for (const c of caps) { const d = Math.hypot(c[1] - x, (c[2] - y) * 1.6) * r.range(0.85, 1.15); if (d < bd) { bd = d; best = c; } }
-    const tags = r.shuffle([...TAG_KEYS]).slice(0, r.int(1, 2));
+    let tags = r.shuffle([...TAG_KEYS]).slice(0, r.int(1, 2));
+    if (tags.includes('industrial') && tags.includes('agricultural')) tags = tags.filter((t) => t !== 'agricultural');
     const biomes = r.shuffle([...BIOMES]).slice(0, r.int(2, 3));
     return { id: 's' + i, name: names[i % names.length], x, y, owner: best[0], diff: 1, tags, desc: (() => { const d0 = descs.find((d) => !firsts.has(d.split('. ')[0])) ?? descs[i % descs.length]; firsts.add(d0.split('. ')[0]); return d0; })(), links: [], biomes, visited: false, contractsDay: -999, storeDay: -999, hiresDay: -999 };
   });
-  if (r.chance(0.5)) systems[r.int(0, systems.length - 1)].owner = 'pirates';
-  systems[r.int(0, systems.length - 1)].owner = 'pirates';
+  const havens = ['A lawless haven where the only government is whoever has the most guns.', 'A pirate port: every dock is for hire and every captain has a price on their head.', 'Smugglers run this rock. Nobody asks where cargo came from.'];
+  const pirate = (sy: StarSystem) => { sy.owner = 'pirates'; sy.desc = r.pick(havens); sy.tags = sy.tags.filter((t) => t !== 'capital' && t !== 'agricultural'); if (!sy.tags.includes('frontier')) sy.tags.push('frontier'); };
+  if (r.chance(0.5)) pirate(systems[r.int(0, systems.length - 1)]);
+  pirate(systems[r.int(0, systems.length - 1)]);
   // Links: connect k nearest within range, then ensure connectivity
   const d = (a: StarSystem, b: StarSystem) => Math.hypot(a.x - b.x, (a.y - b.y) * 1.6);
   for (const s of systems) {

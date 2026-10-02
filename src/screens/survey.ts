@@ -3,17 +3,22 @@
 
 import { Display } from '../engine/display';
 import { C, lerp, scale } from '../engine/color';
-import { Contract, Company } from '../game/company';
+import { Contract, Company, mechReady } from '../game/company';
 import { setupMission, MissionRuntime } from '../combat/missions';
 import { BIOME_INFO } from '../combat/terrain';
 import { SIDE } from '../combat/battle';
-import { cloneFrame, frameTons, newMechFrame } from '../game/frame';
+import { Frame, cloneFrame, frameTons, newMechFrame } from '../game/frame';
 
 const cache = new Map<string, MissionRuntime>();
 
+/** The lance the drop screen would field: heaviest ready 'Mechs first. */
+export function likelyLance(c: Company): Frame[] {
+  return c.mechs.filter((m) => mechReady(c, m)).sort((a, b) => frameTons(b) - frameTons(a)).slice(0, 4);
+}
+
 /** Builds (once) the mission a contract would launch, using placeholder 'Mechs for the player. */
 export function surveyOf(c: Company, k: Contract): MissionRuntime {
-  const lance = c.mechs.filter((m) => c.lance.includes(m.uid));
+  const lance = likelyLance(c);
   const key = `${k.id}:${k.seed}:${lance.length}`;
   let rt = cache.get(key);
   if (!rt) {

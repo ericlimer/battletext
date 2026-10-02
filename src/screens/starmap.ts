@@ -6,7 +6,7 @@ import { COLS } from '../engine/display';
 import type { ArgoScreen } from './argo';
 import { skulls } from './argo';
 import { company, saveGame } from '../game/save';
-import { sys, startTravel, travelMult, maxContractDiff } from '../game/company';
+import { sys, startTravel, travelMult, maxContractDiff, hasBlackMarket } from '../game/company';
 import { route, tagDesc, StarSystem } from '../game/world';
 import { FACTIONS, faction, repLevel } from '../data/factions';
 import { wrap } from '../engine/util';
@@ -79,7 +79,7 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     const col = cur ? lerp(C.accent, '#ffffff', 0.5 + 0.5 * Math.sin(ui.time * 4)) : f.color;
     d.set(sx, sy, glyph, col, sel || hov ? '#26323c' : undefined);
     if (sel) { d.set(sx - 1, sy, '[', C.accent); d.set(sx + 1, sy, ']', C.accent); }
-    if (offers.has(s.id)) d.set(sx, sy - 1, '◆', lerp(C.cbill, '#ffffff', 0.25 + 0.25 * Math.sin(ui.time * 3)));
+    if (offers.has(s.id) && !sel) d.set(sx + 1, sy, '◆', lerp(C.cbill, '#ffffff', 0.25 + 0.25 * Math.sin(ui.time * 3)));
     for (let k = -1; k <= 1; k++) occupied.add(`${sx + k},${sy}`);
     if (s.diff > maxContractDiff(c) && (sel || hov)) d.text(sx - 1, sy + 1, '!', C.red);
   }
@@ -99,6 +99,14 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     if (fits(lx) || rank(s) > 0) {
       d.text(lx, sy, label, cur ? C.accent : sel || hov ? C.bright : scale(f.color, s.visited ? 0.8 : 0.55));
       for (let k = 0; k < label.length; k++) occupied.add(`${lx + k},${sy}`);
+    } else {
+      // Crowded: fall back to a three-letter abbreviation rather than leaving the system unnamed
+      const ab = label.slice(0, 3);
+      for (const ax of [right, sx - 4]) {
+        let ok = ax >= ox && ax + 3 < ox + MW;
+        for (let k = 0; k < 3 && ok; k++) if (occupied.has(`${ax + k},${sy}`)) ok = false;
+        if (ok) { d.text(ax, sy, ab, scale(f.color, s.visited ? 0.8 : 0.55)); for (let k = 0; k < 3; k++) occupied.add(`${ax + k},${sy}`); break; }
+      }
     }
   }
   // Travelling ship marker
@@ -124,6 +132,7 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   for (const t of s.tags) for (const l of wrap(`▪ ${tagDesc(t)}`, pw - 4)) d.text(px + 2, yy++, l, C.dim);
   yy++;
   d.text(px + 2, yy++, `Biomes: ${s.biomes.join(', ')}`, C.faint, undefined, pw - 4);
+  if (hasBlackMarket(s)) d.ctext(px + 2, yy++, `{#b27ae8}Black market{/}${c.blackMarket ? ' (member)' : ' (members only)'}`, C.faint);
   if (s.visited && c.contracts[s.id]) d.text(px + 2, yy++, `Known contracts: ${c.contracts[s.id].filter((k) => k.expires > c.day).length}`, C.faint);
   for (const k of (c.travelOffers ?? []).filter((k) => k.sysId === s.id && k.expires > c.day).slice(0, 3)) {
     d.ctext(px + 2, yy++, `{#f0c850}◆{/} ${k.name} {#e8503a}${skulls(k.diff)}{/} {#f0c850}${Math.round(k.pay / 1000)}K{/}`, C.text, undefined, pw - 4);
