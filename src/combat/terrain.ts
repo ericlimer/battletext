@@ -214,7 +214,7 @@ export function generateMap(r: RNG, o: MapGenOpts): BattleMap {
     const s = m.shade[i];
     switch (t) {
       case 'plain': m.glyph[i] = B.groundGlyphs[Math.floor(s * 997) % B.groundGlyphs.length]; break;
-      case 'rough': m.glyph[i] = (m as any).rim?.has(i) ? 'o' : biome === 'lunar' ? '∙' : ['∙', ',', '∴', '\'', '∙'][Math.floor(s * 4999) % 5]; break;
+      case 'rough': m.glyph[i] = (m as any).rim?.has(i) ? '◦' : biome === 'lunar' ? '∙' : ['∙', ',', '∴', '\'', '∙'][Math.floor(s * 4999) % 5]; break;
       case 'lforest': m.glyph[i] = B.treeGlyphs[0]; break;
       case 'hforest': m.glyph[i] = B.treeGlyphs[1]; break;
       case 'water': m.glyph[i] = '~'; break;

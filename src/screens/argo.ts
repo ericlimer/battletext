@@ -6,7 +6,7 @@ import { C, lerp, scale, healthColor } from '../engine/color';
 import { COLS, ROWS } from '../engine/display';
 import { company, saveGame, exportSave } from '../game/save';
 import {
-  Company, dateStr, monthlyExpenses, morale, moraleName, mrbLevel, MRB_LEVELS, EXPENSE_LEVELS, UPGRADES, sys, advanceDay,
+  Company, dateStr, monthlyExpenses, morale, moraleName, moraleBreakdown, mrbLevel, MRB_LEVELS, EXPENSE_LEVELS, UPGRADES, sys, advanceDay,
   bays, pilotCap, techHours, CAREER_DAYS, careerScore, companyValue, travelDaysLeft, rngOf, saveRng, mechReady, has,
 } from '../game/company';
 import { FACTIONS, repLevel, faction } from '../data/factions';
@@ -137,7 +137,9 @@ export class ArgoScreen implements Screen {
     x += 16;
     x += d.text(x, 0, `-${cbk(ex.total)}/mo`, runway < 2 ? C.red : C.dim) + 3;
     const m = morale(c);
-    x += d.ctext(x, 0, `MORALE {${m >= 30 ? '#6ad46a' : m >= 15 ? '#f0c040' : '#e8503a'}}${m} ${moraleName(m)}{/}`, C.dim) + 3;
+    const mw = d.ctext(x, 0, `MORALE {${m >= 30 ? '#6ad46a' : m >= 15 ? '#f0c040' : '#e8503a'}}${m} ${moraleName(m)}{/}`, C.dim);
+    if (ui.hover(x, 0, mw, 1)) ui.setTip([`Morale ${m}/50 · ${moraleName(m)}`, ...moraleBreakdown(c).map(([l, v]) => `  ${v >= 0 ? '+' : ''}${v}  ${l}`), m >= 40 ? 'Inspired: +15% mission XP.' : m < 12 ? 'Below 12 at month end, MechWarriors may desert!' : 'Sets starting and maximum Resolve in combat.']);
+    x += mw + 3;
     x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}{#6d7f8a}·${c.mrb}{/}`, C.dim) + 2;
     const s = sys(c);
     const loc = c.travel ? `→ ${sys(c, c.travel.dest).name} ${travelDaysLeft(c)}d` : `${s.name}`;
@@ -286,7 +288,8 @@ export class ArgoScreen implements Screen {
     const m = morale(c);
     d.ctext(x + 3, y + 14, `Current morale: {#f2f6f8}${m}{/} (${moraleName(m)})`, C.text);
     d.text(x + 3, y + 15, 'Morale sets starting/max Resolve and how fast it builds.', C.faint, undefined, 66);
-    d.text(x + 3, y + 16, 'Below 12 at month end, unhappy MechWarriors may desert.', C.faint, undefined, 66);
+    d.text(x + 3, y + 16, 'Below 12 at month end, MechWarriors may desert. 40+: +15% XP.', C.faint, undefined, 66);
+    d.ctext(x + 56, y + 14, moraleBreakdown(c).filter(([l]) => l.startsWith('Recent')).map(([, v]) => `{${v >= 0 ? '#6ad46a' : '#e8503a'}}events ${v >= 0 ? '+' : ''}${v}{/}`).join(''), C.dim);
     simpleBar(d, x + 3, y + 17, 50, m / 50, healthColor(m / 50));
     // Breakdown
     const e = monthlyExpenses(c);
@@ -298,14 +301,34 @@ export class ArgoScreen implements Screen {
     d.text(x + 40, y + 31, cb(e.total).padStart(14), C.cbill, undefined, 99, true);
     const days = 30 - (c.day % 30);
     d.ctext(x + 3, y + 33, `Next payment in {#f2f6f8}${days}{/} days. ${c.funds >= e.total ? `Runway ~{#f2f6f8}${Math.floor(c.funds / Math.max(1, e.total))}{/} months.` : '{#e8503a}Insufficient funds for next payment!{/}'}`, C.dim);
+    (c.debts ?? []).forEach((db, i) => d.ctext(x + 3, y + 35 + i, `Loan: {#f0c850}${cb(db.amount)}{/} due to the ${db.who} in {#f2f6f8}${db.day - c.day}{/} days.`, C.warn));
     if (c.negativeMonths) d.text(x + 3, y + 35, 'The company is in debt. Another negative month means bankruptcy.', C.red);
     // Mech upkeep detail
     ui.panel(x + 73, y, w - 74, h, 'MAINTENANCE DETAIL');
     let yy = y + 1;
-    for (const mm of c.mechs) { d.text(x + 75, yy, mm.nickname ?? mm.defId, C.text); d.text(x + 110, yy, cb(12000 + (chassisTons(mm)) * 450).padStart(10), C.dim); yy++; }
+    for (const mm of c.mechs) { if (yy >= y + h - 24) break; d.text(x + 75, yy, mm.nickname ?? mm.defId, C.text); d.text(x + 110, yy, cb(12000 + (chassisTons(mm)) * 450).padStart(10), C.dim); yy++; }
     yy++;
+    // Funds history chart and career ledger at the bottom of the panel
+    const ch = 10, cy = y + h - ch - 9, cx = x + 77, cw = w - 74 - 14;
+    const hist = [...(c.fundsHistory ?? []), c.funds].slice(-cw);
+    const hi = Math.max(1, ...hist), lo = Math.min(0, ...hist);
+    d.text(x + 75, cy - 2, 'FUNDS · LAST ' + Math.max(1, (hist.length - 1) * 3) + ' DAYS', C.accent, undefined, 99, true);
+    d.text(x + 75, cy - 1, cbk(hi), C.faint);
+    d.text(x + 75, cy + ch, cbk(lo), C.faint);
+    for (let i = 0; i < hist.length; i++) {
+      const v = hist[i], top = ((v - lo) / (hi - lo || 1)) * ch * 8;
+      for (let r = 0; r < ch; r++) {
+        const fill = Math.max(0, Math.min(8, Math.round(top - (ch - 1 - r) * 8)));
+        if (fill > 0) d.set(cx + 6 + i, cy + r, ' ▁▂▃▄▅▆▇█'[fill], v < 0 ? C.red : i === hist.length - 1 ? C.accent : '#8a7a3a');
+        else d.set(cx + 6 + i, cy + r, r === ch - 1 ? '·' : ' ', '#23303a');
+      }
+    }
+    const st = c.stats;
+    const ly = cy + ch + 2;
+    d.ctext(x + 75, ly, `Earned {#f0c850}${cb(st.earned)}{/}   Spent {#f0c850}${cb(st.spent)}{/}   Contracts {#f2f6f8}${st.wins}/${st.missions}{/} won`, C.dim, undefined, w - 78);
+    d.ctext(x + 75, ly + 1, `Kills {#f2f6f8}${st.kills}{/}   'Mechs lost {#f2f6f8}${st.mechsLost}{/}   MechWarriors lost {#f2f6f8}${st.pilotsLost}{/}`, C.dim, undefined, w - 78);
     for (const p of c.pilots.filter((q) => !q.dead)) {
-      if (yy >= y + h - 1) break;
+      if (yy >= cy - 3) break;
       d.text(x + 75, yy, `${p.callsign}`, C.text);
       d.text(x + 110, yy, (p.commander ? 'owner' : cb(Math.round(salaryOf(p) * e.mult))).padStart(10), C.dim);
       yy++;

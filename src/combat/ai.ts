@@ -3,7 +3,10 @@
 import { item } from '../data/items';
 import { Component } from '../game/frame';
 import { Battle, Unit, SIDE, MoveMode, attackArc, Assignment } from './battle';
-import { TERRAIN, dist, dirTo } from './terrain';
+import { TERRAIN, dist, dirTo, los } from './terrain';
+
+/** Feature switches, used by the headless A/B harness. */
+export const AI_OPTS = { losThreat: true, killFocus: true, caution: false };
 
 interface Cand {
   i: number;
@@ -60,14 +63,17 @@ function threatAt(b: Battle, u: Unit, x: number, y: number, pips: number, known:
     const d = dist(e.x, e.y, x, y);
     const reach = e.stats.walk * 0.6;
     const gun = e.pilot?.gun ?? 3;
+    // Hills and buildings between us and them mean they must move (and spend their turn) to shoot
+    const hidden = AI_OPTS.losThreat && d > 1.5 && d < 30 && !los(b.map, e.x, e.y, x, y).clear;
     for (const c of b.weaponsOf(e)) {
       const w = item(c.id);
+      const cover = hidden ? (w.indirect ? 0.85 : 0.7) : 1;
       const eff = Math.max(0, d - reach);
       if (eff > (w.lr ?? 0)) continue;
       let p = 55 + gun * 3 - pips * 8;
       if (eff > (w.mr ?? 0)) p -= 15; else if (eff > (w.sr ?? 0)) p -= 5;
       p = Math.max(5, Math.min(95, p));
-      total += (p / 100) * (w.dmg ?? 0) * (w.shots ?? 1);
+      total += (p / 100) * (w.dmg ?? 0) * (w.shots ?? 1) * cover;
     }
   }
   return total * (1 - t.cover);
@@ -197,7 +203,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     if (u.tag === 'target') pos -= Math.max(0, 12 - nearest) * 2; // assassination targets are timid
     if (u.tag === 'raider' && u.ai.goal) pos -= Math.max(0, dist(x, y, u.ai.goal[0], u.ai.goal[1]) - 6) * 2.2;
     if (u.tag === 'guard' && u.ai.goal) pos -= Math.max(0, dist(x, y, u.ai.goal[0], u.ai.goal[1]) - 7) * 1.5;
-    c.score = off * aggr * 1.0 - threat * (1 - aggr) * 0.35 + pos + b.rng.next() * 0.5;
+    c.score = off * aggr * 1.0 - threat * (1 - aggr) * (AI_OPTS.caution ? 0.6 : 0.35) + pos + b.rng.next() * 0.5;
     if (!best || c.score > best.score) best = c;
   }
 
@@ -290,7 +296,16 @@ export function aiAttack(b: Battle, u: Unit, visible: Unit[]): boolean {
     const chosen = pickWithinHeat(b, u, usable, unitHealth(t) < 0.25);
     // Prefer targets that threaten us: adjacent brawlers and whoever can hurt us most
     const threat = dist(u.x, u.y, t.x, t.y) <= 1.5 ? 2.4 : 1 + Math.min(0.5, b.expectedDamage(t, u, t) / 250);
-    const ev = chosen.reduce((a, c) => a + c[1], 0) * targetValue(b, u, t) * threat;
+    const dmg = chosen.reduce((a, c) => a + c[1], 0);
+    let kill = 1;
+    if (AI_OPTS.killFocus) {
+      // Weight toward shots that can finish a unit: compare expected damage to its weakest vital location
+      const f = t.frame;
+      const vitals = f.kind === 'mech' ? ['CT', 'HD', 'LT', 'RT', 'LL', 'RL'] : Object.keys(f.struct);
+      const weakest = Math.min(...vitals.filter((l) => f.struct[l] > 0).map((l) => f.struct[l] + (f.armor[l] ?? 0) * (l === 'HD' ? 2.5 : 1) + (l === 'LT' || l === 'RT' || l === 'LL' || l === 'RL' ? 40 : 0)));
+      kill = 1 + Math.max(0, Math.min(1, (dmg * 0.6) / Math.max(1, weakest))) * 0.8;
+    }
+    const ev = dmg * targetValue(b, u, t) * threat * kill;
     if (ev > bestV) { bestV = ev; bestT = t; bestW = chosen.map((c) => c[0]); }
   }
   if (!bestT || !bestW.length) return false;

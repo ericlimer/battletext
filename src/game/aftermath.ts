@@ -78,11 +78,12 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   const wiped = rt.playerUnits.every((u) => !u.alive);
   const kills = rt.playerUnits.reduce((a, u) => a + u.kills, 0);
   c.stats.kills += kills;
+  const inspired = morale(c) >= 40;
   for (const u of rt.playerUnits) {
     const p = u.pilot!;
     p.missions++;
     p.kills += u.kills;
-    const gained = Math.round((350 + d * 140 + u.kills * 120) * (win ? 1 : 0.5));
+    const gained = Math.round((350 + d * 140 + u.kills * 120) * (win ? 1 : 0.5) * (inspired ? 1.15 : 1));
     p.xp += gained; p.xpTotal += gained;
     res.xp.push([p, gained]);
     let died = false;
@@ -125,6 +126,14 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
       }
     }
   }
+  // The crew's mood follows the company's fortunes
+  const deaths = rt.playerUnits.filter((u) => u.pilot!.dead).length;
+  const moodDelta = (win ? 3 : outcome === 'withdraw' ? -2 : -4) - deaths * 5 + (win && kills >= 4 ? 1 : 0);
+  if (moodDelta) {
+    c.moraleMod = Math.max(-20, Math.min(15, c.moraleMod + moodDelta));
+    lines.push(`Crew morale ${moodDelta > 0 ? '+' : ''}${moodDelta}: ${win ? 'a victory to celebrate' : outcome === 'withdraw' ? 'the retreat stings' : 'a bitter defeat'}${deaths ? `, ${deaths} comrade${deaths > 1 ? 's' : ''} lost` : ''}.`);
+  }
+  if (inspired) lines.push('Inspired crew: +15% MechWarrior experience.');
   // Auto-queue repairs the company can afford (keeping a month of expenses in reserve)
   const reserve = monthlyExpenses(c).total;
   for (const u of rt.playerUnits) {

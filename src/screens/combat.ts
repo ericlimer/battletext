@@ -792,7 +792,7 @@ export class CombatScreen implements Screen {
     // Sparse ground texture: a faint grid dot on most tiles, occasional detail
     const calm = m.biome === 'martian' || m.biome === 'badlands' || m.biome === 'lunar' || m.biome === 'desert';
     if (t === 'plain') ch = calm ? (((x * 7 + y * 13) % 3 === 0) ? '·' : ' ') : ((x * 7 + y * 13) % 5 === 0 && ch !== '.') ? ch : '·';
-    if (t === 'rough' && calm && ch !== 'o' && (x * 5 + y * 11) % 3 !== 0) ch = ' ';
+    if (t === 'rough' && calm && ch !== '◦' && (x * 5 + y * 11) % 3 !== 0) ch = ' ';
     if (t === 'plain' && m.biome === 'desert') { const band = Math.sin(x * 0.5 + y * 0.9 + s * 3); if (band > 0.82) { ch = '~'; fg = lerp(bg, '#d8a860', 0.35); } }
     const tt = this.time;
     switch (t) {

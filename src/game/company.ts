@@ -118,6 +118,8 @@ export interface Company {
   travelOffers?: Contract[];
   travelOffersDay?: number;
   installing?: { id: string; doneDay: number }[];
+  debts?: { day: number; amount: number; who: string }[];
+  fundsHistory?: number[]; // sampled every 3 days
 }
 
 export function rngOf(c: Company): RNG {
@@ -207,6 +209,15 @@ export function morale(c: Company): number {
   if (has(c, 'hydro')) m += 4;
   if (has(c, 'rec')) m += 6;
   return Math.max(0, Math.min(50, Math.round(m)));
+}
+
+/** Itemised morale sources, for tooltips. */
+export function moraleBreakdown(c: Company): [string, number][] {
+  const rows: [string, number][] = [['Base', 25], [`Expenses: ${EXPENSE_LEVELS[c.expense].name}`, EXPENSE_LEVELS[c.expense].morale]];
+  if (has(c, 'hydro')) rows.push(['Hydroponics & Galley', 4]);
+  if (has(c, 'rec')) rows.push(['Recreation Deck', 6]);
+  if (c.moraleMod) rows.push(['Recent events (fades 1 per 5 days)', c.moraleMod]);
+  return rows;
 }
 
 export function moraleName(m: number): string {
@@ -454,7 +465,13 @@ export function advanceDay(c: Company): DayReport {
     if (trainXP) { p.xp += trainXP; p.xpTotal += trainXP; }
   }
   // Morale modifier decays toward 0
+  if (c.day % 3 === 0) c.fundsHistory = [...(c.fundsHistory ?? []), c.funds].slice(-120);
   if (c.day % 5 === 0 && c.moraleMod !== 0) c.moraleMod += c.moraleMod > 0 ? -1 : 1;
+  for (const debt of (c.debts ?? []).filter((x) => c.day >= x.day)) {
+    c.funds -= debt.amount; c.stats.spent += debt.amount;
+    say(`The ${debt.who} collected ${cb(debt.amount)} in loan repayments.`, '#f0a830');
+  }
+  if (c.debts?.length) c.debts = c.debts.filter((x) => c.day < x.day);
   // Travel
   if (c.travel) {
     c.travel.legLeft--;
@@ -485,6 +502,7 @@ export function advanceDay(c: Company): DayReport {
     say(`Month end: paid ${cb(e.total)} in operating costs.`, '#f0c850');
     rep.monthEnd = true;
     const mor = morale(c);
+    if (mor >= 40) say('The crew is inspired. MechWarriors will learn faster on the next contracts.', '#6ad46a');
     if (mor < 12) {
       const cands = c.pilots.filter((p) => !p.dead && !p.commander);
       const flight = cands.filter((p) => !p.quirks?.includes('loyal'));

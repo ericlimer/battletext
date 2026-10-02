@@ -1,8 +1,8 @@
 // Random Argo events with choices, in the spirit of BATTLETECH's travel events.
 
 import { RNG } from '../engine/rng';
-import { Company, addLog, sys } from './company';
-import { Pilot, SKILLS, SKILL_NAMES, makePilot } from './pilot';
+import { Company, addLog, sys, monthlyExpenses, morale } from './company';
+import { Pilot, SKILLS, SKILL_NAMES, makePilot, hasQuirk, health } from './pilot';
 import { cb } from '../engine/util';
 
 export interface EventChoice {
@@ -17,6 +17,8 @@ export interface GameEvent {
   text: (c: Company, ctx: EventCtx) => string;
   choices: EventChoice[];
   weight?: (c: Company) => number;
+  /** Chooses the focal MechWarrior; returning undefined rules the event out. */
+  focus?: (alive: Pilot[]) => Pilot | undefined;
 }
 export interface EventCtx { pilot: Pilot; pilot2: Pilot; sysName: string; }
 
@@ -228,6 +230,52 @@ export const EVENTS: GameEvent[] = [
       { text: 'Sell it back to the seller.', apply: (c) => { c.funds += 40000; return `The seller pays ${cb(40000)}, looking very relieved.`; } },
     ],
   },
+  {
+    id: 'itching', title: 'Itching to Fight', where: 'any',
+    focus: (a) => a.find((p) => p.injuries > 0 && p.injuries < health(p) && p.healDays > 6),
+    text: (c, x) => `${x.pilot.callsign} has been hobbling around the 'Mech bay against the doctor's orders, insisting they are fit for the next drop. The ${x.pilot.healDays} days of bed rest are driving them mad.`,
+    choices: [
+      { text: 'Clear them for light duty in the simulators.', apply: (c, x, r) => { if (r.chance(0.7)) { x.pilot.healDays = Math.max(1, Math.round(x.pilot.healDays * 0.6)); xp(x.pilot, 200); return `Keeping busy agrees with ${x.pilot.callsign}: recovery time cut to ${x.pilot.healDays} days.`; } x.pilot.healDays += 7; return `${x.pilot.callsign} tears their stitches in a simulator crash. Recovery extended by 7 days.`; } },
+      { text: 'Order them back to the infirmary.', apply: (c) => { mor(c, -1); return 'The order is obeyed, with poor grace. Morale -1.'; } },
+    ],
+  },
+  {
+    id: 'loan', title: 'Easy Money', where: 'docked',
+    weight: (c) => (c.funds < monthlyExpenses(c).total * 1.5 ? 4 : 0),
+    text: (c, x) => `Word of your company's finances has spread. A smiling banker from the ${x.sysName} Mercantile Exchange offers an emergency line of credit: ${cb(400000)} now, ${cb(520000)} due in 60 days.`,
+    choices: [
+      { text: `Take the loan (+${cb(400000)}).`, apply: (c) => { c.funds += 400000; c.debts = [...(c.debts ?? []), { day: c.day + 60, amount: 520000, who: 'Mercantile Exchange' }]; return `The C-Bills hit your account. ${cb(520000)} will be collected on day ${c.day + 60}.`; } },
+      { text: 'Decline. The company will survive on its own.', apply: (c) => { mor(c, 1); return 'Your stubbornness earns quiet nods from the crew. Morale +1.'; } },
+    ],
+  },
+  {
+    id: 'party', title: 'Shore Leave', where: 'docked',
+    weight: (c) => (morale(c) >= 30 ? 2 : 0.3),
+    text: (c, x) => `The crew wants to blow off steam on ${x.sysName}. ${x.pilot.callsign} has already found a bar that will take the whole company — if the company is buying.`,
+    choices: [
+      { text: `Open a tab (${cb(35000)}).`, req: funds(35000), apply: (c, x, r) => { pay(c, 35000); mor(c, 4); if (r.chance(0.2)) { c.rep['locals'] = (c.rep['locals'] ?? 0) - 2; return `A legendary night. Some furniture does not survive. Morale +4, planetary rep -2.`; } return 'A legendary night. Morale +4.'; } },
+      { text: 'Everyone pays their own way.', apply: (c) => { mor(c, 1); return 'Smaller celebrations break out across the docks. Morale +1.'; } },
+      { text: 'No leave. Drills instead.', apply: (c) => { mor(c, -3); for (const p of c.pilots) if (!p.dead) xp(p, 150); return 'Every MechWarrior gains 150 XP. Nobody thanks you. Morale -3.'; } },
+    ],
+  },
+  {
+    id: 'raise', title: 'A Matter of Pay', where: 'docked',
+    focus: (a) => a.find((p) => !p.commander && hasQuirk(p, 'greedy') && p.missions >= 2) ?? a.find((p) => !p.commander && p.kills >= 6),
+    text: (c, x) => `${x.pilot.callsign} has ${x.pilot.kills} confirmed kills and a recruiter's card from another company. They want a one-time bonus to stay — or they will walk.`,
+    choices: [
+      { text: `Pay the bonus (${cb(90000)}).`, req: funds(90000), apply: (c, x) => { pay(c, 90000); mor(c, 1); x.pilot.timeline.push(`Paid a retention bonus on day ${c.day}.`); return `${x.pilot.callsign} signs on for another tour. Morale +1.`; } },
+      { text: 'Appeal to loyalty.', apply: (c, x, r) => { if (hasQuirk(x.pilot, 'loyal') || r.chance(0.45)) { mor(c, 2); return `${x.pilot.callsign} laughs and tears up the card. Morale +2.`; } c.pilots = c.pilots.filter((q) => q !== x.pilot); c.lancePilots = c.lancePilots.map((id) => (id === x.pilot.id ? null : id)); mor(c, -3); return `${x.pilot.callsign} packs their kit and leaves the company. Morale -3.`; } },
+    ],
+  },
+  {
+    id: 'cookoff', title: 'Hot Cargo', where: 'travel',
+    weight: (c) => (Object.entries(c.inventory).some(([id, n]) => n > 0 && id.startsWith('A-')) ? 1 : 0.4),
+    text: () => 'A fire breaks out in the forward cargo hold, two bulkheads from the ammunition lockers. The damage-control team is standing by for orders.',
+    choices: [
+      { text: 'Jettison the cargo in that hold.', apply: (c, x, r) => { const ids = Object.keys(c.inventory).filter((id) => c.inventory[id] > 0); const lost = r.shuffle(ids).slice(0, 2); for (const id of lost) c.inventory[id]--; return lost.length ? `Spare parts tumble into the void: lost ${lost.join(' and ')}.` : 'The hold was nearly empty anyway.'; } },
+      { text: 'Fight the fire.', apply: (c, x, r) => { if (r.chance(0.6)) { mor(c, 2); return 'The fire is out within the hour. The damage-control team drinks free for a week. Morale +2.'; } pay(c, 80000); injure(c, x.pilot, 10); return `The fire spreads before it is contained: ${cb(80000)} in repairs, and ${x.pilot.callsign} is injured for 10 days.`; } },
+    ],
+  },
 ];
 
 export function pickEvent(c: Company, r: RNG, where: 'travel' | 'docked'): { ev: GameEvent; ctx: EventCtx } | null {
@@ -236,12 +284,21 @@ export function pickEvent(c: Company, r: RNG, where: 'travel' | 'docked'): { ev:
   // Events are spaced out and don't repeat until several others have fired
   if (c.lastEventDay !== undefined && c.day - c.lastEventDay < 12) return null;
   const recent = c.recentEvents ?? [];
-  const pool = EVENTS.filter((e) => (e.where === where || e.where === 'any') && !recent.includes(e.id));
+  const focal = new Map<string, Pilot>();
+  const pool = EVENTS.filter((e) => {
+    if ((e.where !== where && e.where !== 'any') || recent.includes(e.id)) return false;
+    if (!e.focus) return true;
+    const p = e.focus(r.shuffle([...alive]));
+    if (p) focal.set(e.id, p);
+    return !!p;
+  });
   const ev = r.weighted(pool, (e) => e.weight?.(c) ?? 1);
-  if (!ev) return null;
+  if (!ev || (ev.weight && ev.weight(c) <= 0)) return null;
   c.lastEventDay = c.day;
   c.recentEvents = [...recent, ev.id].slice(-6);
   const pa = r.shuffle([...alive]);
+  const f = focal.get(ev.id);
+  if (f) { pa.splice(pa.indexOf(f), 1); pa.unshift(f); }
   return { ev, ctx: { pilot: pa[0], pilot2: pa[1], sysName: sys(c).name } };
 }
 
