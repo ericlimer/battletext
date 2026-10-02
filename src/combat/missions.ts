@@ -19,7 +19,7 @@ export const MISSION_INFO: Record<MissionType, { name: string; desc: string; gly
   defendbase: { name: 'Defend Base', glyph: '⌂', desc: 'Protect the employer\'s facility from waves of attackers.' },
   ambush: { name: 'Ambush Convoy', glyph: '»', desc: 'Intercept and destroy a supply convoy before it leaves the map.' },
   escort: { name: 'Escort Convoy', glyph: '«', desc: 'Protect a friendly convoy until it reaches the extraction point.' },
-  capture: { name: 'Target Acquisition', glyph: '◎', desc: 'Seize three data beacons held by a defending lance.' },
+  capture: { name: 'Target Acquisition', glyph: '¤', desc: 'Seize three data beacons held by a defending lance.' },
 };
 
 export interface Objective {
@@ -134,6 +134,9 @@ function place(b: Battle, list: Combatant[], team: number, cx: number, cy: numbe
   return out;
 }
 
+/** 'A' or 'An' for a faction name. */
+const art = (w: string) => (/^[AEIOU]/i.test(w) ? 'An' : 'A');
+
 // ---- Setup --------------------------------------------------------------------------------
 export function setupMission(spec: MissionSpec): MissionRuntime {
   const r = new RNG(spec.seed);
@@ -223,7 +226,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (const pu of playerUnits) pu.ai.goal = [Math.floor(cx), Math.floor(cy)];
       objectives.push({ id: 'buildings', text: 'Destroy the base\'s primary structures', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'turrets', text: 'Destroy all defensive turrets', primary: false, status: 'active', bonus });
-      briefing.push(`A ${tgt.short} installation is operating in the region. Level its primary structures (marked ■). Turrets and a garrison lance defend it.`);
+      briefing.push(`${art(tgt.short)} ${tgt.short} installation is operating in the region. Level its primary structures (marked ■). Turrets and a garrison lance defend it.`);
       break;
     }
     case 'defendbase': {
@@ -265,7 +268,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       enemyUnits = [...cu, ...eu];
       objectives.push({ id: 'convoy', text: `Destroy the convoy (at least ${n - 1} of ${n} haulers)`, primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'escorts', text: 'Destroy the convoy escort', primary: false, status: 'active', bonus });
-      briefing.push(`A ${tgt.short} supply convoy is moving along the highway. Intercept it before it leaves the area.`);
+      briefing.push(`${art(tgt.short)} ${tgt.short} supply convoy is moving along the highway. Intercept it before it leaves the area.`);
       break;
     }
     case 'escort': {
@@ -286,7 +289,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (const pu of playerUnits) { pu.tag = 'guard'; pu.ai.goal = [cu[0]?.x ?? 6, cu[0]?.y ?? rd.wy]; }
       objectives.push({ id: 'escort', text: 'At least 2 convoy vehicles reach the east edge', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'allsafe', text: 'All convoy vehicles survive', primary: false, status: 'active', bonus });
-      briefing.push(`An ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east.`);
+      briefing.push(`${art(emp.short)} ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east.`);
       break;
     }
     case 'capture': {

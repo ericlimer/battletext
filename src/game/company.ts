@@ -333,23 +333,24 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   const salvageMax = Math.min(14, 5 + Math.floor(diff / 2) + (repLevel(c.rep[employer] ?? 0).idx >= 5 ? 2 : repLevel(c.rep[employer] ?? 0).idx >= 4 ? 1 : 0));
   const tgtF = faction(target), empF = faction(employer);
   const biome = r.pick(s.biomes);
+  const an = (w: string) => (/^[AEIOU]/i.test(w) ? 'An' : 'A');
   const pl = (f: { id: string }) => f.id === 'pirates' || f.id === 'locals';
   const has_ = (f: { id: string }) => (pl(f) ? 'have' : 'has'), wants = (f: { id: string }) => (pl(f) ? 'want' : 'wants'), is_ = (f: { id: string }) => (pl(f) ? 'are' : 'is');
   const land = ({ lowlands: 'lowlands', highlands: 'highlands', desert: 'dune seas', badlands: 'badlands', lunar: 'crater fields', martian: 'red wastes', polar: 'ice fields', tundra: 'tundra' } as Record<string, string>)[biome] ?? 'wilds';
   const flavors: Record<MissionType, string[]> = {
     battle: [`${tgtF.short} forces are operating on ${s.name} without authorization. ${empF.short} ${wants(empF)} them driven off.`,
-      `A ${tgtF.short} lance has been raiding outposts in the ${land} of ${s.name}. ${empF.short} ${wants(empF)} it destroyed.`,
+      `${an(tgtF.short)} ${tgtF.short} lance has been raiding outposts in the ${land} of ${s.name}. ${empF.short} ${wants(empF)} it destroyed.`,
       `${empF.short} ${is_(empF)} tired of ${tgtF.short} patrols probing the ${land}. Send a message.`],
-    assassinate: [`A ${tgtF.short} field commander has become a problem for ${empF.short}. Make it permanent.`,
+    assassinate: [`${an(tgtF.short)} ${tgtF.short} field commander has become a problem for ${empF.short}. Make it permanent.`,
       `${empF.short} intelligence has located a ${tgtF.short} officer inspecting positions in the ${land}. They are not to leave.`],
     destroybase: [`${tgtF.short} ${has_(tgtF)} established a forward base on ${s.name}. ${empF.short} will pay to see it burn.`,
-      `A ${tgtF.short} supply depot hidden in the ${land} is feeding their operations. Level it.`],
+      `${an(tgtF.short)} ${tgtF.short} supply depot hidden in the ${land} is feeding their operations. Level it.`],
     defendbase: [`${empF.short} intelligence expects a ${tgtF.short} raid on a critical facility. Hold it.`,
-      `A ${empF.short} relay station in the ${land} is the next target for ${tgtF.short} raiders. Make sure it is still standing tomorrow.`],
-    ambush: [`A ${tgtF.short} supply convoy is moving through the ${land} of ${s.name}. Intercept it.`,
+      `${an(empF.short)} ${empF.short} relay station in the ${land} is the next target for ${tgtF.short} raiders. Make sure it is still standing tomorrow.`],
+    ambush: [`${an(tgtF.short)} ${tgtF.short} supply convoy is moving through the ${land} of ${s.name}. Intercept it.`,
       `${tgtF.short} haulers are running supplies across the ${land}. ${empF.short} ${wants(empF)} the cargo burned.`],
     escort: [`${empF.short} needs a supply convoy escorted through contested ${land} on ${s.name}.`,
-      `A ${empF.short} medical convoy has to cross the ${land}, and ${tgtF.short} knows it is coming.`],
+      `${an(empF.short)} ${empF.short} medical convoy has to cross the ${land}, and ${tgtF.short} knows it is coming.`],
     capture: [`${tgtF.short} sensor beacons in the ${land} are feeding targeting data to their artillery. ${empF.short} ${wants(empF)} them taken intact.`,
       `${empF.short} ${wants(empF)} the data cores from three ${tgtF.short} survey beacons on ${s.name}.`],
   };

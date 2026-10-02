@@ -83,8 +83,19 @@ export class CombatScreen implements Screen {
     const used = new Set<string>(); // shared, so a tag never means two different units
     for (const side of [0, 1]) {
       for (const u of this.b.units.filter((x) => SIDE(x.team) === side)) {
-        if (u.frame.kind === 'turret') { this.glyphs.set(u.id, 'τ'); continue; }
-        if (u.frame.kind === 'vehicle') { this.glyphs.set(u.id, u.tag === 'convoy' ? '■' : '◆'); continue; }
+        // Turrets and haulers are numbered; other vehicles get lower-case codes so they never read as 'Mechs
+        if (u.frame.kind === 'turret' || u.tag === 'convoy') {
+          const base = u.frame.kind === 'turret' ? 'τ' : '■';
+          let n = 1; while (used.has(base + n)) n++;
+          const g = n < 10 ? base + n : base; used.add(g); this.glyphs.set(u.id, g); continue;
+        }
+        if (u.frame.kind === 'vehicle') {
+          const code = u.frame.defId.toLowerCase().replace(/[^a-z]/g, '');
+          let g = code.slice(0, 2);
+          for (let k = 2; used.has(g) && k < code.length; k++) g = code[0] + code[k];
+          for (let n = 2; used.has(g) && n < 10; n++) g = code[0] + String(n);
+          used.add(g); this.glyphs.set(u.id, g); continue;
+        }
         // Two-letter designation from the BattleTech variant code (HBK-4G → HB, AS7-D → AS)
         const code = u.frame.defId.toUpperCase().replace(/[^A-Z]/g, '');
         let g = code.slice(0, 2);
@@ -609,7 +620,7 @@ export class CombatScreen implements Screen {
     }
     if (ui.key('c') && u) this.centerOn(u.x, u.y);
     if (!this.canAct(u)) return;
-    const canMove = !u.moved && !u.cannotMove && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
+    const canMove = !u.moved && !u.cannotMove && !u.prone && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
     // Hotkeys
     if (ui.key('Escape') || ui.inp.rclicked) {
       ui.inp.rclicked = false;
@@ -993,6 +1004,16 @@ export class CombatScreen implements Screen {
       if (un.tag === 'target') fg = lerp(fg, '#ffd050', 0.5 + 0.5 * Math.sin(this.time * 4));
       const facing = un.frame.kind === 'turret' ? -1 : (un === this.sel && this.mode === 'facing') ? this.facingDir : un.facing;
       d.wide(sx, sy, glyph, fg, bg, facing, un.team === 0 ? '#bfe8ff' : '#ffc0b0');
+      // The assassination target wears a gold halo so it can't be lost in a crowd
+      if (un.tag === 'target') {
+        const a = 0.25 + 0.15 * Math.sin(this.time * 4);
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const cx = sx + dx * 2, cy = sy + dy;
+          if (cx < MX || cy < MY || cx >= MX + VW * 2 || cy >= MY + VH) continue;
+          for (const k of [0, 1]) { const i = cy * COLS + cx + k; d.bg[i] = lerp(d.bg[i], '#ffd050', a); }
+        }
+      }
     }
     // Line of fire to the hovered enemy
     if (act && u && ht >= 0) {
@@ -1026,7 +1047,7 @@ export class CombatScreen implements Screen {
     const occ: [number, number, number][] = [];
     // Floaters never sit on top of a visible unit
     for (const u of b.units) if (u.alive && u.deployed && !u.fled && (SIDE(u.team) === 0 || this.visibleUnit(u))) occ.push([MY + u.y - this.camY, MX + (u.x - this.camX) * 2, MX + (u.x - this.camX) * 2 + 2]);
-    for (const f of this.fx.floats) {
+    for (const f of this.b.result ? [] : this.fx.floats) {
       if (f.delay && f.delay > 0) continue;
       const k = f.life / f.max;
       const x = f.x, y = f.y - k * (f.big ? 2.2 : 1.6) - 0.6;
@@ -1280,7 +1301,8 @@ export class CombatScreen implements Screen {
     const d = ui.d, b = this.b;
     ui.header(x, y, PW, 'LANCE STATUS', C.bg, '#2a5a70');
     let yy = y + 1;
-    const units = b.units.filter((u) => SIDE(u.team) === 0 && u.deployed);
+    const units = b.units.filter((u) => SIDE(u.team) === 0 && u.deployed && u.tag !== 'convoy');
+    const convoy = b.units.filter((u) => SIDE(u.team) === 0 && u.tag === 'convoy');
     for (const u of units) {
       if (yy >= ROWS - 1) break;
       const f = u.frame;
@@ -1304,6 +1326,21 @@ export class CombatScreen implements Screen {
         if (u.pilot && u.team === 0) d.ctext(x + 41, yy + 1, healthPips(u.pilot), C.text, bg);
       }
       if (hov) { ui.cursor = 'pointer'; if (ui.click(x, yy, PW, 2)) { if (this.canAct(u) && !b.active) this.select(u); this.centerOn(u.x, u.y); } }
+      yy += 2;
+    }
+    // Escorted convoy: one compact row, a health block per vehicle
+    if (convoy.length && yy < ROWS - 1) {
+      d.text(x + 1, yy, 'CONVOY', C.ally, undefined, 99, true);
+      convoy.forEach((v, i) => {
+        const f = v.frame;
+        let hp = 0, mx = 0;
+        for (const k in f.maxArmor) { hp += f.armor[k]; mx += f.maxArmor[k]; }
+        for (const k in f.maxStruct) { hp += Math.max(0, f.struct[k]); mx += f.maxStruct[k]; }
+        const st = v.fled ? 'SAFE' : !v.alive ? 'LOST' : `${Math.round((hp / Math.max(1, mx)) * 100)}%`;
+        d.text(x + 9 + i * 11, yy, this.glyphOf(v), v.alive || v.fled ? C.ally : C.faint);
+        d.text(x + 12 + i * 11, yy, st, v.fled ? C.green : !v.alive ? C.red : healthColor(hp / Math.max(1, mx)));
+        if (ui.hover(x + 9 + i * 11, yy, 10, 1)) ui.setTip([`${b.fullName(v)}: ${v.fled ? 'reached the exit' : v.alive ? `armor+structure ${hp}/${mx}` : 'destroyed'}`]);
+      });
       yy += 2;
     }
     this.drawThreats(ui, x, yy + 1);

@@ -184,7 +184,20 @@ export class Battle {
   fullName(u: Unit): string { return frameName(u.frame); }
 
   emit(e: BEvent): void { this.events.push(e); }
+  /** While an attack resolves, per-weapon results collect here and print as one summary line. */
+  private volley: { name: string; color: string; hits: number; shots: number; dmg: number; locs: Map<string, number>; weapons: Map<string, number> }[] | null = null;
+  private sayBuf: { text: string; color?: string }[] | null = null;
+  private record(a: Unit, tname: string, w: ItemDef, hits: number, shots: number, locs: [string, number][]): boolean {
+    if (!this.volley) return false;
+    let v = this.volley.find((x) => x.name === tname);
+    if (!v) { v = { name: tname, color: SIDE(a.team) === 0 ? '#9fd8ef' : '#f0a898', hits: 0, shots: 0, dmg: 0, locs: new Map(), weapons: new Map() }; this.volley.push(v); }
+    v.hits += hits; v.shots += shots;
+    for (const [l, d] of locs) { v.dmg += d; v.locs.set(l, (v.locs.get(l) ?? 0) + d); }
+    v.weapons.set(w.short ?? w.name, (v.weapons.get(w.short ?? w.name) ?? 0) + 1);
+    return true;
+  }
   say(text: string, color?: string): void {
+    if (this.sayBuf) { this.sayBuf.push({ text, color }); return; }
     this.log.push({ text, color, round: this.round });
     this.emit({ k: 'log', text, color });
   }
@@ -206,6 +219,11 @@ export class Battle {
       }
       u.acted = false;
       u.reserved = false;
+      // Per-activation flags start clean every round (evasion pips persist until the unit acts again)
+      u.moved = null;
+      u.movedSteps = 0;
+      u.attacked = false;
+      u.cannotMove = false;
       u.phase = this.basePhase(u) - (u.ai && (u as any)._knockedBack ? 1 : 0);
       (u as any)._knockedBack = false;
       u.phase = Math.max(1, u.phase);
@@ -645,6 +663,20 @@ export class Battle {
 
   attack(a: Unit, plan: Assignment[], called?: string): void {
     if (!this.canAttack(a)) return;
+    this.volley = []; this.sayBuf = [];
+    try { this.attackInner(a, plan, called); } finally {
+      const buf = this.sayBuf ?? [], vol = this.volley ?? [];
+      this.sayBuf = null; this.volley = null;
+      for (const v of vol) {
+        const locs = [...v.locs.entries()].map(([l, d]) => (l ? `${l} ${d}` : `${d}`)).join(', ');
+        const ws = [...v.weapons.entries()].map(([n, k]) => (k > 1 ? `${k}×${n}` : n)).join(' ');
+        this.say(`${this.displayName(a)} → ${v.name}: ${v.hits}/${v.shots} hit, ${v.dmg} dmg${locs && v.locs.size > 0 && locs !== String(v.dmg) ? ` (${locs})` : ''} · ${ws}`, v.color);
+      }
+      for (const m of buf) this.say(m.text, m.color);
+    }
+  }
+
+  private attackInner(a: Unit, plan: Assignment[], called?: string): void {
     a.attacked = true;
     this.lastAttackRound = this.round;
     const allWeapons = plan.flatMap((p) => p.weapons);
@@ -707,7 +739,7 @@ export class Battle {
     const locs = new Map<string, number>();
     for (const h of hits) locs.set(h.loc, (locs.get(h.loc) ?? 0) + h.dmg);
     const locStr = [...locs.entries()].map(([l, d]) => `${l} ${d}`).join(', ');
-    this.say(`${this.displayName(a)}: ${w.name} → ${this.displayName(t)} ${hits.length}/${res.length} hit${hits.length ? ` (${locStr})` : ''}`,
+    if (!this.record(a, this.displayName(t), w, hits.length, res.length, [...locs.entries()])) this.say(`${this.displayName(a)}: ${w.name} → ${this.displayName(t)} ${hits.length}/${res.length} hit${hits.length ? ` (${locStr})` : ''}`,
       SIDE(a.team) === 0 ? '#9fd8ef' : '#f0a898');
     if (!hits.length) return;
     for (const h of hits) {
@@ -737,7 +769,7 @@ export class Battle {
     }
     this.emit({ k: 'fire', u: a.id, t: -1 - s.id, tx: tile % m.w, ty: (tile / m.w) | 0, w: w.id, shots: res, indirect: hc.indirect, total, struct: true });
     const hits = res.filter((r) => r.hit).length;
-    this.say(`${this.displayName(a)}: ${w.name} → ${s.name} ${hits}/${res.length} hit${total ? ` (${total})` : ''}`, SIDE(a.team) === 0 ? '#9fd8ef' : '#f0a898');
+    if (!this.record(a, s.name, w, hits, res.length, total ? [['', total]] : [])) this.say(`${this.displayName(a)}: ${w.name} → ${s.name} ${hits}/${res.length} hit${total ? ` (${total})` : ''}`, SIDE(a.team) === 0 ? '#9fd8ef' : '#f0a898');
     if (total > 0) this.damageStructureObj(s, total, a);
   }
 
