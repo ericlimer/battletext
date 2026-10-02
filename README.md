@@ -28,7 +28,7 @@ It plays best at 1280×768 or larger, using mouse and keyboard. Buttons show the
 - Melee and Death From Above both exist. Brace makes a unit Guarded, and cover comes from light and heavy forest.
 - Pilots can be injured and incapacitated. The Safety Cage and Eject both help. Enemies eject when things look hopeless.
 - Pilot abilities: Multi-Target, Breaching Shot, Evasive Movement, Ace Pilot, Bulwark, Juggernaut, Sensor Lock and Master Tactician.
-- There are six mission types: Battle, Assassinate, Destroy Base, Defend Base, Ambush Convoy and Escort Convoy. Each has optional bonus objectives, reinforcement waves and a withdraw option.
+- There are seven mission types: Battle, Assassinate, Destroy Base, Defend Base, Ambush Convoy, Escort Convoy and Target Acquisition. Each has optional bonus objectives, reinforcement waves and a withdraw option.
 - Maps are procedural across 8 biomes (Lowlands, Highlands, Desert, Badlands, Lunar, Martian, Polar, Tundra). They have elevation with hillshading, forests, water, crags, roads, and destructible buildings and walls. Some missions happen at night.
 - Combat uses fog of war with visual range, sensor blips and shared spotting. The AI is utility-based and manages heat, focus-fires, uses melee and DFA, sensor-locks and makes called shots.
 - Visuals include animated beams, shells, arcing missile salvos, explosions, smoke and burning wrecks with dynamic colored lighting and screen shake. Procedural sound effects are synthesized with WebAudio.
@@ -36,15 +36,15 @@ It plays best at 1280×768 or larger, using mouse and keyboard. Buttons show the
 **Career mode (1,200 days)**
 - You found a company: pick a name, a commander background, a difficulty and optionally Ironman. You start with a random HBS-style lance.
 - The star map is procedural, with factions (Davion, Liao, Marik, Taurian, Canopus, Aurigan Directorate, Locals, Pirates), territories, jump routes and travel time.
-- Contracts show difficulty skulls, pay and employer against target. You negotiate a split between C-Bills and salvage. Your MRB rating gates contract difficulty. Faction reputation runs from Loathed to Honored and affects pay and prices.
+- Contracts show difficulty skulls, pay, employer against target, the objectives, an intel estimate of the opposition and a battlefield survey minimap generated from the contract's own map. You negotiate a split between C-Bills and salvage. Your MRB rating gates contract difficulty. Faction reputation runs from Loathed to Honored and affects pay and prices.
 - Salvage: you make priority picks from the pool and the remaining shares are random. Three parts of a chassis let you assemble a 'Mech.
 - In the 'Mech Bay, repairs and refits are work orders that take MechTech hours. There is cold storage, and you can sell 'Mechs. Cored 'Mechs are recovered as wrecks unless your whole lance is lost.
 - The **Mech Lab** enforces Ballistic, Energy, Missile and Support hardpoints, slots, tonnage, jump-jet classes and armor allocation (front and rear), and warns you about heat and ammo. Refits cost time and money.
 - The Barracks lets you spend XP on Gunnery, Piloting, Guts and Tactics, unlock abilities at 5 and 8, heal injuries in the medbay, and record deaths and service history. The hiring hall is at the planet you're docked at.
-- Markets are per system, with stock driven by planet tags and prices affected by reputation. There are +/++/+++ weapon variants and rare LosTech.
-- The Finance screen has expense levels from Spartan to Extravagant, which change your monthly costs and morale. You can go bankrupt.
-- There are twelve Argo upgrades: MechTech crews, 'Mech bay pods, medbay, training pods, hydroponics, drive tuning and more.
-- Random events come with choices. The career ends with a score. Saving is automatic, and you can also export and import save files.
+- Markets are per system, with stock driven by planet tags and prices affected by reputation. There are +/++/+++ weapon variants and rare LosTech. Pirate and frontier systems host a members-only black market.
+- The Finance screen has expense levels from Spartan to Extravagant, a funds-history chart and a career ledger. Morale also moves with mission results and deaths; Inspired crews learn faster and miserable ones desert. You can take emergency loans, and you can go bankrupt.
+- There are fourteen Argo upgrades: MechTech crews, 'Mech bay pods, medbay, training pods, hydroponics, drive tuning, an automated armory, a tactical operations center and more. Each takes days to install.
+- Around thirty random events come with choices, some triggered by the company's situation (injuries, money, morale, pilot quirks). The career ends with a score. Saving is automatic, and you can also export and import save files.
 
 **Skirmish:** build two lances under a C-Bill budget, then pick the mission type, biome and time of day.
 
