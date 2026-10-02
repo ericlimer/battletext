@@ -827,7 +827,7 @@ export class CombatScreen implements Screen {
     const s = m.shade[i];
     const hs = m.hill[i];
     // Elevation reads as distinct brightness bands, softened by hillshade
-    let bg = scale(B.ground[e], (1.05 + e * 0.16 + s * 0.12) * (1 + hs * 0.3));
+    let bg = scale(B.ground[e], (1.05 + e * 0.14 + s * 0.05) * (1 + hs * 0.26));
     let fg = lerp(bg, scale(B.groundFg, 1 + e * 0.1), 0.28);
     let ch = m.glyph[i];
     // Sparse ground texture: a faint grid dot on most tiles, occasional detail
