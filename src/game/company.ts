@@ -120,6 +120,38 @@ export interface Company {
   installing?: { id: string; doneDay: number }[];
   debts?: { day: number; amount: number; who: string }[];
   fundsHistory?: number[]; // sampled every 3 days
+  blackMarket?: boolean; // membership bought from a pirate contact
+  blackStores?: Record<string, StoreItem[]>;
+  blackStoreDay?: Record<string, number>;
+}
+
+export const BLACK_MARKET_FEE = 300000;
+/** Pirate havens and frontier worlds host a black market. */
+export function hasBlackMarket(s: StarSystem): boolean { return s.owner === 'pirates' || s.tags.includes('frontier'); }
+
+/** Members-only stock: rare equipment, high-tier weapons, the odd rare 'Mech — at a steep markup. */
+export function blackStore(c: Company, s: StarSystem): StoreItem[] {
+  c.blackStores ??= {}; c.blackStoreDay ??= {};
+  if (c.blackStores[s.id] && c.day - (c.blackStoreDay[s.id] ?? -999) <= 30) return c.blackStores[s.id];
+  const r = new RNG((c.seed ^ (c.day * 7919) ^ s.id.charCodeAt(1) * 131) >>> 0);
+  const out: StoreItem[] = [];
+  const mark = 1.6;
+  const rare = ALL_BASE_ITEMS.filter((id) => item(id).rarity >= 2 && item(id).kind !== 'ammo');
+  for (let i = 0; i < r.int(3, 5); i++) {
+    const id = r.pick(rare);
+    if (!out.some((o) => o.id === id)) out.push({ kind: 'item', id, qty: 1, price: Math.round((item(id).cost * mark) / 1000) * 1000 });
+  }
+  const guns = ALL_BASE_ITEMS.filter((id) => item(id).kind === 'weapon' && item(id).rarity <= 1);
+  for (let i = 0; i < r.int(3, 5); i++) {
+    const base = r.pick(guns);
+    const id = `${base}+${r.chance(0.6) ? 2 : 3}${r.pick(bonusesFor(base))}`;
+    if (!out.some((o) => o.id === id)) out.push({ kind: 'item', id, qty: 1, price: Math.round((item(id).cost * mark) / 1000) * 1000 });
+  }
+  if (out.some((o) => o.id === 'GAUSS')) out.push({ kind: 'item', id: 'A-GAUSS', qty: 4, price: Math.round((item('A-GAUSS').cost * mark) / 100) * 100 });
+  const mechs = CHASSIS.filter((ch) => ch.rarity >= 1);
+  if (mechs.length && r.chance(0.5)) { const ch = r.pick(mechs); out.unshift({ kind: 'mech', id: ch.id, qty: 1, price: Math.round((ch.cost * 1.35) / 5000) * 5000 }); }
+  c.blackStores[s.id] = out; c.blackStoreDay[s.id] = c.day;
+  return out;
 }
 
 export function rngOf(c: Company): RNG {

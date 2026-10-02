@@ -4,7 +4,7 @@ import { UI } from '../engine/ui';
 import { C } from '../engine/color';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
-import { sys, sellPrice, bays, addLog, priceMult, PARTS_NEEDED } from '../game/company';
+import { sys, sellPrice, bays, addLog, priceMult, PARTS_NEEDED, hasBlackMarket, blackStore, BLACK_MARKET_FEE } from '../game/company';
 import { item, HARD_COLORS } from '../data/items';
 import { chassis } from '../data/mechs';
 import { newMechFrame, weaponSummary } from '../game/frame';
@@ -12,7 +12,7 @@ import { faction, repLevel } from '../data/factions';
 import { cb, cbk } from '../engine/util';
 import { weaponTip, hardpointStr } from './widgets';
 
-type Cat = 'all' | 'weapon' | 'equip' | 'ammo' | 'mech';
+type Cat = 'all' | 'weapon' | 'equip' | 'ammo' | 'mech' | 'black';
 
 export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: number, h: number): void {
   const d = ui.d, c = company!;
@@ -24,20 +24,39 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
   }
   const s = sys(c);
   const own = faction(s.owner);
-  const cats: [Cat, string][] = [['all', 'All'], ['weapon', 'Weapons'], ['equip', 'Equipment'], ['ammo', 'Ammo'], ['mech', '\'Mechs & Parts']];
-  cats.forEach(([k, n], i) => { if (ui.button(x + 2 + i * 17, y, n, { active: st.cat === k, w: 16, center: true })) st.cat = k; });
-  d.ctext(x + 90, y, `{${own.color}}${own.short}{/} market · ${repLevel(c.rep[s.owner] ?? 0).name} · prices x${priceMult(c, s).toFixed(2)}`, C.dim);
+  const cats: [Cat, string][] = [['all', 'All'], ['weapon', 'Weapons'], ['equip', 'Equipment'], ['ammo', 'Ammo'], ['mech', '\'Mechs/Parts']];
+  const bm = hasBlackMarket(s);
+  if (bm) cats.push(['black', 'Black Market']);
+  if (!bm && st.cat === 'black') st.cat = 'all';
+  cats.forEach(([k, n], i) => { if (ui.button(x + 2 + i * 16, y, n, { active: st.cat === k, w: 15, center: true, fg: k === 'black' ? '#b27ae8' : undefined, tip: k === 'black' ? 'Rare equipment and high-tier weapons, no questions asked. Members only.' : '' })) st.cat = k; });
+  if (st.cat === 'black' && !c.blackMarket) {
+    const half0 = Math.floor((w - 3) / 2);
+    ui.panel(x + 1, y + 2, half0, h - 2, 'BLACK MARKET');
+    d.text(x + 4, y + 5, 'A pirate fixer watches you from the back of a dockside bar.', C.text, undefined, half0 - 6);
+    d.text(x + 4, y + 7, '"Membership is for life. Rare kit, Star League salvage, the', '#c8a8f0', undefined, half0 - 6);
+    d.text(x + 4, y + 8, ' good stuff. Prices are what they are."', '#c8a8f0', undefined, half0 - 6);
+    d.ctext(x + 4, y + 10, `Membership fee {#f0c850}${cb(BLACK_MARKET_FEE)}{/}. Pirate reputation +5, ${own.short} reputation -3.`, C.dim, undefined, half0 - 6);
+    if (ui.button(x + 4, y + 12, 'BUY MEMBERSHIP', { style: 'block', w: 22, center: true, disabled: c.funds < BLACK_MARKET_FEE })) {
+      c.funds -= BLACK_MARKET_FEE; c.stats.spent += BLACK_MARKET_FEE; c.blackMarket = true;
+      c.rep['pirates'] = (c.rep['pirates'] ?? 0) + 5; c.rep[s.owner] = (c.rep[s.owner] ?? 0) - 3;
+      addLog(c, `Bought black market membership on ${s.name} for ${cb(BLACK_MARKET_FEE)}.`, '#b27ae8');
+      saveGame(c);
+      argo.notify('Welcome to the black market', '#b27ae8');
+    }
+    return;
+  }
+  d.ctext(x + 100, y, `{${own.color}}${own.short}{/} market · ${repLevel(c.rep[s.owner] ?? 0).name} · prices x${priceMult(c, s).toFixed(2)}`, C.dim);
   const match = (kind: 'item' | 'part' | 'mech', id: string) => {
-    if (st.cat === 'all') return true;
+    if (st.cat === 'all' || st.cat === 'black') return true;
     if (st.cat === 'mech') return kind !== 'item';
     if (kind !== 'item') return false;
     const k = item(id).kind;
     return st.cat === 'weapon' ? k === 'weapon' : st.cat === 'ammo' ? k === 'ammo' : k !== 'weapon' && k !== 'ammo';
   };
   // Buy
-  const stock = (c.stores[c.location] ?? []).filter((si) => si.qty > 0 && match(si.kind, si.id));
+  const stock = st.cat === 'black' ? blackStore(c, s).filter((si) => si.qty > 0) : (c.stores[c.location] ?? []).filter((si) => si.qty > 0 && match(si.kind, si.id));
   const half = Math.floor((w - 3) / 2);
-  ui.panel(x + 1, y + 2, half, h - 2, `BUY · ${s.name.toUpperCase()}`);
+  ui.panel(x + 1, y + 2, half, h - 2, st.cat === 'black' ? `BLACK MARKET · ${s.name.toUpperCase()}` : `BUY · ${s.name.toUpperCase()}`);
   const bl = ui.list(x + 2, y + 3, half - 2, h - 4, stock, st.buy, (si, _i, lx, ly, lw, hov) => {
     const bg = hov ? '#16222c' : '#0a0e13';
     d.fill(lx, ly, lw, 1, ' ', C.text, bg);
@@ -65,6 +84,7 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
     else if (si.kind === 'mech' && c.mechs.length >= bays(c) && false) argo.notify('No free bays', C.red);
     else {
       c.funds -= si.price; c.stats.spent += si.price; si.qty--;
+      if (st.cat === 'black') c.rep['pirates'] = (c.rep['pirates'] ?? 0) + 1;
       if (si.kind === 'item') c.inventory[si.id] = (c.inventory[si.id] ?? 0) + 1;
       else if (si.kind === 'part') c.parts[si.id] = (c.parts[si.id] ?? 0) + 1;
       else {
