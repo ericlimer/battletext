@@ -17,6 +17,7 @@ import { drawMechBayTab } from './mechbay';
 import { drawBarracksTab } from './barracks';
 import { drawStoreTab } from './store';
 import { EventScreen } from './eventscreen';
+import { MonthReportScreen } from './monthreport';
 import { GameOverScreen } from './gameover';
 import { pickEvent } from '../game/events';
 import { TitleScreen } from './title';
@@ -63,7 +64,7 @@ export class ArgoScreen implements Screen {
       if (e) { this.advancing = false; app.push(new EventScreen(e.ev, e.ctx)); return false; }
     }
     if (rep.arrived) { this.advancing = false; this.notify(`Arrived at ${sys(c).name}`, C.cyan); this.tab = 'CONTRACTS'; return false; }
-    if (rep.monthEnd) { this.advancing = false; this.notify(`Month end: paid ${cb(c.lastExpenses)}`, C.cbill); return false; }
+    if (rep.monthEnd) { this.advancing = false; this.notify(`Month end: paid ${cb(c.lastExpenses)}`, C.cbill); if (c.ledger?.length) app.push(new MonthReportScreen()); return false; }
     return true;
   }
 
@@ -304,6 +305,20 @@ export class ArgoScreen implements Screen {
     d.ctext(x + 3, y + 33, `Next payment in {#f2f6f8}${days}{/} days. ${c.funds >= e.total ? `Runway ~{#f2f6f8}${Math.floor(c.funds / Math.max(1, e.total))}{/} months.` : '{#e8503a}Insufficient funds for next payment!{/}'}`, C.dim);
     (c.debts ?? []).forEach((db, i) => d.ctext(x + 3, y + 35 + i, `Loan: {#f0c850}${cb(db.amount)}{/} due to the ${db.who} in {#f2f6f8}${db.day - c.day}{/} days.`, C.warn));
     if (c.negativeMonths) d.text(x + 3, y + 35, 'The company is in debt. Another negative month means bankruptcy.', C.red);
+    // Recent months
+    const led = (c.ledger ?? []).slice(-Math.max(0, Math.min(5, h - 41)));
+    if (led.length) {
+      const ly0 = y + h - 3 - led.length;
+      d.text(x + 3, ly0 - 1, 'MONTH       CONTRACTS     SALES     SPENDING        NET', C.faint);
+      led.forEach((L, i) => {
+        const net = L.end - L.start;
+        d.text(x + 3, ly0 + i, dateStr(L.day).slice(3), C.dim);
+        d.text(x + 13, ly0 + i, cbk(L.contracts).padStart(10), C.cbill);
+        d.text(x + 25, ly0 + i, cbk(L.sales).padStart(8), C.cbill);
+        d.text(x + 35, ly0 + i, cbk(-(L.other + L.operating)).padStart(11), C.dim);
+        d.text(x + 48, ly0 + i, `${net >= 0 ? '+' : ''}${cbk(net)}`.padStart(10), net >= 0 ? C.green : C.red);
+      });
+    }
     // Mech upkeep detail
     ui.panel(x + 73, y, w - 74, h, 'MAINTENANCE DETAIL');
     let yy = y + 1;
@@ -316,12 +331,16 @@ export class ArgoScreen implements Screen {
     d.text(x + 75, cy - 2, 'FUNDS · LAST ' + Math.max(1, (hist.length - 1) * 3) + ' DAYS', C.accent, undefined, 99, true);
     d.text(x + 75, cy - 1, cbk(hi), C.faint);
     d.text(x + 75, cy + ch, cbk(lo), C.faint);
+    const bw = Math.max(1, Math.floor(cw / Math.max(1, hist.length)));
     for (let i = 0; i < hist.length; i++) {
       const v = hist[i], top = ((v - lo) / (hi - lo || 1)) * ch * 8;
       for (let r = 0; r < ch; r++) {
         const fill = Math.max(0, Math.min(8, Math.round(top - (ch - 1 - r) * 8)));
-        if (fill > 0) d.set(cx + 6 + i, cy + r, ' ▁▂▃▄▅▆▇█'[fill], v < 0 ? C.red : i === hist.length - 1 ? C.accent : '#8a7a3a');
-        else d.set(cx + 6 + i, cy + r, r === ch - 1 ? '·' : ' ', '#23303a');
+        for (let k = 0; k < bw; k++) {
+          const col = cx + 6 + i * bw + k;
+          if (fill > 0) d.set(col, cy + r, ' ▁▂▃▄▅▆▇█'[fill], v < 0 ? C.red : i === hist.length - 1 ? C.accent : '#8a7a3a');
+          else d.set(col, cy + r, r === ch - 1 ? '·' : ' ', '#23303a');
+        }
       }
     }
     const st = c.stats;

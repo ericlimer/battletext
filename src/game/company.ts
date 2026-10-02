@@ -123,10 +123,13 @@ export interface Company {
   debts?: { day: number; amount: number; who: string }[];
   fundsHistory?: number[]; // sampled every 3 days
   blackMarket?: boolean; // membership bought from a pirate contact
+  monthStart?: { day: number; funds: number; earned: number; spent: number };
+  ledger?: MonthLedger[];
   blackStores?: Record<string, StoreItem[]>;
   blackStoreDay?: Record<string, number>;
 }
 
+export interface MonthLedger { day: number; start: number; end: number; contracts: number; operating: number; other: number; sales: number; }
 export const BLACK_MARKET_FEE = 300000;
 /** Pirate havens and frontier worlds host a black market. */
 export function hasBlackMarket(s: StarSystem): boolean { return s.owner === 'pirates' || s.tags.includes('frontier'); }
@@ -227,6 +230,7 @@ export function newCompany(opts: { name: string; commander: string; callsign: st
     stats: { missions: 0, wins: 0, kills: 0, earned: 0, spent: 0, mechsLost: 0, pilotsLost: 0 },
     negativeMonths: 0, gameOver: '', rngState: r.seed(), lastExpenses: 0, ironman: opts.ironman, commanderId: cmd.id,
   };
+  c.monthStart = { day: 0, funds: c.funds, earned: 0, spent: 0 };
   refreshSystem(c, true);
   addLog(c, `${opts.name} is founded. The Argo's reactor hums to life above ${sys(c).name}.`, '#f0a830');
   addLog(c, `Contract offers are waiting. Monthly expenses will be ${cb(monthlyExpenses(c).total)}.`);
@@ -561,6 +565,13 @@ export function advanceDay(c: Company): DayReport {
     c.lastExpenses = e.total;
     say(`Month end: paid ${cb(e.total)} in operating costs.`, '#f0c850');
     rep.monthEnd = true;
+    // Monthly ledger: contract income, operating costs, other spending, and sales/other income
+    const ms = c.monthStart ?? { day: c.day - 30, funds: c.funds + e.total, earned: c.stats.earned, spent: c.stats.spent - e.total };
+    const contracts = c.stats.earned - ms.earned, spentAll = c.stats.spent - ms.spent;
+    const other = spentAll - e.total;
+    const sales = c.funds - ms.funds - contracts + spentAll;
+    c.ledger = [...(c.ledger ?? []), { day: c.day, start: ms.funds, end: c.funds, contracts, operating: e.total, other, sales }].slice(-12);
+    c.monthStart = { day: c.day, funds: c.funds, earned: c.stats.earned, spent: c.stats.spent };
     const mor = morale(c);
     if (mor >= 40) say('The crew is inspired. MechWarriors will learn faster on the next contracts.', '#6ad46a');
     if (mor < 12) {
