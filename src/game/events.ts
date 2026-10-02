@@ -60,7 +60,7 @@ export const EVENTS: GameEvent[] = [
     id: 'smugglers', title: 'Friends of Friends', where: 'docked',
     text: (c, x) => `A local fixer on ${x.sysName} offers a crate of "surplus" weapons at a steep discount. No questions asked, no paperwork given.`,
     choices: [
-      { text: `Buy the crate (${cb(120000)}).`, req: funds(120000), apply: (c, x, r) => { pay(c, 120000); const pool = ['LL', 'AC5', 'SRM6', 'LRM10', 'PPC', 'ML+1d', 'AC10']; const a = r.pick(pool), b = r.pick(pool); c.inventory[a] = (c.inventory[a] ?? 0) + 1; c.inventory[b] = (c.inventory[b] ?? 0) + 1; c.rep['locals'] -= 3; return `The crate holds a ${a} and a ${b}. Local authorities hear about it. Planetary rep -3.`; } },
+      { text: `Buy the crate (${cb(120000)}).`, req: funds(120000), apply: (c, x, r) => { pay(c, 120000); const pool = ['LL', 'AC5', 'SRM6', 'LRM10', 'PPC', 'ML+1d', 'AC10']; const a = r.pick(pool), b = r.pick(pool); c.inventory[a] = (c.inventory[a] ?? 0) + 1; c.inventory[b] = (c.inventory[b] ?? 0) + 1; c.rep['locals'] -= 3; return `The crate holds a ${item(a).name} and a ${item(b).name}. Local authorities hear about it. Planetary rep -3.`; } },
       { text: 'Report the fixer to the authorities.', apply: (c) => { c.rep['locals'] += 4; return 'The planetary government appreciates your honesty. Planetary rep +4.'; } },
       { text: 'Decline politely.', apply: () => 'The fixer shrugs and disappears into the crowd.' },
     ],
@@ -286,6 +286,76 @@ export const EVENTS: GameEvent[] = [
     choices: [
       { text: 'Jettison the cargo in that hold.', apply: (c, x, r) => { const ids = Object.keys(c.inventory).filter((id) => c.inventory[id] > 0); const lost = r.shuffle(ids).slice(0, 2); for (const id of lost) c.inventory[id]--; return lost.length ? `Spare parts tumble into the void: lost ${lost.map((id) => item(id).name).join(' and ')}.` : 'The hold was nearly empty anyway.'; } },
       { text: 'Fight the fire.', apply: (c, x, r) => { if (r.chance(0.6)) { mor(c, 2); return 'The fire is out within the hour. The damage-control team drinks free for a week. Morale +2.'; } pay(c, 80000); injure(c, x.pilot, 10); return `The fire spreads before it is contained: ${cb(80000)} in repairs, and ${x.pilot.callsign} is injured for 10 days.`; } },
+    ],
+  },
+  {
+    id: 'friendship', title: 'Wingmates', where: 'any',
+    text: (c, x) => `${x.pilot.callsign} and ${x.pilot2.callsign} have started flying as a pair in the simulators, and their drills are the best on the ship. They ask to be kept together in the lance.`,
+    choices: [
+      { text: 'Make it official. Pair them up.', apply: (c, x) => { xp(x.pilot, 400); xp(x.pilot2, 400); mor(c, 2); return `Both gain 400 XP from their drills. Morale +2.`; } },
+      { text: 'Assignments are based on need, not friendship.', apply: (c) => { mor(c, -1); return 'They accept it, but the spark goes out of the drills. Morale -1.'; } },
+    ],
+  },
+  {
+    id: 'rival-offer', title: 'Poaching', where: 'docked',
+    focus: (a) => a.find((p) => !p.commander && p.gun + p.pil >= 11),
+    text: (c, x) => `A rival company has made ${x.pilot.callsign} a generous offer to jump ship. ${x.pilot.callsign} brought the offer straight to you.`,
+    choices: [
+      { text: `Match it with a bonus (${cb(60000)}).`, req: funds(60000), apply: (c, x) => { pay(c, 60000); mor(c, 2); return `${x.pilot.callsign} stays, and word spreads that you look after your people. Morale +2.`; } },
+      { text: 'Thank them for their loyalty.', apply: (c, x, r) => { if (hasQuirk(x.pilot, 'loyal') || r.chance(0.65)) { mor(c, 1); return `${x.pilot.callsign} tears up the offer. Morale +1.`; } c.pilots = c.pilots.filter((q) => q !== x.pilot); c.lancePilots = c.lancePilots.map((id) => (id === x.pilot.id ? null : id)); mor(c, -2); return `${x.pilot.callsign} takes the offer after all. Morale -2.`; } },
+    ],
+  },
+  {
+    id: 'faction-gift', title: 'Diplomatic Pouch', where: 'docked',
+    text: (c, x) => `A courier from the ${x.sysName} governor's office arrives with a sealed case: a token of gratitude for keeping the peace, and an implied request to keep doing it.`,
+    choices: [
+      { text: 'Accept the gift.', apply: (c, x, r) => { const id = r.pick(['HS', 'JJ-L', 'ML+1a', 'SRM4+1d', 'ACT', 'SENS']); c.inventory[id] = (c.inventory[id] ?? 0) + 1; c.rep['locals'] = (c.rep['locals'] ?? 0) + 2; return `The case holds a ${item(id).name}. Planetary rep +2.`; } },
+      { text: 'Politely decline. Mercenaries stay neutral.', apply: (c) => { mor(c, 1); return 'The courier is surprised but respectful. Morale +1.'; } },
+    ],
+  },
+  {
+    id: 'sim-crash', title: 'Simulator Fault', where: 'any',
+    weight: (c) => (c.upgrades.includes('train1') ? 2 : 0.5),
+    text: (c, x) => `A power surge fried the simulator cockpit while ${x.pilot.callsign} was strapped in. The techs say the rig can be repaired, or stripped for parts.`,
+    choices: [
+      { text: `Repair it (${cb(45000)}).`, req: funds(45000), apply: (c, x) => { pay(c, 45000); xp(x.pilot, 200); return `The rig is back online within the week. ${x.pilot.callsign} gains 200 XP from the extra hours.`; } },
+      { text: 'Strip it for parts.', apply: (c) => { c.inventory['HS'] = (c.inventory['HS'] ?? 0) + 1; mor(c, -1); return 'The techs recover a heat sink. The pilots miss their simulator. Morale -1.'; } },
+    ],
+  },
+  {
+    id: 'low-supplies', title: 'Short Rations', where: 'travel',
+    weight: (c) => (c.expense <= 1 ? 3 : 0.3),
+    text: () => 'The quartermaster reports that the galley stores are running thin. The crew has noticed the portions shrinking.',
+    choices: [
+      { text: `Buy supplies at the next jump point (${cb(50000)}).`, req: funds(50000), apply: (c) => { pay(c, 50000); mor(c, 3); return 'Fresh supplies come aboard. Morale +3.'; } },
+      { text: 'Tighten belts.', apply: (c) => { mor(c, -4); return 'The crew mutters about being treated like conscripts. Morale -4.'; } },
+    ],
+  },
+  {
+    id: 'veteran-advice', title: 'War Stories', where: 'any',
+    focus: (a) => a.find((p) => p.missions >= 6),
+    text: (c, x) => `${x.pilot.callsign} has seen more drops than anyone aboard. ${x.pilot2.callsign} keeps asking about them.`,
+    choices: [
+      { text: 'Let them teach.', apply: (c, x) => { xp(x.pilot2, 500); return `${x.pilot2.callsign} absorbs every lesson. +500 XP.`; } },
+      { text: 'Have them write a field manual for the whole company.', apply: (c, x) => { for (const p of c.pilots) if (!p.dead && p !== x.pilot) xp(p, 150); return 'Every other MechWarrior gains 150 XP.'; } },
+    ],
+  },
+  {
+    id: 'damaged-mech', title: 'Cannibalize?', where: 'docked',
+    weight: (c) => (c.mechs.some((m) => (m as any).wreck) ? 4 : 0),
+    text: () => 'The chief tech has a proposal: the wrecked \'Mech in bay four will take weeks to rebuild. Stripping it would get the rest of the lance back in fighting shape faster.',
+    choices: [
+      { text: 'Keep rebuilding it.', apply: (c) => { mor(c, 1); return 'The techs grumble, but they respect the decision. Morale +1.'; } },
+      { text: 'Strip it for parts.', apply: (c) => { const w = c.mechs.find((m) => (m as any).wreck)!; c.mechs = c.mechs.filter((m) => m !== w); c.lance = c.lance.map((u) => (u === w.uid ? null : u)); c.parts[w.defId] = (c.parts[w.defId] ?? 0) + 2; for (const it of w.items) if (!it.dead) c.inventory[it.id] = (c.inventory[it.id] ?? 0) + 1; c.work = c.work.filter((o) => o.mechUid !== w.uid); return 'The wreck is stripped to the frame: 2 chassis parts and its surviving equipment go into storage.'; } },
+    ],
+  },
+  {
+    id: 'press', title: 'Interview Request', where: 'docked',
+    weight: (c) => (c.stats.wins >= 3 ? 1.5 : 0.3),
+    text: (c, x) => `A ${x.sysName} news network wants to interview the commander of the company that has been winning contracts all over the Reach.`,
+    choices: [
+      { text: 'Give the interview.', apply: (c, x, r) => { if (r.chance(0.7)) { c.mrb += 15; mor(c, 2); return 'The piece is flattering. MRB +15, morale +2.'; } c.rep['locals'] = (c.rep['locals'] ?? 0) - 2; return 'The journalist twists your words. Planetary rep -2.'; } },
+      { text: 'No comment.', apply: () => 'The network runs the story anyway, without your side of it.' },
     ],
   },
 ];

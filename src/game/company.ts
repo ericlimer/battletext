@@ -560,7 +560,7 @@ export function advanceDay(c: Company): DayReport {
       }
     }
     if (r.chance(0.09)) rep.event = 'travel';
-  } else if (r.chance(0.045)) rep.event = 'docked';
+  } else if (r.chance(0.07)) rep.event = 'docked';
   // Month end
   if (c.day % 30 === 0) {
     const e = monthlyExpenses(c);
