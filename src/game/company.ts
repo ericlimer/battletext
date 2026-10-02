@@ -297,6 +297,7 @@ const CONTRACT_NAMES: Record<MissionType, string[]> = {
   defendbase: ['Siege Breaker', 'Stand Fast', 'Bulwark', 'The Alamo', 'Garrison Duty', 'Walls of Iron'],
   ambush: ['Highway Robbery', 'Road Toll', 'Supply Cut', 'Dead End', 'Hijack', 'Toll Booth'],
   escort: ['Precious Cargo', 'Shepherd', 'Safe Passage', 'Special Delivery', 'Milk Run', 'Caravan'],
+  capture: ['Data Mine', 'Signal Fire', 'Lighthouse', 'Breadcrumbs', 'Ping', 'Dead Drop'],
 };
 
 export function basePay(diff: number): number {
@@ -304,7 +305,7 @@ export function basePay(diff: number): number {
 }
 
 export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
-  const types: MissionType[] = ['battle', 'battle', 'assassinate', 'destroybase', 'defendbase', 'ambush', 'escort'];
+  const types: MissionType[] = ['battle', 'battle', 'assassinate', 'destroybase', 'defendbase', 'ambush', 'escort', 'capture'];
   const board0 = c.contracts[s.id] ?? [];
   const type = r.weighted(types, (t) => 1 / (1 + board0.filter((k) => k.type === t).length * 1.2));
   // Employers: owner, locals, and neighbouring powers
@@ -329,6 +330,7 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
     defendbase: `${empF.short} intelligence expects a ${tgtF.short} raid on a critical facility. Hold it.`,
     ambush: `A ${tgtF.short} supply convoy is moving through the ${s.name} highlands. Intercept it.`,
     escort: `${empF.short} needs a supply convoy escorted through contested territory on ${s.name}.`,
+    capture: `${tgtF.short} sensor beacons on ${s.name} are feeding targeting data to their artillery. ${empF.short} wants them taken intact.`,
   };
   return {
     id: 'k' + r.int(0, 1e9).toString(36),

@@ -10,7 +10,7 @@ import { Pilot, makePilot, uniqueCallsign } from '../game/pilot';
 import { Battle, Unit, SIDE } from './battle';
 import { Biome, generateMap, MapGenOpts, TERRAIN, BattleMap, dist } from './terrain';
 
-export type MissionType = 'battle' | 'assassinate' | 'destroybase' | 'defendbase' | 'ambush' | 'escort';
+export type MissionType = 'battle' | 'assassinate' | 'destroybase' | 'defendbase' | 'ambush' | 'escort' | 'capture';
 
 export const MISSION_INFO: Record<MissionType, { name: string; desc: string; glyph: string }> = {
   battle: { name: 'Battle', glyph: '⚔', desc: 'Engage and destroy all hostile forces in the area.' },
@@ -19,6 +19,7 @@ export const MISSION_INFO: Record<MissionType, { name: string; desc: string; gly
   defendbase: { name: 'Defend Base', glyph: '⌂', desc: 'Protect the employer\'s facility from waves of attackers.' },
   ambush: { name: 'Ambush Convoy', glyph: '»', desc: 'Intercept and destroy a supply convoy before it leaves the map.' },
   escort: { name: 'Escort Convoy', glyph: '«', desc: 'Protect a friendly convoy until it reaches the extraction point.' },
+  capture: { name: 'Target Acquisition', glyph: '◎', desc: 'Seize three data beacons held by a defending lance.' },
 };
 
 export interface Objective {
@@ -146,8 +147,15 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
   if (t === 'destroybase') mo.base = { x: W - 20, y: Math.floor(H / 2) - 7, w: 15, h: 14, buildings: 5, walls: true, team: 1, objectiveCount: 3 };
   if (t === 'defendbase') mo.base = { x: 6, y: Math.floor(H / 2) - 7, w: 14, h: 14, buildings: 5, walls: r.chance(0.6), team: 0, objectiveCount: 3 };
   if (t === 'ambush' || t === 'escort') mo.road = 'h';
+  // Target Acquisition: three beacons across the middle and far side of the map
+  const beacons: { x: number; y: number; owner: number }[] = [];
+  if (t === 'capture') {
+    for (const [fx, fy] of [[0.48, 0.22], [0.66, 0.5], [0.48, 0.78]]) beacons.push({ x: Math.round(W * fx) + r.int(-3, 3), y: Math.round(H * fy) + r.int(-3, 3), owner: 1 });
+    for (const bc of beacons) mo.clear!.push({ x: bc.x, y: bc.y, r: 2 });
+  }
   mo.clear!.push({ x: pStart[0], y: pStart[1], r: 4 }, { x: eStart[0], y: eStart[1], r: 4 });
   const map: BattleMap = generateMap(r, mo);
+  if (beacons.length) map.beacons = beacons;
   const b = new Battle(map, r);
   if (spec.morale !== undefined) { b.morale = spec.morale; b.resolveMax[0] = 60 + spec.morale * 2; b.resolve[0] = Math.round(spec.morale / 2); }
   if (spec.startResolve) b.resolve[0] = Math.min(b.resolveMax[0], b.resolve[0] + spec.startResolve);
@@ -278,6 +286,20 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       briefing.push(`An ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east.`);
       break;
     }
+    case 'capture': {
+      playerUnits = place(b, spec.player, 0, pStart[0], pStart[1], 2);
+      const mid = beacons[1];
+      const guards = place(b, enemyLance(d <= 4 ? 3 : 4), 1, mid.x + 3, mid.y, 6, { tag: 'guard' }, 3);
+      guards.forEach((g, k) => { const bc = beacons[k % beacons.length]; g.ai.goal = [bc.x, bc.y]; });
+      const re = spec.enemies || d < 5 ? [] : place(b, generateForce(r, d, spec.target, 2), 1, W - 4, r.chance(0.5) ? 5 : H - 6, 6, { deployRound: 4, deployed: false });
+      for (const e of re) e.ai.goal = [mid.x, mid.y];
+      enemyUnits = [...guards, ...re];
+      for (const pu of playerUnits) { pu.tag = 'capper'; pu.ai.goal = [beacons[0].x, beacons[0].y]; }
+      objectives.push({ id: 'beacons', text: 'Secure all three data beacons ◎', primary: true, status: 'active', bonus: 0 });
+      objectives.push({ id: 'kill', text: 'Destroy all hostile forces', primary: false, status: 'active', bonus });
+      briefing.push(`${tgt.short} has seeded the area with data beacons. Move a unit onto each ◎ with no enemy adjacent to secure it.`);
+      break;
+    }
   }
   if (spec.night) briefing.push('Night operation: visual range reduced to 360m. Sensors unaffected.');
 
@@ -362,6 +384,26 @@ function installHooks(rt: MissionRuntime): void {
         if (dead >= cv.length - 1 && combatEnemies().every((u) => !u.alive)) { obj(rt, 'convoy')!.status = 'done'; return 'win'; }
         break;
       }
+      case 'capture': {
+        const bcs = b.map.beacons ?? [];
+        const foes = alive(rt.enemyUnits);
+        for (const bc of bcs) {
+          if (bc.owner === 0) continue;
+          const holder = b.units.find((u) => u.alive && SIDE(u.team) === 0 && dist(u.x, u.y, bc.x, bc.y) <= 1.5);
+          if (holder && !foes.some((e) => dist(e.x, e.y, bc.x, bc.y) <= 2.5)) {
+            bc.owner = 0;
+            b.say(`${b.displayName(holder)} secured a data beacon.`, '#4ad4e8');
+            b.float(bc.x, bc.y, 'BEACON SECURED', '#4ad4e8', true);
+          }
+        }
+        const got = bcs.filter((bc) => bc.owner === 0).length;
+        obj(rt, 'beacons')!.progress = `${got}/${bcs.length}`;
+        const ko = obj(rt, 'kill')!;
+        if (ko.status === 'active' && rt.enemyUnits.every((u) => !u.alive || u.fled) && rt.enemyUnits.every((u) => u.deployed)) ko.status = 'done';
+        if (got === bcs.length) { obj(rt, 'beacons')!.status = 'done'; return 'win'; }
+        if (alive(rt.enemyUnits).length === 0 && rt.enemyUnits.every((u) => u.deployed)) { /* keep moving to the beacons */ }
+        break;
+      }
       case 'escort': {
         const cv = b.units.filter((u) => u.team === 2 && u.tag === 'convoy');
         const dead = cv.filter((u) => !u.alive).length, safe = cv.filter((u) => u.fled).length;
@@ -380,6 +422,13 @@ function installHooks(rt: MissionRuntime): void {
   };
   b.hooks.check = () => update();
   b.hooks.roundStart = () => {
+    // Beacon runners head for the nearest unsecured beacon
+    const open = (b.map.beacons ?? []).filter((bc) => bc.owner !== 0);
+    for (const u of rt.playerUnits) {
+      if (u.tag !== 'capper' || !u.alive || !open.length) continue;
+      const bc = open.reduce((a, q) => (dist(u.x, u.y, q.x, q.y) < dist(u.x, u.y, a.x, a.y) ? q : a));
+      u.ai.goal = [bc.x, bc.y];
+    }
     // Assassination targets bolt once hurt or after round 6
     const tg = rt.enemyUnits.find((u) => u.tag === 'target');
     if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 9 || tg.dmgTaken > 300)) {

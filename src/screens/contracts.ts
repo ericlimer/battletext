@@ -100,8 +100,9 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
     drawSurvey(d, rt, sx, sy);
     const lx = sx + sm.w + 3;
     const legend = ['{#5fd0e8}▲{/} drop zone'];
-    if (k.type !== 'battle' && k.type !== 'destroybase' && k.type !== 'defendbase') legend.push('{#f0c040}×{/} exit');
+    if (k.type === 'escort' || k.type === 'ambush' || k.type === 'assassinate') legend.push('{#f0c040}×{/} exit');
     if (k.type === 'escort') legend.push('{#6ad46a}■{/} convoy');
+    if (k.type === 'capture') legend.push('{#f0c040}◎{/} beacon');
     if (k.type === 'destroybase') legend.push('{#e8603a}■{/} target');
     if (k.type === 'defendbase') legend.push('{#3aa8d8}■{/} protect');
     if (k.type === 'escort' || k.type === 'ambush') legend.push('{#d8d0b8}─{/} road');

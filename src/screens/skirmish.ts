@@ -15,7 +15,7 @@ import { hardpointStr } from './widgets';
 
 const TIERS = ['Green', 'Regular', 'Veteran', 'Elite'];
 const BUDGETS = [0, 12e6, 20e6, 30e6, 45e6];
-const MTYPES: MissionType[] = ['battle', 'assassinate', 'destroybase', 'defendbase', 'ambush', 'escort'];
+const MTYPES: MissionType[] = ['battle', 'assassinate', 'destroybase', 'defendbase', 'ambush', 'escort', 'capture'];
 
 interface Slot { chassis: string | null; tier: number; }
 

@@ -95,9 +95,17 @@ export class CombatScreen implements Screen {
     }
   }
   /** Exit zones and escape points implied by mission AI goals. */
-  goalMarkers(): Map<number, { color: string; glyph: string }> {
-    const out = new Map<number, { color: string; glyph: string }>();
+  goalMarkers(): Map<number, { color: string; glyph: string; force?: boolean }> {
+    const out = new Map<number, { color: string; glyph: string; force?: boolean }>();
     const m = this.b.map;
+    for (const bc of m.beacons ?? []) {
+      const col = bc.owner === 0 ? '#4ad4e8' : '#f0c040';
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const x = bc.x + dx, y = bc.y + dy;
+        if (x < 0 || y < 0 || x >= m.w || y >= m.h) continue;
+        out.set(y * m.w + x, dx || dy ? { color: col, glyph: '·' } : { color: col, glyph: '◎', force: true });
+      }
+    }
     for (const u of this.b.units) {
       if (!u.alive || u.fled || !u.ai.goal) continue;
       const fleeing = u.tag === 'convoy' || (u as any)._fleeing || (u.tag === 'target' && this.b.seen[0].has(u.id));
@@ -926,7 +934,7 @@ export class CombatScreen implements Screen {
           if (arc === 'front') bg = lerp(bg, '#ffb030', 0.45 * fade + 0.1); else if (arc === 'rear') bg = lerp(bg, '#ff3020', 0.5 * fade + 0.1);
         }
         const mk = markers.get(i);
-        if (mk) { bg = lerp(bg, mk.color, 0.3 + 0.1 * Math.sin(this.time * 3)); if (ch === '·' || ch === '.') { ch = mk.glyph; fg = mk.color; } }
+        if (mk) { bg = lerp(bg, mk.color, 0.3 + 0.1 * Math.sin(this.time * 3)); if (mk.force || ch === '·' || ch === '.') { ch = mk.glyph; fg = mk.force ? lerp(mk.color, '#ffffff', 0.3 + 0.3 * Math.sin(this.time * 4)) : mk.color; } }
         if (meleeSpots?.has(i)) bg = lerp(bg, '#c06a2a', 0.45 + 0.1 * Math.sin(this.time * 6));
         if (pathTiles.has(i)) { bg = lerp(bg, pendingMode === 'sprint' ? '#e0c050' : pendingMode === 'jump' ? '#60e090' : '#70b0ff', 0.35); if (!b.unitAt(x, y) && i !== pendingTile) { ch = '•'; fg = '#e8f4ff'; } }
         if (i === ht) bg = lerp(bg, '#ffffff', 0.18);

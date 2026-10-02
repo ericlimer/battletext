@@ -44,7 +44,7 @@ export interface Unit {
   dmgDealt: number;
   dmgTaken: number;
   injuriesTaken: number;
-  tag: '' | 'convoy' | 'target' | 'escort' | 'guard' | 'raider';
+  tag: '' | 'convoy' | 'target' | 'escort' | 'guard' | 'raider' | 'capper';
   deployRound: number;
   deployed: boolean;
   fled: boolean;

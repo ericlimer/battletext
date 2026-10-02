@@ -72,6 +72,7 @@ export function drawSurvey(d: Display, rt: MissionRuntime, x: number, y: number)
   for (const u of [...rt.enemyUnits, ...rt.battle.units.filter((v) => v.team === 2)]) {
     if ((u.tag === 'convoy' || u.tag === 'target') && u.ai.goal) mark(u.ai.goal[0], u.ai.goal[1], '×', '#f0c040');
   }
+  for (const bc of rt.battle.map.beacons ?? []) mark(bc.x, bc.y, '◎', '#f0c040');
   if (rt.spec.type === 'escort') for (const u of rt.battle.units.filter((v) => v.tag === 'convoy')) mark(u.x, u.y, '■', '#6ad46a');
 }
 

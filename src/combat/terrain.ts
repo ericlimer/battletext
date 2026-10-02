@@ -112,6 +112,7 @@ export interface BattleMap {
   wrecks: Map<number, string>; // tile -> wreck glyph
   scorch: Float32Array;
   hill: Float32Array; // hillshade -1..1 (light from the north-west)
+  beacons?: { x: number; y: number; owner: number }[]; // Target Acquisition objectives
 }
 
 export function idx(m: BattleMap, x: number, y: number): number { return y * m.w + x; }
