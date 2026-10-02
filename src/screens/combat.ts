@@ -823,6 +823,8 @@ export class CombatScreen implements Screen {
     const calm = m.biome === 'martian' || m.biome === 'badlands' || m.biome === 'lunar' || m.biome === 'desert';
     if (t === 'plain') ch = calm ? (((x * 7 + y * 13) % 3 === 0) ? '·' : ' ') : ((x * 7 + y * 13) % 5 === 0 && ch !== '.') ? ch : '·';
     if (t === 'rough' && calm && ch !== '◦' && (x * 5 + y * 11) % 3 !== 0) ch = ' ';
+    // Crater rims read as a raised, sunlit lip rather than a row of glyphs
+    if (ch === '◦') { ch = (x + y) % 2 ? '∙' : ' '; bg = scale(bg, 1.38); fg = lerp(bg, '#ffffff', 0.25); }
     if (t === 'plain' && m.biome === 'desert') { const band = Math.sin(x * 0.5 + y * 0.9 + s * 3); if (band > 0.82) { ch = '~'; fg = lerp(bg, '#d8a860', 0.35); } }
     const tt = this.time;
     switch (t) {
@@ -1303,6 +1305,34 @@ export class CombatScreen implements Screen {
       }
       if (hov) { ui.cursor = 'pointer'; if (ui.click(x, yy, PW, 2)) { if (this.canAct(u) && !b.active) this.select(u); this.centerOn(u.x, u.y); } }
       yy += 2;
+    }
+    this.drawThreats(ui, x, yy + 1);
+  }
+
+  /** Visible enemies ranked by how hard they could hit the selected unit from where they stand. */
+  drawThreats(ui: UI, x: number, y: number): void {
+    const d = ui.d, b = this.b;
+    const u = this.sel ?? b.active ?? this.rt.playerUnits.find((x) => x.alive) ?? null;
+    if (!u || !u.alive || SIDE(u.team) !== 0 || y >= ROWS - 4) return;
+    const foes = b.units.filter((e) => e.alive && e.deployed && !e.fled && SIDE(e.team) === 1 && this.visibleUnit(e));
+    if (!foes.length) return;
+    ui.header(x, y, PW, `THREATS TO ${u.name.toUpperCase()}`, C.bg, '#703030');
+    const rows = foes.map((e) => ({ e, dmg: Math.round(b.expectedDamage(e, u, { x: e.x, y: e.y, moved: null })), dd: dist(u.x, u.y, e.x, e.y) }))
+      .sort((p, q) => q.dmg - p.dmg);
+    let yy = y + 1;
+    for (const r of rows) {
+      if (yy >= ROWS - 1) break;
+      const arc = attackArc(u, r.e.x, r.e.y);
+      const hov = ui.hover(x, yy, PW, 1);
+      const bg = hov ? '#1e1414' : C.panel;
+      d.fill(x, yy, PW, 1, ' ', C.text, bg);
+      d.text(x + 1, yy, this.glyphOf(r.e), C.enemy, bg, 99, true);
+      d.text(x + 4, yy, b.chassisName(r.e).slice(0, 16), C.text, bg);
+      d.text(x + 21, yy, `${r.dd.toFixed(0).padStart(2)} tiles`, C.dim, bg);
+      d.text(x + 31, yy, arc === 'rear' ? 'REAR' : arc === 'front' ? 'front' : 'side', arc === 'rear' ? C.red : arc === 'front' ? C.faint : C.warn, bg);
+      d.text(x + 38, yy, r.dmg ? `~${r.dmg} dmg` : 'no shot', r.dmg >= 60 ? C.red : r.dmg ? C.orange : C.faint, bg);
+      if (hov) { ui.setTip([`${b.chassisName(r.e)} could deal ~${r.dmg} damage to ${u.name} from its current position.`, `It sees ${u.name}'s ${arc} arc.`]); if (ui.click(x, yy, PW, 1)) this.centerOn(r.e.x, r.e.y); }
+      yy++;
     }
   }
 
