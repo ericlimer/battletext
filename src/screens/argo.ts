@@ -360,26 +360,41 @@ export class ArgoScreen implements Screen {
     const d = ui.d, c = this.c;
     ui.panel(x + 1, y, w - 2, h, 'ARGO UPGRADES');
     d.text(x + 3, y + 1, 'Refit the Argo. Each module adds monthly upkeep and takes days to install.', C.dim);
-    UPGRADES.forEach((u, i) => {
-      const col = i % 2, row = Math.floor(i / 2);
-      const bx = x + 3 + col * 73, by = y + 3 + row * 5;
-      const owned = has(c, u.id);
-      const inst = (c.installing ?? []).find((x) => x.id === u.id);
-      const locked = u.requires && !has(c, u.requires);
-      d.box(bx, by, 71, 5, owned ? '#2a6a4a' : locked ? '#2a2a2a' : C.border, owned ? '#0c1a14' : C.panel);
-      d.text(bx + 2, by + 1, u.name, owned ? C.green : locked ? C.faint : C.bright, undefined, 99, true);
-      d.text(bx + 2, by + 2, u.desc, C.dim, undefined, 66);
-      d.ctext(bx + 2, by + 3, `{#f0c850}${cb(u.cost)}{/} · upkeep ${cb(u.upkeep)}/mo${!owned && !inst && !locked ? ` · ${Math.max(3, Math.round(u.cost / 180000))}d install` : ''}${locked ? `  {#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}` : ''}`, C.dim, undefined, locked ? 67 : 52);
-      if (owned) d.text(bx + 60, by + 1, 'INSTALLED', C.green);
-      else if (inst) d.text(bx + 52, by + 1, `INSTALLING ${Math.max(0, inst.doneDay - c.day)}d`, C.warn);
-      else if (!locked && !inst && ui.button(bx + 56, by + 3, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : 'Click twice to purchase.' })) {
-        if (this.confirmBuy !== u.id) this.confirmBuy = u.id;
-        else {
-          const days = Math.max(3, Math.round(u.cost / 180000));
-          c.funds -= u.cost; c.stats.spent += u.cost; (c.installing ??= []).push({ id: u.id, doneDay: c.day + days });
-          saveGame(c); this.notify(`${u.name}: refit crews need ${days} days`, C.cyan); this.confirmBuy = '';
+    const TRACKS: [string, string, string[]][] = [
+      ['ENGINEERING', 'Repairs, refits and the drive', ['tech1', 'tech2', 'bay2', 'armory', 'drive']],
+      ['CREW', 'Health, training and comfort', ['med1', 'med2', 'train1', 'train2', 'hydro', 'rec']],
+      ['COMMAND', 'Intelligence and personnel', ['comms', 'toc', 'barracks']],
+    ];
+    const cw = Math.floor((w - 6) / 3);
+    TRACKS.forEach(([title, sub, ids], col) => {
+      const tx = x + 3 + col * cw;
+      d.text(tx, y + 3, title, C.accent, undefined, 99, true);
+      d.text(tx + title.length + 2, y + 3, sub, C.faint, undefined, cw - title.length - 4);
+      ids.forEach((id, row) => {
+        const u = UPGRADES.find((q) => q.id === id);
+        if (!u) return;
+        const bx = tx, by = y + 4 + row * 6, bw = cw - 2;
+        const owned = has(c, u.id);
+        const inst = (c.installing ?? []).find((q) => q.id === u.id);
+        const locked = !!u.requires && !has(c, u.requires);
+        d.box(bx, by, bw, 6, owned ? '#2a6a4a' : locked ? '#2a2a2a' : C.border, owned ? '#0c1a14' : C.panel);
+        // Tier connector from the module this one requires
+        if (u.requires && ids.includes(u.requires) && ids.indexOf(u.requires) === row - 1) d.set(bx + 4, by, '┴', owned ? '#2a6a4a' : '#3a4a58');
+        d.text(bx + 2, by + 1, u.name, owned ? C.green : locked ? C.faint : C.bright, undefined, bw - 14, true);
+        if (owned) d.text(bx + bw - 11, by + 1, 'INSTALLED', C.green);
+        else if (inst) d.text(bx + bw - 16, by + 1, `INSTALLING ${Math.max(0, inst.doneDay - c.day)}d`, C.warn);
+        wrap(u.desc, bw - 4).slice(0, 2).forEach((l, k) => d.text(bx + 2, by + 2 + k, l, C.dim));
+        const days = Math.max(3, Math.round(u.cost / 180000));
+        if (locked) d.ctext(bx + 2, by + 4, `{#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}`, C.dim, undefined, bw - 4);
+        else d.ctext(bx + 2, by + 4, `{#f0c850}${cbk(u.cost)}{/} · ${cbk(u.upkeep)}/mo${!owned && !inst ? ` · ${days}d` : ''}`, C.dim, undefined, bw - 15);
+        if (!owned && !locked && !inst && ui.button(bx + bw - 12, by + 4, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { w: 10, disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : `Click twice to purchase. Upkeep ${cb(u.upkeep)}/month; ${days} days to install.` })) {
+          if (this.confirmBuy !== u.id) this.confirmBuy = u.id;
+          else {
+            c.funds -= u.cost; c.stats.spent += u.cost; (c.installing ??= []).push({ id: u.id, doneDay: c.day + days });
+            saveGame(c); this.notify(`${u.name}: refit crews need ${days} days`, C.cyan); this.confirmBuy = '';
+          }
         }
-      }
+      });
     });
     const upk = monthlyExpenses(c).upgrades;
     d.ctext(x + 3, y + h - 2, `Installed modules {#f2f6f8}${c.upgrades.length}/${UPGRADES.length}{/} · upkeep {#f0c850}${cb(upk)}{/}/mo${(c.installing ?? []).length ? ` · {#f0c040}${c.installing!.length} installing{/}` : ''}`, C.dim);
