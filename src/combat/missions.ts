@@ -422,7 +422,7 @@ function installHooks(rt: MissionRuntime): void {
         obj(rt, 'escort')!.progress = `${safe} safe, ${dead} lost`;
         if (dead > 0) obj(rt, 'allsafe')!.status = 'failed';
         if (dead >= 2) { obj(rt, 'escort')!.status = 'failed'; return 'loss'; }
-        if (safe >= 2 && (safe + dead === cv.length || safe >= 2)) {
+        if (safe >= 2) {
           obj(rt, 'escort')!.status = 'done';
           const a = obj(rt, 'allsafe')!; if (a.status === 'active') a.status = safe === cv.length ? 'done' : 'failed';
           return 'win';

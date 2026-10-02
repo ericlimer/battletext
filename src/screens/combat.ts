@@ -45,6 +45,7 @@ export class CombatScreen implements Screen {
   animPos = new Map<number, [number, number]>();
   ghosts = new Set<number>();
   logLines: { text: string; color?: string }[] = [];
+  flashMsg: { text: string; until: number } | null = null;
   logScroll = { scroll: 0 };
   banner: { text: string; sub: string; t: number; color: string } | null = null;
   aiTimer = 0;
@@ -79,8 +80,8 @@ export class CombatScreen implements Screen {
 
   /** Unique glyph per unit within a side: first unused letter of the chassis name. */
   assignGlyphs(): void {
+    const used = new Set<string>(); // shared, so a tag never means two different units
     for (const side of [0, 1]) {
-      const used = new Set<string>();
       for (const u of this.b.units.filter((x) => SIDE(x.team) === side)) {
         if (u.frame.kind === 'turret') { this.glyphs.set(u.id, 'τ'); continue; }
         if (u.frame.kind === 'vehicle') { this.glyphs.set(u.id, u.tag === 'convoy' ? '■' : '◆'); continue; }
@@ -667,7 +668,7 @@ export class CombatScreen implements Screen {
       const dfa = this.mode === 'dfa';
       if (hu && SIDE(hu.team) === 1 && this.visibleUnit(hu)) {
         const spots = b.meleeSpots(u, hu, dfa);
-        if (!spots.size) { b.say('No reachable attack position.', C.dim); this.pull(); return; }
+        if (!spots.size) { this.flashMsg = { text: `Out of reach: ${b.displayName(hu)} is ${dist(u.x, u.y, hu.x, hu.y).toFixed(1)} tiles away, ${dfa ? `jump ${u.stats.jump}` : `walk ${u.stats.walk}`}.`, until: this.time + 3 }; return; }
         if (this.meleeTarget === hu) {
           // default spot: cheapest
           let bi = -1, bc = Infinity;
@@ -875,6 +876,8 @@ export class CombatScreen implements Screen {
   drawMap(ui: UI): void {
     const d = ui.d, b = this.b, m = b.map;
     const lights = this.fx.lights();
+    // At night every friendly 'Mech carries its own floodlights
+    if (m.night) for (const pu of b.units) if (pu.alive && pu.deployed && !pu.fled && SIDE(pu.team) === 0) lights.push({ x: pu.x, y: pu.y, r: 4.5, color: '#c8d0d8', intensity: 0.16 });
     const ambient = m.night ? 0.55 : 1;
     const u = this.sel;
     const act = this.playerTurn() && this.canAct(u);
@@ -917,7 +920,7 @@ export class CombatScreen implements Screen {
         const vis = b.visibleTiles[i];
         let lr = ambient, lg = ambient, lb = ambient * (m.night ? 1.15 : 1);
         if (lights.length) { const L = lightAt(lights, x, y); lr += L[0] * 1.3; lg += L[1] * 1.3; lb += L[2] * 1.3; }
-        if (!vis) { const k = m.night ? 0.42 : 0.62; lr *= k; lg *= k; lb *= k * 1.1; fg = desaturate(fg, m.night ? 0.6 : 0.35); }
+        if (!vis) { const k = m.night ? 0.55 : 0.62; lr *= k; lg *= k; lb *= k * (m.night ? 1.22 : 1.1); fg = desaturate(fg, m.night ? 0.6 : 0.35); }
         fg = light(fg, lr, lg, lb);
         bg = light(bg, lr, lg, lb);
         // overlays
@@ -1019,6 +1022,8 @@ export class CombatScreen implements Screen {
     }
     // Floaters
     const occ: [number, number, number][] = [];
+    // Floaters never sit on top of a visible unit
+    for (const u of b.units) if (u.alive && u.deployed && !u.fled && (SIDE(u.team) === 0 || this.visibleUnit(u))) occ.push([MY + u.y - this.camY, MX + (u.x - this.camX) * 2, MX + (u.x - this.camX) * 2 + 2]);
     for (const f of this.fx.floats) {
       if (f.delay && f.delay > 0) continue;
       const k = f.life / f.max;
@@ -1027,7 +1032,7 @@ export class CombatScreen implements Screen {
       const len = [...f.text].length;
       const sx = Math.max(MX, Math.min(MX + VW * 2 - len, MX + Math.round((x - this.camX) * 2 + 1 - len / 2)));
       // Bump up until this label doesn't overlap another on the same row
-      for (let tries = 0; tries < 6 && occ.some(([ry, a, bb]) => ry === sy && sx < bb + 1 && sx + len > a - 1); tries++) sy--;
+      for (let tries = 0; tries < 8 && occ.some(([ry, a, bb]) => ry === sy && sx < bb + 1 && sx + len > a - 1); tries++) sy--;
       occ.push([sy, sx, sx + len]);
       if (sy < MY || sy >= MY + VH) continue;
       const col = k > 0.8 ? lerp(f.color, '#303030', (k - 0.8) / 0.2) : f.color;
@@ -1075,13 +1080,16 @@ export class CombatScreen implements Screen {
       const fade = k > 0.6 ? 1 - (k - 0.6) / 0.4 : 1;
       // Beam grows out from the muzzle during the first 30%
       const reachF = Math.min(1, k / 0.25);
-      for (let s = 1; s <= Math.floor(n * reachF); s++) {
+      const head = Math.floor(n * reachF);
+      for (let s = 1; s <= head; s++) {
         const x = bm.x0 + ((bm.x1 - bm.x0) * s) / n, y = bm.y0 + ((bm.y1 - bm.y0) * s) / n;
         const p = toScreen(x, y);
         if (!p) continue;
-        const glyph = bm.crackle ? ['~', '≈', '*', '╳', g][Math.floor(Math.random() * 5)] : g;
-        const bg = lerp(d.getBg(p[0], p[1]), bm.color, 0.45 * fade);
-        d.wide(p[0], p[1], glyph, lerp(d.getBg(p[0], p[1]), col, fade), bg);
+        const tip = s === head && reachF < 1;
+        const glyph = tip ? '◆' : bm.crackle ? ['~', '≈', '*', '╳', g][Math.floor(Math.random() * 5)] : g;
+        // A thin glowing line: bright core glyph, only a faint halo on the ground beneath
+        const bg = lerp(d.getBg(p[0], p[1]), bm.color, (tip ? 0.4 : 0.18) * fade);
+        d.wide(p[0], p[1], glyph, tip ? bm.core : lerp(d.getBg(p[0], p[1]), col, fade), bg);
       }
     }
     for (const p of this.fx.parts) {
@@ -1228,7 +1236,8 @@ export class CombatScreen implements Screen {
       this.pending ? `Click again/[Space] to move. Evasion: ${pipStr(this.b.pipsFor(u, this.pending.mode, this.pendingSteps(u)), this.b.maxPips(u))}` :
       u.moved || u.attacked ? (b.canAttack(u) ? 'Click a target and [F]ire, or [E] to end.' : '[E] to choose facing and end.') :
       'Move, attack or brace. [Tab] next unit. [?] help.';
-    ui.d.ctext(x, y + 2, `{#6d7f8a}${hint}{/}`, C.dim, undefined, 62);
+    if (this.flashMsg && this.time < this.flashMsg.until) ui.d.text(x, y + 2, this.flashMsg.text, C.red, undefined, 62);
+    else ui.d.ctext(x, y + 2, `{#6d7f8a}${hint}{/}`, C.dim, undefined, 62);
   }
 
   pendingSteps(u: Unit): number {
