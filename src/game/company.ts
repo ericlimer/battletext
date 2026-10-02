@@ -164,6 +164,8 @@ export function newCompany(opts: { name: string; commander: string; callsign: st
   cmd.gun = 4; cmd.pil = 4; cmd.gut = 4; cmd.tac = 4;
   for (const [k, v] of Object.entries(bg.skills)) (cmd as any)[k] = Math.max(1, Math.min(10, (cmd as any)[k] + v));
   cmd.abilities = [];
+  cmd.quirks = (cmd.quirks ?? []).filter((q) => q !== 'greedy' && q !== 'loyal' && q !== 'fickle');
+  cmd.missions = 0;
   grantAbilities(cmd);
   const pilots = [cmd];
   const taken = new Set([cmd.callsign]);

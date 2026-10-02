@@ -60,12 +60,13 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     for (let k = 1; k < n; k++) {
       const xx = Math.round(x0 + ((x1 - x0) * k) / n), yy = Math.round(y0 + ((y1 - y0) * k) / n);
       const pulse = hot ? 0.5 + 0.5 * Math.sin(ui.time * 6 - k * 0.6) : 0;
-      d.set(xx, yy, hot ? '•' : '·', hot ? lerp('#2a8ab0', '#bff0ff', pulse) : '#3a4a58');
+      d.set(xx, yy, hot ? '•' : '·', hot ? lerp('#2a8ab0', '#bff0ff', pulse) : '#4a5e70');
     }
   }
-  // Systems
+  // Systems: glyphs first, then labels that avoid every glyph and each other
   let hovered: StarSystem | null = null;
   const occupied = new Set<string>();
+  const offers = new Set((c.travelOffers ?? []).filter((k) => k.expires > c.day && k.sysId).map((k) => k.sysId!));
   for (const s of c.systems) {
     const [sx, sy] = toS(s);
     const f = faction(s.owner);
@@ -78,17 +79,27 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     const col = cur ? lerp(C.accent, '#ffffff', 0.5 + 0.5 * Math.sin(ui.time * 4)) : f.color;
     d.set(sx, sy, glyph, col, sel || hov ? '#26323c' : undefined);
     if (sel) { d.set(sx - 1, sy, '[', C.accent); d.set(sx + 1, sy, ']', C.accent); }
-    // label
-    const label = s.name;
-    // Labels flip to the left near the right edge of the map
-    const lx = sx + 2 + label.length >= ox + MW ? sx - 1 - label.length : sx + 2;
-    let free = true;
-    for (let k = -1; k < label.length + 1; k++) if (occupied.has(`${lx + k},${sy}`)) free = false;
-    if (free || sel || hov || cur) {
-      d.text(lx, sy, label, cur ? C.accent : sel || hov ? C.bright : scale(f.color, s.visited ? 0.8 : 0.55));
-      for (let k = -1; k < label.length + 1; k++) occupied.add(`${lx + k},${sy}`);
-    }
+    if (offers.has(s.id)) d.set(sx, sy - 1, '◆', lerp(C.cbill, '#ffffff', 0.25 + 0.25 * Math.sin(ui.time * 3)));
+    for (let k = -1; k <= 1; k++) occupied.add(`${sx + k},${sy}`);
     if (s.diff > maxContractDiff(c) && (sel || hov)) d.text(sx - 1, sy + 1, '!', C.red);
+  }
+  const order = [...c.systems].sort((p, q) => rank(q) - rank(p));
+  function rank(s: StarSystem): number { return s.id === c.location ? 3 : s.id === st.sel ? 2 : s === hovered ? 1 : 0; }
+  for (const s of order) {
+    const [sx, sy] = toS(s);
+    const f = faction(s.owner);
+    const cur = s.id === c.location, sel = s.id === st.sel, hov = s === hovered;
+    const label = s.name;
+    // Labels flip to the left near the right edge of the map, or when the right side is taken
+    const right = sx + 2, left = sx - 1 - label.length;
+    const fits = (lx: number) => { for (let k = -1; k < label.length + 1; k++) if (occupied.has(`${lx + k},${sy}`) && !(k === -1 && lx + k === sx + 1)) return false; return true; };
+    const okR = right + label.length < ox + MW, okL = left >= ox;
+    let lx = okR ? right : left;
+    if (!fits(lx) && okR && okL && fits(lx === right ? left : right)) lx = lx === right ? left : right;
+    if (fits(lx) || rank(s) > 0) {
+      d.text(lx, sy, label, cur ? C.accent : sel || hov ? C.bright : scale(f.color, s.visited ? 0.8 : 0.55));
+      for (let k = 0; k < label.length; k++) occupied.add(`${lx + k},${sy}`);
+    }
   }
   // Travelling ship marker
   if (c.travel) {
@@ -114,6 +125,9 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   yy++;
   d.text(px + 2, yy++, `Biomes: ${s.biomes.join(', ')}`, C.faint, undefined, pw - 4);
   if (s.visited && c.contracts[s.id]) d.text(px + 2, yy++, `Known contracts: ${c.contracts[s.id].filter((k) => k.expires > c.day).length}`, C.faint);
+  for (const k of (c.travelOffers ?? []).filter((k) => k.sysId === s.id && k.expires > c.day).slice(0, 3)) {
+    d.ctext(px + 2, yy++, `{#f0c850}◆{/} ${k.name} {#e8503a}${skulls(k.diff)}{/} {#f0c850}${Math.round(k.pay / 1000)}K{/}`, C.text, undefined, pw - 4);
+  }
   yy++;
   if (s.id === c.location) d.text(px + 2, yy, c.travel ? 'Departing…' : 'You are here.', C.accent);
   else {
@@ -134,4 +148,5 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   ui.panel(px, y + 31, pw, h - 31, 'LEGEND');
   FACTIONS.forEach((fa, i) => d.ctext(px + 2 + (i % 2) * 22, y + 32 + Math.floor(i / 2), `{${fa.color}}●{/} ${fa.short}`, C.dim));
   d.ctext(px + 2, y + 37, `{#f0a830}◉{/} Argo  ● visited  ○ unexplored`, C.faint);
+  d.ctext(px + 2, y + 38, `{#f0c850}◆{/} travel contract on offer`, C.faint);
 }

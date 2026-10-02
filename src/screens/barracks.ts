@@ -71,6 +71,16 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     if (ui.hover(dx + 3, yy, 32, 1)) ui.setTip(SKILL_DESC[s]);
     yy++;
   }
+  // What the numbers mean in combat
+  yy++;
+  d.text(dx + 3, yy++, 'COMBAT PROFILE', C.accent, undefined, 99, true);
+  const prof: [string, string][] = [
+    ['Base accuracy', `${55 + p.gun * 3}%`], ['Crit chance', `+${p.gun * 3}%`],
+    ['Melee accuracy', `${60 + p.pil * 3}%`], ['Stability dmg taken', `-${Math.round(p.pil * 2.5)}%`],
+    ['Indirect fire', `${-20 + p.tac}%`], ['Ejection risk', `-${p.gut * 3}%`],
+  ];
+  prof.forEach(([k, v], i) => d.ctext(dx + 3 + (i % 2) * 36, yy + (i >> 1), `${k.padEnd(20)}{#f2f6f8}${v}{/}`, C.dim));
+  yy += 3;
   if (p.quirks?.length) {
     yy++;
     d.text(dx + 3, yy++, 'QUIRKS', C.accent, undefined, 99, true);
