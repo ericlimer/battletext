@@ -325,7 +325,9 @@ export function genContract(c: Company, r: RNG, s: StarSystem): Contract {
   const enemies = faction(employer).enemies.filter((e) => e !== employer);
   let target = r.weighted(enemies, (e) => (neigh.has(e) ? 3 : 1) * (e === 'pirates' ? 1.5 : 1));
   if (!target) target = 'pirates';
-  const diff = Math.max(1, Math.min(10, s.diff + r.int(-1, 1) + (type === 'assassinate' ? 1 : 0)));
+  // Some boards carry a high-stakes job pitched at the top of what the MRB will bond
+  const stakes = r.chance(0.2) && maxContractDiff(c) >= s.diff + 2 ? 2 : 0;
+  const diff = Math.max(1, Math.min(10, s.diff + r.int(-1, 1) + (type === 'assassinate' ? 1 : 0) + stakes));
   const repF = 1 + Math.max(-0.2, Math.min(0.25, (c.rep[employer] ?? 0) / 300));
   const pay = Math.round((basePay(diff) * r.range(0.9, 1.15) * repF * (s.tags.includes('capital') ? 1.15 : 1)) / 5000) * 5000;
   const salvageMax = Math.min(14, 5 + Math.floor(diff / 2) + (repLevel(c.rep[employer] ?? 0).idx >= 5 ? 2 : repLevel(c.rep[employer] ?? 0).idx >= 4 ? 1 : 0));
