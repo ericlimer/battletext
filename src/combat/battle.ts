@@ -130,6 +130,7 @@ export class Battle {
   visibleTiles: Uint8Array;
   seen: [Set<number>, Set<number>] = [new Set(), new Set()];
   detected: [Set<number>, Set<number>] = [new Set(), new Set()];
+  lastAttackRound = 0;
   active: Unit | null = null;
   heatMult: number;
   hooks: { roundStart?: (b: Battle) => void; check?: (b: Battle) => '' | 'win' | 'loss'; destroyed?: (b: Battle, u: Unit) => void; structDestroyed?: (b: Battle, s: Structure) => void } = {};
@@ -645,6 +646,7 @@ export class Battle {
   attack(a: Unit, plan: Assignment[], called?: string): void {
     if (!this.canAttack(a)) return;
     a.attacked = true;
+    this.lastAttackRound = this.round;
     const allWeapons = plan.flatMap((p) => p.weapons);
     const breaching = has(a.pilot ?? undefined, 'breaching') && allWeapons.length === 1;
     // face the (first) target

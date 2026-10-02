@@ -158,6 +158,9 @@ export class SkirmishScreen implements Screen {
 }
 
 export function quickSkirmish(type: string, seed: number): void {
+  const alias: Record<string, MissionType> = { defend: 'defendbase', destroy: 'destroybase', assassination: 'assassinate', target: 'capture' };
+  type = alias[type] ?? type;
+  if (!(type in MISSION_INFO)) type = 'battle';
   const r = new RNG(seed);
   const taken = new Set<string>();
   const player: Combatant[] = ['HBK-4G', 'CN9-A', 'JR7-D', 'CPLT-C1'].map((id) => { const p = makePilot(r, 2); p.callsign = uniqueCallsign(r, taken); taken.add(p.callsign); return { frame: newMechFrame(id), pilot: p }; });

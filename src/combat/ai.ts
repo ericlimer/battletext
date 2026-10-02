@@ -38,7 +38,7 @@ function targetValue(b: Battle, a: Unit, t: Unit): number {
   const hp = (s + a2) / Math.max(1, ms + ma);
   let v = 1 + (1 - hp) * 1.2;
   if (t.frame.kind === 'mech') v *= 1.15;
-  if (t.tag === 'convoy') v *= 1.4;
+  if (t.tag === 'convoy') v *= SIDE(t.team) === 0 ? 0.6 : 1.4;
   if (t.prone || t.shutdown) v *= 1.3;
   if ((t as any)._hitRound === b.round) v *= 1.2; // focus fire on what the lance is already hitting
   const arc = attackArc(t, a.x, a.y);
@@ -89,13 +89,22 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   const known: Unit[] = [...visible];
   for (const e of enemies) {
     if (visible.includes(e)) continue;
-    const lk = u.ai.lastKnown.get(e.id);
-    if (lk && b.round - lk[2] <= 3) known.push({ ...e, x: lk[0], y: lk[1] } as Unit);
+    // Sensor contacts count (their position is known, their loadout is not), then shared lance memory
+    if (b.detected[side].has(e.id)) { known.push(e); continue; }
+    let lk = u.ai.lastKnown.get(e.id);
+    for (const a of b.alliesOf(u)) { const k2 = a.ai.lastKnown.get(e.id); if (k2 && (!lk || k2[2] > lk[2])) lk = k2; }
+    if (lk && b.round - lk[2] <= 5) known.push({ ...e, x: lk[0], y: lk[1] } as Unit);
   }
 
   // ---- Convoys drive for the exit -----------------------------------------------------
   if ((u.tag === 'convoy' || (u as any)._fleeing) && u.ai.goal) {
-    moveToward(b, u, u.ai.goal[0], u.ai.goal[1], 'walk');
+    // Escorted convoys wait for their escort to catch up; hunted convoys run when they see trouble
+    const friendlyConvoy = u.tag === 'convoy' && SIDE(u.team) === 0;
+    const escortNear = b.units.some((v) => v.team === 0 && v.alive && dist(v.x, v.y, u.x, u.y) <= 10);
+    const hostileClose = enemies.some((e) => e.alive && e.deployed && b.seen[side].has(e.id) && dist(e.x, e.y, u.x, u.y) <= 8);
+    if (friendlyConvoy && (!escortNear || hostileClose)) { b.finishActivation(u); return; }
+    const threatened = visible.some((e) => dist(e.x, e.y, u.x, u.y) <= 10);
+    moveToward(b, u, u.ai.goal[0], u.ai.goal[1], u.tag === 'convoy' && !friendlyConvoy && threatened && unitHealth(u) < 0.5 ? 'sprint' : 'walk');
     const [gx, gy] = u.ai.goal;
     if (dist(u.x, u.y, gx, gy) <= 2.5) {
       u.fled = true;
@@ -121,7 +130,13 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
       b.finishActivation(u);
       return;
     }
-    const goal = u.ai.goal ?? [Math.floor(m.w / 2), Math.floor(m.h / 2)];
+    // Hunt: head for the last place anyone in the lance saw an enemy, else sweep toward their side
+    let goal = u.ai.goal;
+    if (!goal || u.tag === '' || u.tag === 'escort') {
+      let best: [number, number, number] | null = null;
+      for (const a of [u, ...b.alliesOf(u)]) for (const [, lk] of a.ai.lastKnown) if (!best || lk[2] > best[2]) best = lk;
+      goal = best ? [best[0], best[1]] : (u.ai.goal ?? (side === 1 ? [8, Math.floor(m.h / 2)] : [m.w - 8, Math.floor(m.h / 2)]));
+    }
     if (u.frame.kind !== 'turret') moveToward(b, u, goal[0], goal[1], dist(u.x, u.y, goal[0], goal[1]) > 14 ? 'sprint' : 'walk');
     b.finishActivation(u);
     return;
@@ -142,7 +157,9 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   const hp = unitHealth(u);
   const allies = b.alliesOf(u);
   const alliedStr = allies.length + 1, enemyStr = Math.max(1, known.length);
-  let aggr = u.ai.aggression + (alliedStr / enemyStr - 1) * 0.15 - (1 - hp) * 0.25;
+  // Standoff breaker: the longer nobody has fired, the bolder the AI gets
+  const quiet = Math.max(0, b.round - (b.lastAttackRound ?? 0) - 1);
+  let aggr = u.ai.aggression + (alliedStr / enemyStr - 1) * 0.15 - (1 - hp) * 0.25 + Math.min(0.35, quiet * 0.12);
   aggr = Math.max(0.2, Math.min(0.9, aggr));
   const pref = roleRange(b, u);
   const cands: Cand[] = [];

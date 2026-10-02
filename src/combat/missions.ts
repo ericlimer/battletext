@@ -257,8 +257,10 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (let i = 0; i < n; i++) convoy.push({ frame: newVehicleFrame('HAULER'), pilot: makePilot(r, 0) });
       const cu = place(b, convoy, 1, 2, rd.wy, 2, { tag: 'convoy' }, 1);
       for (const c of cu) c.ai.goal = [W - 1, rd.ey];
+      for (const cv of cu) for (const k in cv.frame.armor) { cv.frame.armor[k] = Math.round(cv.frame.armor[k] * 1.3); cv.frame.maxArmor[k] = cv.frame.armor[k]; }
       const esc = spec.enemies ?? generateForce(r, d, spec.target, d >= 5 ? 4 : 3);
-      const eu = place(b, esc, 1, 5, rd.wy, 2, { tag: 'escort' });
+      // The escort screens ahead of the haulers
+      const eu = place(b, esc, 1, 12, rd.wy, 2, { tag: 'escort' });
       for (const e of eu) e.ai.goal = [W - 4, rd.ey];
       enemyUnits = [...cu, ...eu];
       objectives.push({ id: 'convoy', text: `Destroy the convoy (at least ${n - 1} of ${n} haulers)`, primary: true, status: 'active', bonus: 0 });
@@ -275,12 +277,13 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (const c of cu) {
         c.ai.goal = [W - 1, rd.ey]; c.name = 'Convoy';
         // Escorted convoys use up-armored haulers
-        for (const k in c.frame.armor) { c.frame.armor[k] = Math.round(c.frame.armor[k] * 1.7); c.frame.maxArmor[k] = c.frame.armor[k]; }
+        for (const k in c.frame.armor) { c.frame.armor[k] = Math.round(c.frame.armor[k] * 2); c.frame.maxArmor[k] = c.frame.armor[k]; }
       }
       const a1 = place(b, enemyLance(3), 1, Math.floor(W * 0.6), r.chance(0.5) ? 5 : H - 6, 4);
-      const a2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, 2), 1, W - 5, rd.ey + (r.chance(0.5) ? -8 : 8), 6, { deployRound: 3, deployed: false });
+      const a2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, 2), 1, W - 5, rd.ey + (r.chance(0.5) ? -12 : 12), 6, { deployRound: 4, deployed: false });
       enemyUnits = [...a1, ...a2];
       for (const e of enemyUnits) e.ai.goal = [Math.floor(W * 0.6), rd.ey];
+      for (const pu of playerUnits) { pu.tag = 'guard'; pu.ai.goal = [cu[0]?.x ?? 6, cu[0]?.y ?? rd.wy]; }
       objectives.push({ id: 'escort', text: 'At least 2 convoy vehicles reach the east edge', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'allsafe', text: 'All convoy vehicles survive', primary: false, status: 'active', bonus });
       briefing.push(`An ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east.`);
@@ -310,6 +313,15 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
     if (u.team === 0 || !u.pilot) continue;
     if (taken.has(u.pilot.callsign)) u.pilot.callsign = uniqueCallsign(r, taken);
     taken.add(u.pilot.callsign);
+  }
+  // Text that names enemy pilots is written once callsigns are final
+  if (t === 'assassinate') {
+    const tg = enemyUnits.find((u) => u.tag === 'target');
+    const o = objectives.find((x) => x.id === 'target');
+    if (tg && o) {
+      o.text = `Destroy ${tg.pilot?.callsign ?? 'the target'} (${b.fullName(tg)})`;
+      briefing[0] = `${tgt.short} commander "${tg.pilot?.callsign}" is overseeing operations here. ${emp.short} wants them dead. If the target escapes, the contract is void.`;
+    }
   }
   const rt: MissionRuntime = { spec, battle: b, objectives, enemyUnits, playerUnits, briefing };
   installHooks(rt);
@@ -410,9 +422,9 @@ function installHooks(rt: MissionRuntime): void {
         obj(rt, 'escort')!.progress = `${safe} safe, ${dead} lost`;
         if (dead > 0) obj(rt, 'allsafe')!.status = 'failed';
         if (dead >= 2) { obj(rt, 'escort')!.status = 'failed'; return 'loss'; }
-        if (safe + dead === cv.length && safe >= 2) {
+        if (safe >= 2 && (safe + dead === cv.length || safe >= 2)) {
           obj(rt, 'escort')!.status = 'done';
-          const a = obj(rt, 'allsafe')!; if (a.status === 'active') a.status = 'done';
+          const a = obj(rt, 'allsafe')!; if (a.status === 'active') a.status = safe === cv.length ? 'done' : 'failed';
           return 'win';
         }
         break;
@@ -422,6 +434,11 @@ function installHooks(rt: MissionRuntime): void {
   };
   b.hooks.check = () => update();
   b.hooks.roundStart = () => {
+    // Escorts shadow the lead vehicle of the convoy
+    if (t === 'escort') {
+      const lead = b.units.filter((v) => v.team === 2 && v.tag === 'convoy' && v.alive && !v.fled).sort((p, q) => q.x - p.x)[0];
+      if (lead) for (const u of rt.playerUnits) if (u.alive && u.tag === 'guard') u.ai.goal = [Math.min(b.map.w - 2, lead.x + 3), lead.y];
+    }
     // Beacon runners head for the nearest unsecured beacon
     const open = (b.map.beacons ?? []).filter((bc) => bc.owner !== 0);
     for (const u of rt.playerUnits) {
