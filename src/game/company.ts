@@ -65,6 +65,8 @@ export const UPGRADES: Upgrade[] = [
   { id: 'barracks', name: 'Barracks Expansion', cost: 450000, upkeep: 8000, desc: 'Room for 14 MechWarriors (from 8).' },
   { id: 'drive', name: 'K-F Drive Tuning', cost: 1800000, upkeep: 20000, desc: 'Travel between systems takes 25% less time.' },
   { id: 'comms', name: 'HPG Uplink', cost: 800000, upkeep: 14000, desc: '+1 contract offered in every system; contracts last longer.' },
+  { id: 'armory', name: 'Automated Armory', cost: 900000, upkeep: 15000, desc: 'Refits take 40% fewer tech-hours.' },
+  { id: 'toc', name: 'Tactical Operations Center', cost: 1100000, upkeep: 18000, desc: 'Your lance starts every mission with +15 Resolve.', requires: 'comms' },
 ];
 
 export const EXPENSE_LEVELS = [

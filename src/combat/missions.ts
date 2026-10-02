@@ -45,6 +45,7 @@ export interface MissionSpec {
   targetName?: string;
   basePay?: number;
   morale?: number;
+  startResolve?: number; // bonus Resolve at deployment (Argo upgrades)
 }
 
 export interface MissionRuntime {
@@ -149,6 +150,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
   const map: BattleMap = generateMap(r, mo);
   const b = new Battle(map, r);
   if (spec.morale !== undefined) { b.morale = spec.morale; b.resolveMax[0] = 60 + spec.morale * 2; b.resolve[0] = Math.round(spec.morale / 2); }
+  if (spec.startResolve) b.resolve[0] = Math.min(b.resolveMax[0], b.resolve[0] + spec.startResolve);
   const objectives: Objective[] = [];
   const briefing: string[] = [];
   const emp = faction(spec.employer), tgt = faction(spec.target);

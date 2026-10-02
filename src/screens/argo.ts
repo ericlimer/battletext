@@ -339,10 +339,10 @@ export class ArgoScreen implements Screen {
   drawUpgrades(ui: UI, x: number, y: number, w: number, h: number): void {
     const d = ui.d, c = this.c;
     ui.panel(x + 1, y, w - 2, h, 'ARGO UPGRADES');
-    d.text(x + 3, y + 1, 'Refit your Leopard-class dropship. Upgrades add monthly upkeep.', C.dim);
+    d.text(x + 3, y + 1, 'Refit the Argo. Each module adds monthly upkeep and takes days to install.', C.dim);
     UPGRADES.forEach((u, i) => {
       const col = i % 2, row = Math.floor(i / 2);
-      const bx = x + 3 + col * 73, by = y + 3 + row * 6;
+      const bx = x + 3 + col * 73, by = y + 3 + row * 5;
       const owned = has(c, u.id);
       const inst = (c.installing ?? []).find((x) => x.id === u.id);
       const locked = u.requires && !has(c, u.requires);
@@ -361,6 +361,8 @@ export class ArgoScreen implements Screen {
         }
       }
     });
+    const upk = monthlyExpenses(c).upgrades;
+    d.ctext(x + 3, y + h - 2, `Installed modules {#f2f6f8}${c.upgrades.length}/${UPGRADES.length}{/} · upkeep {#f0c850}${cb(upk)}{/}/mo${(c.installing ?? []).length ? ` · {#f0c040}${c.installing!.length} installing{/}` : ''}`, C.dim);
     void scale; void pilotCap;
   }
 }

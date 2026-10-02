@@ -11,7 +11,7 @@ import { item, Loc, MECH_LOCS, SLOTS, HARD_COLORS, HardType, LOC_NAMES, ARMOR_PE
 import { chassis, CLASS_NAMES } from '../data/mechs';
 import { cb, pad } from '../engine/util';
 import { weaponTip, statsSummary, simpleBar, hardpointStr } from './widgets';
-import { addLog, techHours } from '../game/company';
+import { addLog, techHours, has } from '../game/company';
 
 type Filter = 'all' | HardType | 'equip' | 'ammo';
 const FILTERS: [Filter, string][] = [['all', 'All'], ['B', 'Bal'], ['E', 'Ene'], ['M', 'Mis'], ['S', 'Sup'], ['equip', 'Eqp'], ['ammo', 'Ammo']];
@@ -248,6 +248,7 @@ export class MechLabScreen implements Screen {
     let hours = armorDelta / 20;
     for (const id of [...added, ...removed]) hours += 2 + item(id).tons * 0.6;
     const cost = (added.length + removed.length) * 1500 + armorAdd * ARMOR_COST_PER_PT;
+    if (has(company!, 'armory')) hours *= 0.6;
     return { added, removed, armorDelta, hours: Math.ceil(hours), cost };
   }
 

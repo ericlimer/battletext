@@ -1,7 +1,7 @@
 // Contract execution: build the mission from career state and resolve the results.
 
 import { RNG } from '../engine/rng';
-import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED, monthlyExpenses, dateStr, morale, contractDays } from './company';
+import { Company, Contract, Negotiation, addLog, sys, healDaysFor, queueRepair, mrbLevel, PARTS_NEEDED, monthlyExpenses, dateStr, morale, contractDays, has } from './company';
 import { Frame, frameName, refillAmmo, isFrameDamaged, repairEstimate } from './frame';
 import { Pilot, health } from './pilot';
 import { setupMission, MissionRuntime, objectivesSummary } from '../combat/missions';
@@ -36,7 +36,7 @@ export function launchContract(c: Company, k: Contract, lance: { mech: Frame; pi
   return setupMission({
     type: k.type, difficulty: k.diff, biome: k.biome, seed: k.seed, night: k.night,
     employer: k.employer, target: k.target, targetName: k.targetName, basePay: k.pay,
-    player: lance.map((l) => ({ frame: l.mech, pilot: l.pilot })), morale: morale(c),
+    player: lance.map((l) => ({ frame: l.mech, pilot: l.pilot })), morale: morale(c), startResolve: has(c, 'toc') ? 15 : 0,
   });
 }
 
