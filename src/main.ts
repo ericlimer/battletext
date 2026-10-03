@@ -5,6 +5,7 @@ import { App, setApp } from './screens/app';
 import { TitleScreen } from './screens/title';
 import { quickSkirmish } from './screens/skirmish';
 import { ArtSheetScreen } from './screens/portrait';
+import { initTelemetry, track, currentScreen } from './game/telemetry';
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
@@ -21,6 +22,7 @@ async function boot(): Promise<void> {
   const app = new App(d, ui, inp);
   setApp(app);
   (window as any).__app = app;
+  void initTelemetry();
   window.addEventListener('resize', () => d.resize());
   const params = new URLSearchParams(location.search);
   if (params.has('artsheet')) { const sh = new ArtSheetScreen(); sh.page = +(params.get('page') ?? 0); app.push(sh); }
@@ -36,6 +38,7 @@ async function boot(): Promise<void> {
     } catch (e) {
       console.error(e);
       (window as any).__lastError = String((e as Error).stack ?? e);
+      track('error', { msg: String((e as Error).stack ?? e).slice(0, 500), screen: currentScreen() });
     }
     inp.endFrame();
     requestAnimationFrame(loop);

@@ -13,6 +13,7 @@ import { item, ItemDef } from '../data/items';
 import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
 import { portraitOf, drawPortrait, locTip } from './portrait';
+import { track, flush } from '../game/telemetry';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
@@ -64,6 +65,7 @@ export class CombatScreen implements Screen {
   showHelp = false;
   /** Unit shown in the [I]nspect portrait view. */
   inspect: Unit | null = null;
+  missionT0 = Date.now();
   confirmWithdraw = false;
   time = 0;
   facingDir = 0;
@@ -82,6 +84,9 @@ export class CombatScreen implements Screen {
   constructor(public rt: MissionRuntime, public onDone: (rt: MissionRuntime) => void, public title = '') {
     this.b = rt.battle;
     this.b.start();
+    const sp = rt.spec;
+    track('mission_start', { type: sp.type, diff: sp.difficulty, biome: sp.biome, night: !!sp.night, title, lance: rt.playerUnits.map((u) => `${u.frame.defId}/${u.pilot?.callsign ?? '?'}`), enemies: rt.enemyUnits.length });
+    this.missionT0 = Date.now();
     this.pull();
     const p = rt.playerUnits[0];
     if (p) this.centerOn(p.x, p.y);
@@ -172,6 +177,7 @@ export class CombatScreen implements Screen {
   private playNext(): void {
     const e = this.queue.shift()!;
     const b = this.b;
+    this.trackEvent(e);
     if ('u' in e && typeof (e as any).u === 'number' && e.k !== 'destroyed') { const pu = b.units.find((q) => q.id === (e as any).u); if (pu) this.playingTeam = SIDE(pu.team); }
     const sp = this.speed;
     switch (e.k) {
@@ -328,6 +334,38 @@ export class CombatScreen implements Screen {
   }
   private tileVisibleXY(x: number, y: number): boolean {
     return !!this.b.visibleTiles[Math.round(y) * this.b.map.w + Math.round(x)];
+  }
+
+  /** Telemetry: what the player does and how the mission goes. */
+  private trackEvent(e: BEvent): void {
+    const b = this.b;
+    const mine = (id: number) => { const u = b.units.find((q) => q.id === id); return u && u.team === 0 ? u : null; };
+    switch (e.k) {
+      case 'round': track('round', { r: e.round, s: Math.round((Date.now() - this.missionT0) / 1000) }); break;
+      case 'volley': { const u = mine(e.u); if (u) track('p_attack', { r: b.round, u: u.frame.defId, n: e.n, auto: this.autoplay }); break; }
+      case 'move': { const u = mine(e.u); if (u) track('p_move', { r: b.round, u: u.frame.defId, mode: e.mode, steps: e.path.length - 1 }); break; }
+      case 'melee': { const u = mine(e.u); if (u) track('p_melee', { r: b.round, dfa: e.dfa, hit: e.hit }); break; }
+      case 'destroyed': { const u = b.units.find((q) => q.id === e.u); if (u) track('destroyed', { r: b.round, side: SIDE(u.team), u: u.frame.defId, how: e.how }); break; }
+      case 'end': {
+        const rt = this.rt;
+        track('mission_end', { result: e.result, rounds: b.round, s: Math.round((Date.now() - this.missionT0) / 1000), lost: rt.playerUnits.filter((u) => !u.alive).length, kills: rt.enemyUnits.filter((u) => !u.alive && !u.fled).length, objectives: rt.objectives.map((o) => `${o.id}:${o.status}`), elevMode: ELEV_MODES[this.elevMode], speed: this.speed });
+        void flush();
+        break;
+      }
+    }
+  }
+
+  /** For bookmarks: what the battle looks like right now. */
+  describe(): Record<string, unknown> {
+    const b = this.b, ht = this.hoverTile, m = b.map;
+    const hu = ht >= 0 ? b.unitAt(ht % m.w, (ht / m.w) | 0) : undefined;
+    return {
+      mission: this.rt.spec.type, round: b.round, phase: b.phase,
+      selected: this.sel ? `${this.sel.frame.defId}/${this.sel.name}` : null,
+      target: this.target ? `${this.target.frame.defId}` : null,
+      hoverTile: ht >= 0 ? { x: ht % m.w, y: (ht / m.w) | 0, terrain: m.terr[ht], elev: m.elev[ht], unit: hu ? `${hu.frame.defId} team${hu.team}` : null } : null,
+      mode: this.mode, elevView: ELEV_MODES[this.elevMode], log: this.logLines.slice(-6).map((l) => l.text),
+    };
   }
 
   posOf(u: Unit): [number, number] {

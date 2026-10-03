@@ -1,5 +1,9 @@
 import * as esbuild from 'esbuild';
 import fs from 'fs';
+import { execSync } from 'child_process';
+
+let sha = 'nogit';
+try { sha = execSync('git rev-parse --short HEAD').toString().trim(); } catch { /* not a repo */ }
 
 const watch = process.argv.includes('--watch');
 const opts = {
@@ -8,6 +12,8 @@ const opts = {
   format: 'iife',
   target: 'es2020',
   minify: !process.argv.includes('--dev'),
+  define: { __BUILD__: JSON.stringify(`${new Date().toISOString().slice(0, 16)} ${sha}`) },
+  keepNames: true, // screen names in telemetry and readable error stacks
   write: false,
   logLevel: 'warning',
 };

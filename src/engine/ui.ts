@@ -5,6 +5,7 @@ import { Input } from './input';
 import { C, lerp } from './color';
 import { vlen, wrap } from './util';
 import { sfx } from './sound';
+import { count, currentScreen } from '../game/telemetry';
 
 export interface ButtonOpts {
   w?: number;
@@ -38,8 +39,16 @@ export class UI {
     this.cursor = 'default';
   }
 
+  /** The tooltip shown last frame (bookmarks record it). */
+  lastTip: string[] | null = null;
   endFrame(): void {
-    if (this.tip && this.tip.length) this.drawTooltip(this.tip);
+    if (this.tip && this.tip.length) {
+      this.drawTooltip(this.tip);
+      // Count each tooltip once per appearance, keyed by its first line
+      const first = this.tip[0].replace(/\{[^}]*\}/g, '').slice(0, 50);
+      if (!this.lastTip || this.lastTip[0] !== this.tip[0]) count('tip', `${currentScreen()}:${first}`);
+    }
+    this.lastTip = this.tip && this.tip.length ? this.tip : null;
     this.d.canvas.style.cursor = this.cursor;
   }
 
@@ -133,7 +142,7 @@ export class UI {
       if (o.key) this.key(o.key); // swallow
       return false;
     }
-    if (this.click(x, y, w, 1) || (o.key && this.key(o.key))) { sfx('click'); return true; }
+    if (this.click(x, y, w, 1) || (o.key && this.key(o.key))) { sfx('click'); count('click', `${currentScreen()}:${label.replace(/\{[^}]*\}/g, '').trim().slice(0, 40)}`); return true; }
     return false;
   }
 

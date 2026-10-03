@@ -2,6 +2,7 @@
 
 import { RNG } from '../engine/rng';
 import { Frame, newMechFrame, frameTons, repairEstimate, repairFully, frameValue, frameSellPrice, refillAmmo, frameName, isFrameDamaged } from './frame';
+import { track } from './telemetry';
 import { Pilot, makePilot, salary, health, uniqueCallsign, grantAbilities, assignIcon } from './pilot';
 import { StarSystem, generateStarMap, route } from './world';
 import { MissionType, MISSION_INFO, pilotTier } from '../combat/missions';
@@ -185,6 +186,7 @@ export function dateStr(day: number): string {
 }
 
 export function addLog(c: Company, text: string, color?: string, day = c.day): void {
+  track('log', { day, text: text.slice(0, 200), funds: c.funds });
   // Keep the log in date order: deployment reports are dated ahead of the days that pass in transit
   let i = c.log.length;
   while (i > 0 && c.log[i - 1].day > day) i--;

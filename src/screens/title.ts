@@ -1,5 +1,6 @@
 // Title screen with animated starfield and 'Mech silhouette.
 
+import { telemetry, build } from '../game/telemetry';
 import { Screen, app } from './app';
 import { UI } from '../engine/ui';
 import { C, lerp, scale } from '../engine/color';
@@ -104,6 +105,7 @@ export class TitleScreen implements Screen {
     if (this.msg) d.text(lx + 2, y + 1, this.msg, C.warn, '#030508');
     d.text(lx + 2, ROWS - 6, 'Inspired by BATTLETECH (2018) by Harebrained Schemes. BattleTech is a trademark of its owners; this is a fan tribute.', C.faint, undefined, 140);
     d.text(lx + 2, ROWS - 5, 'Mouse + keyboard. Highlighted letters are hotkeys. Best at 1280×768 or larger.', C.faint);
+    d.ctext(lx + 2, ROWS - 4, `{#f0a830}\`{/} bookmarks whatever is under the mouse, on any screen.  {#6d7f8a}Telemetry ${telemetry.status()} · build ${build()}{/}`, C.dim, undefined, 140);
   }
 
   importFile(): void {

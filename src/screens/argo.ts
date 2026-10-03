@@ -31,6 +31,13 @@ export type Tab = typeof TABS[number];
 
 export class ArgoScreen implements Screen {
   tab: Tab = 'COMMAND';
+  /** For bookmarks: the company at a glance. */
+  describe(): Record<string, unknown> {
+    const c = company;
+    if (!c) return { tab: this.tab };
+    return { tab: this.tab, day: c.day, funds: c.funds, location: sys(c).name, travel: c.travel ? c.travel.dest : null, mrb: c.mrb, morale: morale(c),
+      mechs: c.mechs.map((m) => m.defId), storage: c.storage.length, pilots: c.pilots.filter((p) => !p.dead).length, work: c.work.length };
+  }
   advancing = false;
   advT = 0;
   toast: { text: string; t: number; color: string } | null = null;

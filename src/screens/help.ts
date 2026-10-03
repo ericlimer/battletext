@@ -13,6 +13,8 @@ const PAGES: [string, string[]][] = [
     'The game is played with mouse and keyboard. Buttons show their hotkey in {#f0a830}amber{/}. Hover almost anything for a tooltip.',
     '',
     '{#f0a830}Skirmish{/} lets you build two lances under a C-Bill budget and fight any mission type on any biome.',
+    '',
+    '{#f0a830}Feedback.{/} Press {#f0a830}`{/} (backquote) on any screen to bookmark whatever is under the mouse, with an optional note; a screenshot is attached. The game also records play telemetry (screens, clicks, missions, errors) for the developer. Nothing leaves the artifact\'s own private storage.',
   ]],
   ['COMBAT', [
     '{#f0a830}Initiative.{/} Rounds are split into phases 5..1. Light \'Mechs act in phase 4, mediums in 3, heavies in 2, assaults in 1 (Master Tactician: +1). In each phase your units act first, in any order. [R]eserve delays a unit one phase.',
