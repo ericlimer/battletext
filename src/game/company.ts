@@ -121,6 +121,8 @@ export interface Company {
   travelOffersDay?: number;
   installing?: { id: string; doneDay: number }[];
   debts?: { day: number; amount: number; who: string }[];
+  /** Recently posted contract names, so the boards don't repeat themselves. */
+  recentNames?: string[];
   fundsHistory?: number[]; // sampled every 3 days
   blackMarket?: boolean; // membership bought from a pirate contact
   monthStart?: { day: number; funds: number; earned: number; spent: number };
@@ -262,7 +264,7 @@ export function moraleBreakdown(c: Company): [string, number][] {
   const rows: [string, number][] = [['Base', 25], [`Expenses: ${EXPENSE_LEVELS[c.expense].name}`, EXPENSE_LEVELS[c.expense].morale]];
   if (has(c, 'hydro')) rows.push(['Hydroponics & Galley', 4]);
   if (has(c, 'rec')) rows.push(['Recreation Deck', 6]);
-  if (c.moraleMod) rows.push(['Recent events (fades 1 per 5 days)', c.moraleMod]);
+  if (c.moraleMod) rows.push(['Recent events (fades 1 per 4 days)', c.moraleMod]);
   return rows;
 }
 
@@ -301,13 +303,13 @@ export function careerScore(c: Company): number {
 
 // ---- Contracts ----------------------------------------------------------------------------
 const CONTRACT_NAMES: Record<MissionType, string[]> = {
-  battle: ['Clean Sweep', 'Hold the Line', 'Scorched Earth', 'Iron Rain', 'Border Dispute', 'Show of Force', 'Burning Bridges', 'Hammer Fall', 'Pest Control', 'Line in the Sand', 'Thunder Road', 'Brushfire'],
-  assassinate: ['Cut the Head', 'Silent Knife', 'Blood Money', 'Last Rites', 'Decapitation Strike', 'The Long Goodbye', 'Kingslayer', 'Paper Tiger', 'Retirement Plan', 'Black Mark'],
-  destroybase: ['Demolition Crew', 'Wrecking Ball', 'Leveled', 'Foundation Crack', 'Fire Sale', 'Urban Renewal', 'Scrap Heap', 'Eviction Notice', 'Ground Zero', 'Salt the Earth'],
-  defendbase: ['Siege Breaker', 'Stand Fast', 'Bulwark', 'The Alamo', 'Garrison Duty', 'Walls of Iron', 'Night Watch', 'Gatekeeper', 'Iron Curtain', 'Last Bastion'],
-  ambush: ['Highway Robbery', 'Road Toll', 'Supply Cut', 'Dead End', 'Hijack', 'Toll Booth', 'Ambuscade', 'Trip Wire', 'Broken Axle', 'Detour'],
-  escort: ['Precious Cargo', 'Shepherd', 'Safe Passage', 'Special Delivery', 'Milk Run', 'Caravan', 'Long Haul', 'Convoy Duty', 'Overwatch', 'Mother Hen'],
-  capture: ['Data Mine', 'Signal Fire', 'Lighthouse', 'Breadcrumbs', 'Ping', 'Dead Drop'],
+  battle: ['Clean Sweep', 'Hold the Line', 'Scorched Earth', 'Iron Rain', 'Border Dispute', 'Show of Force', 'Burning Bridges', 'Hammer Fall', 'Pest Control', 'Line in the Sand', 'Thunder Road', 'Brushfire', 'Dust Devil', 'Steel Rain', 'Open Season', 'Killing Field', 'Red Dawn', 'Meat Grinder', 'Crossfire', 'Hard Target', 'No Quarter', 'War of Attrition', 'Firebreak', 'Blood and Iron'],
+  assassinate: ['Cut the Head', 'Silent Knife', 'Blood Money', 'Last Rites', 'Decapitation Strike', 'The Long Goodbye', 'Kingslayer', 'Paper Tiger', 'Retirement Plan', 'Black Mark', 'Dead Man Walking', 'Final Notice', 'Headhunter', 'Quiet Exit', 'Severance Package', 'Last Call', 'Clean Hands', 'Untouchable', 'Marked', 'Grim Harvest', 'Burial Detail', 'Short Fuse'],
+  destroybase: ['Demolition Crew', 'Wrecking Ball', 'Leveled', 'Foundation Crack', 'Fire Sale', 'Urban Renewal', 'Scrap Heap', 'Eviction Notice', 'Ground Zero', 'Salt the Earth', 'Bulldozer', 'Teardown', 'Controlled Burn', 'Wildfire', 'Rubble Bounce', 'Hostile Takeover', 'Condemned', 'Smoke and Mirrors', 'Sledgehammer', 'Torch Song', 'Rainmaker', 'Last Light'],
+  defendbase: ['Siege Breaker', 'Stand Fast', 'Bulwark', 'The Alamo', 'Garrison Duty', 'Walls of Iron', 'Night Watch', 'Gatekeeper', 'Iron Curtain', 'Last Bastion', 'Hold Fast', 'Shield Wall', 'Picket Line', 'Rearguard', 'Fortress', 'Home Front', 'Breakwater', 'Line of Defense', 'Sentinel', 'Unbroken', 'Bastion', 'Lockdown'],
+  ambush: ['Highway Robbery', 'Road Toll', 'Supply Cut', 'Dead End', 'Hijack', 'Toll Booth', 'Ambuscade', 'Trip Wire', 'Broken Axle', 'Detour', 'Ambush Alley', 'Hard Shoulder', 'Roadkill', 'Waylaid', 'Bushwhack', 'Crossroads', 'Jackknife', 'Speed Trap', 'Off-Ramp', 'Rough Ride', 'Pile-Up', 'Blind Corner'],
+  escort: ['Precious Cargo', 'Shepherd', 'Safe Passage', 'Special Delivery', 'Milk Run', 'Caravan', 'Long Haul', 'Convoy Duty', 'Overwatch', 'Mother Hen', 'Fragile Goods', 'Pony Express', 'Long Road Home', 'Supply Train', 'Courier', 'Red Carpet', 'Escort Duty', 'Guardian Angel', 'Lifeline', 'Fast Lane', 'Pathfinder', 'Wagon Wheel'],
+  capture: ['Data Mine', 'Signal Fire', 'Lighthouse', 'Breadcrumbs', 'Ping', 'Dead Drop', 'Needle in a Haystack', 'Scavenger Hunt', 'Treasure Map', 'Echo Location', 'Static', 'Black Box', 'Homing Beacon', 'Cold Trail', 'Flag Day', 'Lost and Found', 'Signal Boost', 'Trailhead', 'Blackout', 'Whisper Net', 'Beacon Fire', 'Last Transmission'],
 };
 
 export function basePay(diff: number): number {
@@ -361,7 +363,7 @@ export function genContract(c: Company, r: RNG, s: StarSystem, opts: { minDiff?:
 
   return {
     id: 'k' + r.int(0, 1e9).toString(36),
-    name: (() => { const used = new Set((c.contracts[s.id] ?? []).map((x) => x.name)); const opts = CONTRACT_NAMES[type].filter((n) => !used.has(n)); return r.pick(opts.length ? opts : CONTRACT_NAMES[type]); })(),
+    name: (() => { const used = new Set([...(c.contracts[s.id] ?? []).map((x) => x.name), ...(c.recentNames ?? [])]); const opts = CONTRACT_NAMES[type].filter((n) => !used.has(n)); const nm = r.pick(opts.length ? opts : CONTRACT_NAMES[type]); c.recentNames = [...(c.recentNames ?? []), nm].slice(-40); return nm; })(),
     type, employer, target, diff,
     biome,
     night: r.chance(0.18),
@@ -544,7 +546,7 @@ export function advanceDay(c: Company): DayReport {
   }
   // Morale modifier decays toward 0
   if (c.day % 3 === 0) c.fundsHistory = [...(c.fundsHistory ?? []), c.funds].slice(-120);
-  if (c.day % 5 === 0 && c.moraleMod !== 0) c.moraleMod += c.moraleMod > 0 ? -1 : 1;
+  if (c.day % 4 === 0 && c.moraleMod !== 0) c.moraleMod += c.moraleMod > 0 ? -1 : 1;
   for (const debt of (c.debts ?? []).filter((x) => c.day >= x.day)) {
     c.funds -= debt.amount; c.stats.spent += debt.amount;
     say(`The ${debt.who} collected ${cb(debt.amount)} in loan repayments.`, '#f0a830');

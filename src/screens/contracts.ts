@@ -18,7 +18,7 @@ import { Pilot, isAvailable, health, skillTotal } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
-import { surveyOf, drawSurvey, oppositionEstimate, likelyLance } from './survey';
+import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots } from './survey';
 import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
@@ -179,22 +179,7 @@ export class DropScreen implements Screen {
   pick: { i: number; what: 'mech' | 'pilot' } | null = null;
   listState = { scroll: 0 };
   constructor(public k: Contract, public n: Negotiation, public argo: ArgoScreen) {
-    const c = company!;
-    const readyM = c.mechs.filter((m) => mechReady(c, m));
-    const readyP = c.pilots.filter(isAvailable);
-    this.slots = [0, 1, 2, 3].map((i) => {
-      let m = c.lance[i] && readyM.find((x) => x.uid === c.lance[i]) ? c.lance[i] : null;
-      let p = c.lancePilots[i] && readyP.find((x) => x.id === c.lancePilots[i]) ? c.lancePilots[i] : null;
-      return { mech: m, pilot: p };
-    });
-    // Fill blanks in pairs: heaviest ready 'Mechs first, best available MechWarriors into them
-    const byTons = [...readyM].sort((a, b) => frameTons(b) - frameTons(a) || frameStats(b).alphaDmg - frameStats(a).alphaDmg);
-    const bySkill = [...readyP].sort((a, b) => skillTotal(b) - skillTotal(a));
-    for (const s of this.slots) {
-      if (!s.mech) { const m = byTons.find((x) => !this.slots.some((o) => o.mech === x.uid)); if (m) s.mech = m.uid; }
-      if (s.mech && !s.pilot) { const p = bySkill.find((x) => !this.slots.some((o) => o.pilot === x.id)); if (p) s.pilot = p.id; }
-      if (!s.mech) s.pilot = null;
-    }
+    this.slots = defaultSlots(company!);
   }
   render(ui: UI): void {
     const d = ui.d, c = company!, k = this.k;
@@ -258,7 +243,7 @@ export class DropScreen implements Screen {
           d.fill(lx, ly, lw, 2, ' ', C.text, bg);
           d.text(lx + 1, ly, `${p.callsign}`, ok && !used ? C.bright : C.faint, bg);
           d.ctext(lx + 16, ly, skillLine(p), C.text, bg);
-          d.text(lx + 1, ly + 1, !ok ? `Injured (${p.healDays} days)` : used ? 'Assigned' : p.name, !ok ? C.warn : C.dim, bg);
+          d.text(lx + 1, ly + 1, !ok ? `Injured (${p.healDays} day${p.healDays === 1 ? '' : 's'})` : used ? 'Assigned' : p.name, !ok ? C.warn : C.dim, bg);
         }, 2);
         if (cl >= 0) { const p = cands[cl]; if (isAvailable(p)) { for (const s of this.slots) if (s.pilot === p.id) s.pilot = null; this.slots[i].pilot = p.id; this.pick = null; } }
       }
@@ -275,6 +260,7 @@ export class DropScreen implements Screen {
     }
     const ready = this.slots.filter((s) => s.mech && s.pilot);
     if (ui.button(2, ROWS - 3, 'Cancel contract', { key: 'Escape' })) app.pop();
+    if (ui.button(24, ROWS - 3, 'Auto-fill best', { key: 'a', tip: 'Heaviest ready \'Mechs, best available MechWarriors.' })) { this.slots = defaultSlots(c, true); this.pick = null; }
     if (ui.button(COLS - 24, ROWS - 3, 'LAUNCH', { key: 'Enter', style: 'block', w: 20, center: true, disabled: !ready.length, tip: ready.length ? 'Drop into combat.' : 'Assign at least one \'Mech and MechWarrior.' })) this.launch();
   }
 
@@ -316,16 +302,20 @@ export class AftermathScreen implements Screen {
     const d = ui.d;
     const win = r.outcome === 'win';
     d.text(3, 2, win ? 'CONTRACT COMPLETE' : r.outcome === 'withdraw' ? 'WITHDRAWN FROM CONTRACT' : 'CONTRACT FAILED', win ? C.green : C.red, undefined, 99, true);
-    ui.panel(2, 4, 70, 16, 'PAYMENT & STANDING');
+    if (r.failed?.length) d.text(30, 2, r.failed.join(' '), C.orange, undefined, COLS - 32);
+    // Lay out the text first so the panels grow to fit it
+    const left: [string, string][] = [];
+    left.push([`Contract payment    {#f0c850}${cb(r.pay)}{/}`, C.dim], [`Objective bonuses   {#f0c850}${cb(r.bonus)}{/}`, C.dim], [`Repairs queued      {#e8503a}${cb(-r.repairCost)}{/}`, C.dim], ['', C.dim]);
+    for (const [f, v] of r.repChanges) { const fa = faction(f); left.push([`{${fa.color}}${fa.name}{/} standing ${v >= 0 ? '{#6ad46a}+' : '{#e8503a}'}${v}{/}  → ${repLevel(c.rep[f]).name}`, C.dim]); }
+    left.push([`MRB rating {#f0a830}+${r.mrbGain}{/}${r.outcome === 'loss' && r.mrbGain ? ' {#6d7f8a}(the review board credits any completed drop){/}' : ''}`, C.dim]);
+    for (const l of r.lines) for (const w of wrap(l, 66)) left.push([w, C.accent]);
+    const right: [string, string][] = [];
+    for (const l of [...r.casualties, ...r.mechsLost]) for (const w of wrap(l, COLS - 82)) right.push([w, C.orange]);
+    const topH = Math.max(12, left.length + 4, r.xp.length + right.length + 5);
+    ui.panel(2, 4, 70, topH, 'PAYMENT & STANDING');
     let y = 6;
-    d.ctext(4, y++, `Contract payment    {#f0c850}${cb(r.pay)}{/}`, C.dim);
-    d.ctext(4, y++, `Objective bonuses   {#f0c850}${cb(r.bonus)}{/}`, C.dim);
-    d.ctext(4, y++, `Repairs queued      {#e8503a}${cb(-r.repairCost)}{/}`, C.dim);
-    y++;
-    for (const [f, v] of r.repChanges) { const fa = faction(f); d.ctext(4, y++, `{${fa.color}}${fa.name}{/} standing ${v >= 0 ? '{#6ad46a}+' : '{#e8503a}'}${v}{/}  → ${repLevel(c.rep[f]).name}`, C.dim); }
-    d.ctext(4, y++, `MRB rating {#f0a830}+${r.mrbGain}{/}${r.outcome === 'loss' && r.mrbGain ? ' {#6d7f8a}(the review board credits any completed drop){/}' : ''}`, C.dim);
-    for (const l of r.lines) for (const w of wrap(l, 66)) if (y < 19) d.text(4, y++, w, C.accent);
-    ui.panel(74, 4, COLS - 76, 16, 'MECHWARRIORS');
+    for (const [t, col] of left) d.ctext(4, y++, t, col, undefined, 66);
+    ui.panel(74, 4, COLS - 76, topH, 'MECHWARRIORS');
     y = 6;
     for (const [p, xp] of r.xp) {
       d.text(76, y, p.callsign.padEnd(14), p.dead ? C.red : C.bright);
@@ -333,11 +323,13 @@ export class AftermathScreen implements Screen {
       y++;
     }
     y++;
-    for (const l of [...r.casualties, ...r.mechsLost]) { for (const w of wrap(l, COLS - 82)) d.text(76, y++, w, C.orange); }
+    for (const [t, col] of right) d.text(76, y++, t, col);
     // Mech condition
-    ui.panel(2, 21, COLS - 4, 18, '\'MECH CONDITION');
-    y = 23;
-    for (const m of c.mechs.filter((mm) => (r.deployed ?? c.lance).includes(mm.uid))) {
+    const deployed = c.mechs.filter((mm) => (r.deployed ?? c.lance).includes(mm.uid));
+    const cy = 4 + topH + 1;
+    ui.panel(2, cy, COLS - 4, Math.min(ROWS - 4 - cy, deployed.length + (r.writtenOff?.length ?? 0) + 4), '\'MECH CONDITION');
+    y = cy + 2;
+    for (const m of deployed) {
       const e = repairEstimate(m);
       const st = frameStats(m);
       d.text(4, y, frameName(m).padEnd(24), C.bright);

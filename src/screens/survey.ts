@@ -7,21 +7,41 @@ import { Contract, Company, mechReady } from '../game/company';
 import { setupMission, MissionRuntime } from '../combat/missions';
 import { BIOME_INFO } from '../combat/terrain';
 import { SIDE } from '../combat/battle';
-import { isAvailable } from '../game/pilot';
-import { Frame, cloneFrame, frameTons, newMechFrame } from '../game/frame';
+import { isAvailable, skillTotal } from '../game/pilot';
+import { Frame, cloneFrame, frameTons, frameStats, newMechFrame } from '../game/frame';
 
 const cache = new Map<string, MissionRuntime>();
 
-/** The lance the drop screen would field: heaviest ready 'Mechs first. */
+export type DropSlot = { mech: string | null; pilot: string | null };
+
+/** The lance the drop screen starts with: the last lance where still ready, blanks filled heaviest-'Mech/best-pilot first.
+ *  With best=true the remembered lance is ignored. Contract odds use the same lance, so the estimate matches the drop. */
+export function defaultSlots(c: Company, best = false): DropSlot[] {
+  const readyM = c.mechs.filter((m) => mechReady(c, m));
+  const readyP = c.pilots.filter(isAvailable);
+  const slots: DropSlot[] = [0, 1, 2, 3].map((i) => ({
+    mech: !best && c.lance[i] && readyM.find((x) => x.uid === c.lance[i]) ? c.lance[i] : null,
+    pilot: !best && c.lancePilots[i] && readyP.find((x) => x.id === c.lancePilots[i]) ? c.lancePilots[i] : null,
+  }));
+  const byTons = [...readyM].sort((a, b) => frameTons(b) - frameTons(a) || frameStats(b).alphaDmg - frameStats(a).alphaDmg);
+  const bySkill = [...readyP].sort((a, b) => skillTotal(b) - skillTotal(a));
+  for (const s of slots) {
+    if (!s.mech) { const m = byTons.find((x) => !slots.some((o) => o.mech === x.uid)); if (m) s.mech = m.uid; }
+    if (s.mech && !s.pilot) { const p = bySkill.find((x) => !slots.some((o) => o.pilot === x.id)); if (p) s.pilot = p.id; }
+    if (!s.mech) s.pilot = null;
+  }
+  return slots;
+}
+
+/** The 'Mechs that would actually drop (those with a pilot). */
 export function likelyLance(c: Company): Frame[] {
-  const pilots = c.pilots.filter(isAvailable).length;
-  return c.mechs.filter((m) => mechReady(c, m)).sort((a, b) => frameTons(b) - frameTons(a)).slice(0, Math.min(4, pilots));
+  return defaultSlots(c).filter((s) => s.mech && s.pilot).map((s) => c.mechs.find((m) => m.uid === s.mech)!).filter(Boolean);
 }
 
 /** Builds (once) the mission a contract would launch, using placeholder 'Mechs for the player. */
 export function surveyOf(c: Company, k: Contract): MissionRuntime {
   const lance = likelyLance(c);
-  const key = `${k.id}:${k.seed}:${lance.length}`;
+  const key = `${k.id}:${k.seed}:${lance.map((m) => m.uid).join(',')}`;
   let rt = cache.get(key);
   if (!rt) {
     const frames = (lance.length ? lance : c.mechs.slice(0, 4)).map(cloneFrame);

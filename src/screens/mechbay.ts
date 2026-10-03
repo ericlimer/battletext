@@ -129,10 +129,15 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   d.hline(dx + 1, by - 1, dw - 2, C.border);
   if (e.armorPts || e.structPts || e.deadItems.length) {
     d.ctext(dx + 2, by, `Damage: {#f2f6f8}${e.armorPts}{/} armor, {#f2f6f8}${e.structPts}{/} structure, {#f2f6f8}${e.deadItems.length}{/} destroyed components. Repair {#f0c850}${cb(e.cost)}{/}, ~${Math.ceil(e.hours / techHours(c))} days`, C.dim, undefined, dw - 4);
-  } else d.text(dx + 2, by, 'Fully operational.', C.green);
+  }
+  const wo = mechBusy(c, m.uid);
+  if (!(e.armorPts || e.structPts || e.deadItems.length)) {
+    if (wo && wo.kind === 'assemble') d.text(dx + 2, by, `UNDER CONSTRUCTION — ready in ~${workQueueDays(c, m.uid)} day${workQueueDays(c, m.uid) === 1 ? '' : 's'}.`, C.warn);
+    else if (wo && wo.kind === 'ready') d.text(dx + 2, by, 'Being readied from storage.', C.warn);
+    else d.text(dx + 2, by, 'Fully operational.', C.green);
+  }
   by += 2;
   let bx = dx + 2;
-  const wo = mechBusy(c, m.uid);
   if (ui.button(bx, by, 'MECH LAB', { key: 'l', style: 'block', w: 14, center: true, disabled: !!wo && wo.kind !== 'repair' && wo.kind !== 'refit', tip: wo && wo.kind !== 'repair' && wo.kind !== 'refit' ? 'Busy with a work order.' : 'Customize weapons, armor and equipment.' })) app.push(new MechLabScreen(m, argo));
   bx += 16;
   if (ui.button(bx, by, `REPAIR ${cbk(e.cost)}`, { key: 'r', style: 'block', w: 18, center: true, disabled: !!wo || !isFrameDamaged(m) || c.funds < e.cost, tip: 'Queue a repair work order.' })) {
@@ -151,7 +156,7 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   bx += 16;
   const price = frameSellPrice(m);
   if (!st.confirmSell) {
-    if (ui.button(bx, by, `SELL ${cbk(price)}`, { style: 'block', w: 16, center: true, disabled: !!wo || !!c.travel, tip: c.travel ? 'Must be docked.' : 'Sell this \'Mech and everything installed in it.' })) st.confirmSell = true;
+    if (ui.button(bx, by, `SELL ${cbk(price)}`, { style: 'block', w: 16, center: true, disabled: !!wo || !!c.travel, tip: wo ? 'Busy with a work order.' : c.travel ? 'Must be docked.' : 'Sell this \'Mech and everything installed in it.' })) st.confirmSell = true;
   } else if (ui.button(bx, by, 'CONFIRM SELL', { style: 'block', w: 16, center: true, fg: C.red })) {
     c.mechs = c.mechs.filter((q) => q !== m); c.storage = c.storage.filter((q) => q !== m);
     c.lance = c.lance.map((u) => (u === m.uid ? null : u));

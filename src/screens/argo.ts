@@ -6,7 +6,7 @@ import { C, lerp, scale, healthColor } from '../engine/color';
 import { COLS, ROWS } from '../engine/display';
 import { company, saveGame, exportSave } from '../game/save';
 import {
-  Company, dateStr, monthlyExpenses, morale, moraleName, moraleBreakdown, maxContractDiff, mrbLevel, MRB_LEVELS, EXPENSE_LEVELS, UPGRADES, sys, advanceDay,
+  Company, addLog, dateStr, monthlyExpenses, morale, moraleName, moraleBreakdown, maxContractDiff, mrbLevel, MRB_LEVELS, EXPENSE_LEVELS, UPGRADES, sys, advanceDay,
   bays, pilotCap, techHours, CAREER_DAYS, careerScore, companyValue, travelDaysLeft, rngOf, saveRng, mechReady, has,
 } from '../game/company';
 import { FACTIONS, repLevel, faction } from '../data/factions';
@@ -214,7 +214,7 @@ export class ArgoScreen implements Screen {
     }
     if (!c.work.length) d.text(x + 3, yy++, 'No work orders pending.', C.faint);
     yy++;
-    for (const p of c.pilots.filter((q) => q.injuries > 0 && !q.dead).slice(0, 5)) d.ctext(x + 3, yy++, `{#f08a30}✚{/} ${p.callsign} recovering: ${p.healDays} days`, C.text);
+    for (const p of c.pilots.filter((q) => q.injuries > 0 && !q.dead).slice(0, 5)) d.ctext(x + 3, yy++, `{#f08a30}✚{/} ${p.callsign} recovering: ${p.healDays} day${p.healDays === 1 ? "" : "s"}`, C.text);
     yy++;
     d.text(x + 3, yy++, "'MECHS", C.accent, undefined, 99, true);
     for (const m of c.mechs) {
@@ -303,8 +303,24 @@ export class ArgoScreen implements Screen {
     d.text(x + 40, y + 31, cb(e.total).padStart(14), C.cbill, undefined, 99, true);
     const days = 30 - (c.day % 30);
     d.ctext(x + 3, y + 33, `Next payment in {#f2f6f8}${days}{/} days. ${c.funds >= e.total ? `Runway ~{#f2f6f8}${Math.floor(c.funds / Math.max(1, e.total))}{/} months.` : '{#e8503a}Insufficient funds for next payment!{/}'}`, C.dim);
-    (c.debts ?? []).forEach((db, i) => d.ctext(x + 3, y + 35 + i, `Loan: {#f0c850}${cb(db.amount)}{/} due to the ${db.who} in {#f2f6f8}${db.day - c.day}{/} days.`, C.warn));
-    if (c.negativeMonths) d.text(x + 3, y + 35, 'The company is in debt. Another negative month means bankruptcy.', C.red);
+    // Bank credit: a lump sum now against a bigger repayment later, one loan at a time
+    const loanAmt = 750000 + mrbLevel(c) * 250000, loanDue = Math.round(loanAmt * 1.25);
+    const hasBank = (c.debts ?? []).some((db) => db.who === 'Aurigan Merchant Bank');
+    if (!hasBank) {
+      d.ctext(x + 3, y + 34, `Bank credit: {#f0c850}${cbk(loanAmt)}{/} now, repay {#f0c850}${cbk(loanDue)}{/} in 90 days.`, C.dim);
+      const armed = this.confirmBuy === 'loan';
+      if (ui.button(x + 56, y + 34, armed ? 'CONFIRM?' : 'Borrow', { w: 11, fg: armed ? C.accent : undefined, tip: 'Click twice. The bank collects automatically on the due date, even if it puts you in the red.' })) {
+        if (!armed) this.confirmBuy = 'loan';
+        else {
+          this.confirmBuy = '';
+          c.funds += loanAmt; (c.debts ??= []).push({ day: c.day + 90, amount: loanDue, who: 'Aurigan Merchant Bank' });
+          addLog(c, `Borrowed ${cb(loanAmt)} from the Aurigan Merchant Bank; ${cb(loanDue)} due ${dateStr(c.day + 90)}.`, '#f0c850');
+          saveGame(c); this.notify(`Borrowed ${cbk(loanAmt)}`, C.cbill);
+        }
+      }
+    }
+    (c.debts ?? []).forEach((db, i) => d.ctext(x + 3, y + 35 + (hasBank ? 0 : 1) + i, `Loan: {#f0c850}${cb(db.amount)}{/} due to the ${db.who} in {#f2f6f8}${db.day - c.day}{/} days.`, C.warn));
+    if (c.negativeMonths) d.text(x + 3, y + 35 + (hasBank ? 0 : 1) + (c.debts ?? []).length, 'The company is in debt. Another negative month means bankruptcy.', C.red);
     // Recent months
     const led = (c.ledger ?? []).slice(-Math.max(0, Math.min(5, h - 41)));
     if (led.length) {

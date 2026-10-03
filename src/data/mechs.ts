@@ -252,7 +252,7 @@ export const CHASSIS: ChassisDef[] = RAW.map((r) => {
   const coreTons = r.tons - itemTons - armorTons(stockArmor);
   const itemCost = stockItems.reduce((a, it) => a + item(it.id).cost, 0);
   const speedF = 1 + (r.walk - 4) * 0.12 + r.jump * 0.02;
-  const cost = Math.round((r.tons * 60000 * speedF + itemCost * 0.8 + armorTons(stockArmor) * 10000) / 5000) * 5000;
+  const cost = Math.round((r.tons * 60000 * speedF * (0.55 + r.tons / 80) + itemCost * 0.8 + armorTons(stockArmor) * 10000) / 5000) * 5000;
   return { ...r, cls: classOf(r.tons), coreTons, hardpoints, stockItems, stockArmor, cost };
 });
 

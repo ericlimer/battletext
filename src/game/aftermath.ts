@@ -27,6 +27,8 @@ export interface MissionResult {
   writtenOff?: [string, string][];
   /** uids of the 'Mechs that dropped. */
   deployed?: string[];
+  /** Primary objectives left unmet, for a failed or abandoned contract. */
+  failed?: string[];
   pool: SalvageEntry[];
   salvageShares: number;
   priority: number;
@@ -60,6 +62,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   const res: MissionResult = { contract: k, neg, outcome: win ? 'win' : outcome === 'withdraw' ? 'withdraw' : 'loss', pay: 0, bonus: 0, repChanges: [], mrbGain: 0, xp: [], casualties: [], mechsLost: [], pool: [], salvageShares: 0, priority: 0, repairCost: 0, lines, days: 0 };
   c.stats.missions++;
   res.deployed = rt.playerUnits.map((u) => u.frame.uid);
+  if (!win) res.failed = outcome === 'withdraw' ? ['The lance withdrew before the objectives were met.'] : [...rt.objectives.filter((o) => o.primary && o.status !== 'done').map((o) => `${o.status === 'failed' ? 'Failed' : 'Not achieved'}: ${o.text}${o.progress ? ` (${o.progress})` : ''}`), ...(rt.playerUnits.every((u) => !u.alive || u.fled) && rt.playerUnits.some((u) => !u.alive) ? ['The lance was knocked out of the fight.'] : [])];
   // ---- Money
   if (win) {
     res.pay = neg.cash;
@@ -121,7 +124,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     if (!p.dead && p.injuries > 0) {
       p.injuries = Math.min(p.injuries, health(p));
       p.healDays = healDaysFor(c, p.injuries);
-      res.casualties.push(`${p.callsign} injured: ${p.injuries} wound${p.injuries > 1 ? 's' : ''}, ${p.healDays} days to recover.`);
+      res.casualties.push(`${p.callsign} injured: ${p.injuries} wound${p.injuries > 1 ? 's' : ''}, ${p.healDays} day${p.healDays === 1 ? '' : 's'} to recover.`);
     }
     if (!p.dead) p.timeline.push(`${dateStr(c.day + contractDays(k))}: "${k.name}" (${win ? 'success' : 'failure'}), ${u.kills} kill${u.kills === 1 ? '' : 's'}.`);
     const m = u.frame;
@@ -138,15 +141,15 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
         const back = wiped ? 0 : 1;
         if (back) c.parts[m.defId] = (c.parts[m.defId] ?? 0) + back;
         res.mechsLost.push(`${frameName(m)} was destroyed and could not be recovered${back ? ' — your techs salvaged 1 part' : ''}.`);
-        (res.writtenOff ??= []).push([frameName(m), wiped ? 'lance wiped out — no recovery team reached the wreck' : win ? 'wreck too badly burned to haul out (1 in 10)' : `field abandoned before the wreck could be hauled out${back ? '; 1 part salvaged' : ''}`]);
+        (res.writtenOff ??= []).push([frameName(m), wiped ? 'lance wiped out — the recovery team could not reach this wreck' : win ? 'wreck too badly burned to haul out (1 in 10)' : `field abandoned before the wreck could be hauled out${back ? '; 1 part salvaged' : ''}`]);
       }
     }
   }
   // The crew's mood follows the company's fortunes
   const deaths = rt.playerUnits.filter((u) => u.pilot!.dead).length;
-  const moodDelta = (win ? 3 : outcome === 'withdraw' ? -2 : -4) - deaths * 5 + (win && kills >= 4 ? 1 : 0);
+  const moodDelta = (win ? 2 : outcome === 'withdraw' ? -2 : -4) - deaths * 5 + (win && kills >= 4 ? 1 : 0);
   if (moodDelta) {
-    c.moraleMod = Math.max(-20, Math.min(15, c.moraleMod + moodDelta));
+    c.moraleMod = Math.max(-20, Math.min(10, c.moraleMod + moodDelta));
     lines.push(`Crew morale ${moodDelta > 0 ? '+' : ''}${moodDelta}: ${win ? 'a victory to celebrate' : outcome === 'withdraw' ? 'the retreat stings' : 'a bitter defeat'}${deaths ? `, ${deaths} comrade${deaths > 1 ? 's' : ''} lost` : ''}.`);
   }
   if (inspired) lines.push('Inspired crew: +15% MechWarrior experience.');
@@ -186,8 +189,11 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     // Bonus loot
     const nb = r.int(1, 2) + Math.floor(d / 4);
     for (let i = 0; i < nb; i++) {
-      let id = r.pick(BASE_WEAPONS);
-      if (r.chance(0.2 + d * 0.04)) id = `${id}+${r.chance(0.7) ? 1 : 2}${r.pick(bonusesFor(id))}`;
+      // Rarer gear only turns up on harder contracts (lostech such as Gauss only at 9+ skulls)
+      const maxR = Math.floor((d + 1) / 2);
+      const pool2 = BASE_WEAPONS.filter((w) => item(w).rarity <= maxR);
+      let id = r.weighted(pool2.length ? pool2 : BASE_WEAPONS, (w) => 1 / (1 + item(w).rarity * 1.5));
+      if (r.chance(0.12 + d * 0.04)) id = `${id}+${r.chance(0.7) ? 1 : 2}${r.pick(bonusesFor(id))}`;
       pool.push({ kind: 'item', id, label: item(id).name, value: item(id).cost });
     }
     pool.sort((a, b2) => b2.value - a.value);

@@ -1,9 +1,9 @@
 // Random Argo events with choices, in the spirit of BATTLETECH's travel events.
 
 import { RNG } from '../engine/rng';
-import { Company, addLog, sys, monthlyExpenses, morale, dateStr } from './company';
+import { Company, addLog, sys, monthlyExpenses, morale, dateStr, pilotCap } from './company';
 import { item } from '../data/items';
-import { Pilot, SKILLS, SKILL_NAMES, makePilot, hasQuirk, health } from './pilot';
+import { Pilot, SKILLS, SKILL_NAMES, makePilot, hasQuirk, health, skillTotal } from './pilot';
 import { cb } from '../engine/util';
 
 export interface EventChoice {
@@ -26,7 +26,9 @@ export interface EventCtx { pilot: Pilot; pilot2: Pilot; sysName: string; }
 const fallen = (c: Company) => c.pilots.find((p) => p.dead && !p.memorial && (p.diedDay ?? -99) >= c.day - 20);
 const funds = (n: number) => (c: Company) => (c.funds >= n ? null : `Requires ${cb(n)}`);
 const pay = (c: Company, n: number) => { c.funds -= n; c.stats.spent += Math.max(0, n); };
-const mor = (c: Company, n: number) => { c.moraleMod += n; };
+const mor = (c: Company, n: number) => { c.moraleMod = Math.max(-20, Math.min(10, c.moraleMod + n)); };
+/** The more skilled of the event's two MechWarriors mentors the other. */
+const mentorPair = (x: EventCtx): [Pilot, Pilot] => (skillTotal(x.pilot) >= skillTotal(x.pilot2) ? [x.pilot, x.pilot2] : [x.pilot2, x.pilot]);
 const xp = (p: Pilot, n: number) => { p.xp += n; p.xpTotal += n; };
 const injure = (c: Company, p: Pilot, days: number) => { p.injuries = Math.max(1, p.injuries); p.healDays = Math.max(p.healDays, days); void c; };
 
@@ -119,10 +121,10 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: 'mentor', title: 'Old Hand', where: 'any',
-    text: (c, x) => `${x.pilot.callsign} has been quietly coaching ${x.pilot2.callsign} after hours. The rookie is improving fast, but the veteran looks exhausted.`,
+    text: (c, x) => { const [v, st] = mentorPair(x); return `${v.callsign} has been quietly coaching ${st.callsign} after hours. ${st.callsign} is improving fast, but ${v.callsign} looks exhausted.`; },
     choices: [
-      { text: 'Encourage it.', apply: (c, x, r) => { const s = r.pick(SKILLS); if (x.pilot2[s] < 10) x.pilot2[s]++; return `${x.pilot2.callsign}'s ${SKILL_NAMES[s]} improves to ${x.pilot2[s]}.`; } },
-      { text: 'Order the veteran to rest.', apply: (c, x) => { xp(x.pilot, 400); return `${x.pilot.callsign} returns refreshed and gains 400 XP.`; } },
+      { text: 'Encourage it.', apply: (c, x, r) => { const [, st] = mentorPair(x); const s = r.pick(SKILLS); if (st[s] < 10) st[s]++; return `${st.callsign}'s ${SKILL_NAMES[s]} improves to ${st[s]}.`; } },
+      { text: 'Order the mentor to rest.', apply: (c, x) => { const [v] = mentorPair(x); xp(v, 400); return `${v.callsign} returns refreshed and gains 400 XP.`; } },
     ],
   },
   {
@@ -168,9 +170,11 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: 'deserter', title: 'The Deserter', where: 'docked',
+    weight: (c) => (c.pilots.some((p) => p.callsign === 'Maverick') ? 0 : 1),
     text: () => 'A young MechWarrior in a torn militia uniform asks to join. She deserted her unit rather than fire on civilians, and her former commander wants her back.',
     choices: [
-      { text: 'Take her on and face the consequences.', apply: (c, x, r) => { c.rep['locals'] -= 6; mor(c, 3); const p = makePilot(r, 1); p.callsign = 'Maverick'; p.bio = 'Deserted her militia unit rather than fire on civilians.'; c.pilots.push(p); return 'Maverick joins the company. The locals are furious. Planetary rep -6, morale +3.'; } },
+      { text: 'Take her on and face the consequences.', req: (c) => (c.pilots.filter((p) => !p.dead).length < pilotCap(c) ? null : 'No bunk free in the barracks'),
+        apply: (c, x, r) => { c.rep['locals'] -= 6; mor(c, 3); const p = makePilot(r, 1, { callsign: 'Maverick', origin: x.sysName + ' militia', bio: `Deserted the ${x.sysName} planetary militia rather than fire on civilians. Her old commander still wants her back.` }); c.pilots.push(p); return 'Maverick joins the company. The locals are furious. Planetary rep -6, morale +3.'; } },
       { text: 'Hand her over.', apply: (c) => { c.rep['locals'] += 4; mor(c, -4); return 'The militia thanks you. The crew does not. Planetary rep +4, morale -4.'; } },
     ],
   },
@@ -247,7 +251,7 @@ export const EVENTS: GameEvent[] = [
     focus: (a) => a.find((p) => p.injuries > 0 && p.injuries < health(p) && p.healDays > 6),
     text: (c, x) => `${x.pilot.callsign} has been hobbling around the 'Mech bay against the doctor's orders, insisting they are fit for the next drop. The ${x.pilot.healDays} days of bed rest are driving them mad.`,
     choices: [
-      { text: 'Clear them for light duty in the simulators.', apply: (c, x, r) => { if (r.chance(0.7)) { x.pilot.healDays = Math.max(1, Math.round(x.pilot.healDays * 0.6)); xp(x.pilot, 200); return `Keeping busy agrees with ${x.pilot.callsign}: recovery time cut to ${x.pilot.healDays} days.`; } x.pilot.healDays += 7; return `${x.pilot.callsign} tears their stitches in a simulator crash. Recovery extended by 7 days.`; } },
+      { text: 'Clear them for light duty in the simulators.', apply: (c, x, r) => { if (r.chance(0.7)) { x.pilot.healDays = Math.max(1, Math.round(x.pilot.healDays * 0.6)); xp(x.pilot, 200); return `Keeping busy agrees with ${x.pilot.callsign}: recovery time cut to ${x.pilot.healDays} day${x.pilot.healDays === 1 ? '' : 's'}.`; } x.pilot.healDays += 7; return `${x.pilot.callsign} tears their stitches in a simulator crash. Recovery extended by 7 days.`; } },
       { text: 'Order them back to the infirmary.', apply: (c) => { mor(c, -1); return 'The order is obeyed, with poor grace. Morale -1.'; } },
     ],
   },

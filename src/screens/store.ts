@@ -36,7 +36,9 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
     d.text(x + 4, y + 7, '"Membership is for life. Rare kit, Star League salvage, the', '#c8a8f0', undefined, half0 - 6);
     d.text(x + 4, y + 8, ' good stuff. Prices are what they are."', '#c8a8f0', undefined, half0 - 6);
     d.ctext(x + 4, y + 10, `Membership fee {#f0c850}${cb(BLACK_MARKET_FEE)}{/}. Pirate reputation +5${s.owner !== 'pirates' ? `, ${own.short} reputation -3` : ''}.`, C.dim, undefined, half0 - 6);
-    if (ui.button(x + 4, y + 12, 'BUY MEMBERSHIP', { style: 'block', w: 22, center: true, disabled: c.funds < BLACK_MARKET_FEE })) {
+    const armed = st.confirmBuy === 'membership';
+    if (ui.button(x + 4, y + 12, armed ? 'CONFIRM?' : 'BUY MEMBERSHIP', { style: 'block', w: 22, center: true, fg: armed ? C.accent : undefined, disabled: c.funds < BLACK_MARKET_FEE }) && !(armed ? false : (st.confirmBuy = 'membership'))) {
+      st.confirmBuy = '';
       c.funds -= BLACK_MARKET_FEE; c.stats.spent += BLACK_MARKET_FEE; c.blackMarket = true;
       c.rep['pirates'] = (c.rep['pirates'] ?? 0) + 5; if (s.owner !== 'pirates') c.rep[s.owner] = (c.rep[s.owner] ?? 0) - 3;
       addLog(c, `Bought black market membership on ${s.name} for ${cb(BLACK_MARKET_FEE)}.`, '#b27ae8');
@@ -129,9 +131,12 @@ export function drawStoreTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: 
     d.text(lx + 38, ly, `x${e.n}`, C.dim, bg);
     d.text(lx + lw - 10, ly, cbk(price).padStart(9), C.cbill, bg);
   });
-  if (sl >= 0 && sellList[sl].kind === 'part' && st.confirmPart !== sellList[sl].id) {
-    st.confirmPart = sellList[sl].id;
-    argo.notify(`Click again to sell a ${chassis(sellList[sl].id).name} part`, C.warn);
+  // Parts and anything valuable (over ¢100K) need a second click
+  const pricey = (e: typeof sellList[0]) => e.kind === 'part' || sellPrice(c, e.id) >= 100000;
+  if (sl >= 0 && pricey(sellList[sl]) && st.confirmPart !== sellList[sl].kind + sellList[sl].id) {
+    st.confirmPart = sellList[sl].kind + sellList[sl].id;
+    const e = sellList[sl];
+    argo.notify(`Click again to sell ${e.kind === 'part' ? `a ${chassis(e.id).name} part` : item(e.id).name} for ${cbk(e.kind === 'part' ? partSellPrice(e.id) : sellPrice(c, e.id))}`, C.warn);
   } else if (sl >= 0) {
     st.confirmPart = '';
     const e = sellList[sl];

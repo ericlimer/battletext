@@ -12,11 +12,13 @@ import { wrap } from '../engine/util';
 export class EventScreen implements Screen {
   modal = true;
   result: string | null = null;
+  /** Captured on first draw so the choice's effects can't rewrite the situation that prompted it. */
+  bodyText: string | null = null;
   constructor(public ev: GameEvent, public ctx: EventCtx) {}
   render(ui: UI): void {
     const d = ui.d, c = company!;
     const w = 80;
-    const body = wrap(this.ev.text(c, this.ctx), w - 8);
+    const body = wrap((this.bodyText ??= this.ev.text(c, this.ctx)), w - 8);
     const res = this.result ? wrap(this.result, w - 8) : [];
     const h = 8 + body.length + (this.result ? res.length + 2 : this.ev.choices.length * 2);
     const x = (COLS - w) >> 1, y = Math.max(2, 20 - (h >> 1));

@@ -259,7 +259,7 @@ export function repairEstimate(f: Frame): RepairEstimate {
   let cost = armorPts * ARMOR_COST_PER_PT + structPts * (40 + tons);
   let hours = armorPts / 12 + structPts / 3;
   for (const c of deadItems) { const d: ItemDef = item(c.id); cost += d.cost * 0.2; hours += 2 + d.tons * 0.8; }
-  if ((f as any).wreck && f.kind === 'mech') { cost += chassis(f.defId).cost * 0.05; hours += 40 + tons; }
+  if ((f as any).wreck && f.kind === 'mech') { cost += chassis(f.defId).cost * 0.04; hours += 40 + tons; }
   return { armorPts, structPts, deadItems, cost: Math.round(cost / 100) * 100, hours: Math.ceil(hours) };
 }
 
