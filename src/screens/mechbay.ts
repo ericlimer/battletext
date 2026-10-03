@@ -99,7 +99,7 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   const dx = x + 52, dw = w - 53;
   const ch = chassis(m.defId);
   ui.panel(dx, y, dw, h, `${ch.name.toUpperCase()} ${ch.id}`);
-  d.ctext(dx + 2, y + 1, `${CLASS_NAMES[ch.cls]} · ${ch.tons} tons · hardpoints ${hardpointStr(m)} · value {#f0c850}${cbk(frameValue(m))}{/}`, C.dim);
+  d.ctext(dx + 2, y + 1, `${CLASS_NAMES[ch.cls]} · ${ch.tons} tons · hardpoints ${hardpointStr(m)} · value {#f0c850}${cbk(frameValue(m))}{/} · resale {#f0c850}${cbk(frameSellPrice(m))}{/}${m.usedPrice ? ' {#6d7f8a}(bought used: resale capped below its price){/}' : ''}`, C.dim, undefined, dw - 4);
   d.text(dx + 2, y + 2, ch.desc, C.faint, undefined, dw - 4);
   drawDoll(ui, dx + 2, y + 4, m, {});
   // Stats bars
@@ -128,7 +128,7 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   let by = y + h - 7;
   d.hline(dx + 1, by - 1, dw - 2, C.border);
   if (e.armorPts || e.structPts || e.deadItems.length) {
-    d.ctext(dx + 2, by, `Damage: {#f2f6f8}${e.armorPts}{/} armor, {#f2f6f8}${e.structPts}{/} structure, {#f2f6f8}${e.deadItems.length}{/} destroyed components. Repair {#f0c850}${cb(e.cost)}{/}, ~${Math.ceil(e.hours / techHours(c))} days`, C.dim, undefined, dw - 4);
+    d.ctext(dx + 2, by, `Damage: {#f2f6f8}${e.armorPts}{/} armor, {#f2f6f8}${e.structPts}{/} structure, {#f2f6f8}${e.deadItems.length}{/} destroyed components. Repair {#f0c850}${cb(e.cost)}{/}, ~${Math.ceil(e.hours / techHours(c))} day${Math.ceil(e.hours / techHours(c)) === 1 ? '' : 's'}`, C.dim, undefined, dw - 4);
   }
   const wo = mechBusy(c, m.uid);
   if (!(e.armorPts || e.structPts || e.deadItems.length)) {

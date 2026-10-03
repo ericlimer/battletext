@@ -196,6 +196,12 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
       if (r.chance(0.12 + d * 0.04)) id = `${id}+${r.chance(0.7) ? 1 : 2}${r.pick(bonusesFor(id))}`;
       pool.push({ kind: 'item', id, label: item(id).name, value: item(id).cost });
     }
+    // The employer's quartermaster can often turn up a part for a chassis you're already collecting
+    const collecting = Object.entries(c.parts).filter(([, n]) => n > 0 && n < PARTS_NEEDED).map(([id]) => id);
+    if (collecting.length && r.chance(0.35 + d * 0.04)) {
+      const id = r.pick(collecting), ch = chassis(id);
+      pool.push({ kind: 'part', id, label: `${ch.name} ${ch.id} part`, value: ch.cost / PARTS_NEEDED });
+    }
     pool.sort((a, b2) => b2.value - a.value);
     res.pool = pool;
   }

@@ -18,7 +18,7 @@ import { Pilot, isAvailable, health, skillTotal } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
-import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots } from './survey';
+import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots, daysToContract } from './survey';
 import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
@@ -75,7 +75,7 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   d.ctext(dx + 3, yy++, `Maximum payment {#f0c850}${cb(k.pay)}{/}   Salvage up to {#f2f6f8}${k.salvageMax}{/} shares`, C.dim);
   const rt = surveyOf(c, k);
   const est = oppositionEstimate(rt);
-  const lanceT = likelyLance(c).reduce((a, m) => a + frameTons(m), 0);
+  const lanceT = likelyLance(c, daysToContract(c, k)).reduce((a, m) => a + frameTons(m), 0);
   d.ctext(dx + 3, yy++, `Enemy forces: ${threatText(k.diff)}  {#6d7f8a}· intel: ~${est.units} units, ~${est.tons}t{/}`, C.dim, undefined, dw - 6);
   const ratio = lanceT / Math.max(1, est.tons);
   d.ctext(dx + 3, yy++, `Your lance: {#f2f6f8}${lanceT}t{/}  {${ratio >= 1.1 ? '#6ad46a' : ratio >= 0.8 ? '#f0c040' : '#e8503a'}}${ratio >= 1.1 ? 'favourable odds' : ratio >= 0.8 ? 'an even fight' : 'outgunned'}{/}`, C.dim);
@@ -249,18 +249,22 @@ export class DropScreen implements Screen {
       }
     } else {
       ui.panel(px, 4, pw, 36, 'INTEL');
-      const lanceDiff = Math.max(0, (tons / 4 - 22) / 7.2);
+      // Same intel and verdict as the contract board, for the lance as currently assigned
+      const est = oppositionEstimate(surveyOf(c, k));
+      const ratio = tons / Math.max(1, est.tons);
       d.text(px + 2, 6, 'Contract difficulty', C.dim);
       d.text(px + 24, 6, skulls(k.diff), '#e8503a');
-      d.text(px + 2, 7, 'Your lance (tonnage)', C.dim);
-      d.text(px + 24, 7, `${tons}t  ${skulls(Math.round(lanceDiff))}`, lanceDiff >= k.diff - 1 ? C.green : C.warn);
-      wrap(`Expected opposition: ${threatText(k.diff).replace(/\{[^}]*\}/g, '')}. Enemy 'Mechs average ~${Math.round(22 + k.diff * 7.2)} tons.`, pw - 4).forEach((l, j) => d.text(px + 2, 9 + j, l, C.text));
+      d.text(px + 2, 7, 'Enemy (intel)', C.dim);
+      d.text(px + 24, 7, `~${est.units} units, ~${est.tons}t`, C.text);
+      d.text(px + 2, 8, 'Your lance', C.dim);
+      d.ctext(px + 24, 8, `${tons}t  {${ratio >= 1.1 ? '#6ad46a' : ratio >= 0.8 ? '#f0c040' : '#e8503a'}}${ratio >= 1.1 ? 'favourable odds' : ratio >= 0.8 ? 'an even fight' : 'outgunned'}{/}`, C.text);
+      wrap(`Expected opposition: ${threatText(k.diff).replace(/\{[^}]*\}/g, '')}.`, pw - 4).forEach((l, j) => d.text(px + 2, 10 + j, l, C.text));
       d.text(px + 2, 13, 'Negotiated terms', C.dim);
       d.ctext(px + 2, 14, `{#f0c850}${cb(this.n.cash)}{/} · ${this.n.salvage} salvage (${this.n.priority} priority)`, C.text);
     }
     const ready = this.slots.filter((s) => s.mech && s.pilot);
     if (ui.button(2, ROWS - 3, 'Cancel contract', { key: 'Escape' })) app.pop();
-    if (ui.button(24, ROWS - 3, 'Auto-fill best', { key: 'a', tip: 'Heaviest ready \'Mechs, best available MechWarriors.' })) { this.slots = defaultSlots(c, true); this.pick = null; }
+    if (ui.button(32, ROWS - 3, 'Auto-fill best', { key: 'a', tip: 'Heaviest ready \'Mechs, best available MechWarriors.' })) { this.slots = defaultSlots(c); this.pick = null; }
     if (ui.button(COLS - 24, ROWS - 3, 'LAUNCH', { key: 'Enter', style: 'block', w: 20, center: true, disabled: !ready.length, tip: ready.length ? 'Drop into combat.' : 'Assign at least one \'Mech and MechWarrior.' })) this.launch();
   }
 

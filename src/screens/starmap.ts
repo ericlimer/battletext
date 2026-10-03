@@ -99,8 +99,21 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     if (fits(lx) || rank(s) > 0) {
       d.text(lx, sy, label, cur ? C.accent : sel || hov ? C.bright : scale(f.color, s.visited ? 0.8 : 0.55));
       for (let k = 0; k < label.length; k++) occupied.add(`${lx + k},${sy}`);
-    } else {
-      // Crowded: fall back to a three-letter abbreviation rather than leaving the system unnamed
+    } else if ((() => {
+      // Crowded: try just above or below the star before abbreviating
+      const cx = Math.max(ox, Math.min(ox + MW - label.length, sx - (label.length >> 1)));
+      for (const ly of [sy - 1, sy + 1]) {
+        if (ly < oy || ly >= oy + MH) continue;
+        let ok = true;
+        for (let k = -1; k <= label.length && ok; k++) if (occupied.has(`${cx + k},${ly}`)) ok = false;
+        if (!ok) continue;
+        d.text(cx, ly, label, scale(f.color, s.visited ? 0.8 : 0.55));
+        for (let k = 0; k < label.length; k++) occupied.add(`${cx + k},${ly}`);
+        return true;
+      }
+      return false;
+    })()) { /* placed above/below */ } else {
+      // Still crowded: fall back to a three-letter abbreviation rather than leaving the system unnamed
       const ab = label.slice(0, 3);
       for (const ax of [right, sx - 4]) {
         let ok = ax >= ox && ax + 3 < ox + MW;

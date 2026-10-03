@@ -1,7 +1,8 @@
 // Random Argo events with choices, in the spirit of BATTLETECH's travel events.
 
 import { RNG } from '../engine/rng';
-import { Company, addLog, sys, monthlyExpenses, morale, dateStr, pilotCap } from './company';
+import { Company, addLog, sys, monthlyExpenses, morale, dateStr, pilotCap, workQueueDays } from './company';
+import { frameName } from './frame';
 import { item } from '../data/items';
 import { Pilot, SKILLS, SKILL_NAMES, makePilot, hasQuirk, health, skillTotal } from './pilot';
 import { cb } from '../engine/util';
@@ -86,10 +87,10 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: 'medtech', title: 'Doctor\'s Orders', where: 'any',
-    weight: (c) => (c.pilots.some((p) => p.injuries > 0) ? 3 : 0.2),
+    weight: (c) => (c.pilots.some((p) => !p.dead && p.injuries > 0) ? 3 : 0),
     text: () => 'The ship\'s doctor has a lead on an experimental regenerative treatment. It is expensive, but could put the wounded back on their feet quickly.',
     choices: [
-      { text: `Pay for the treatment (${cb(90000)}).`, req: funds(90000), apply: (c) => { pay(c, 90000); let n = 0; for (const p of c.pilots) if (p.injuries > 0) { p.healDays = Math.max(1, Math.floor(p.healDays / 3)); n++; } return n ? `${n} injured MechWarrior${n === 1 ? ' recovers' : 's recover'} much faster.` : 'Nobody needed it after all. The money is spent.'; } },
+      { text: `Pay for the treatment (${cb(90000)}).`, req: funds(90000), apply: (c) => { pay(c, 90000); let n = 0; for (const p of c.pilots) if (!p.dead && p.injuries > 0) { p.healDays = Math.max(1, Math.floor(p.healDays / 3)); n++; } return n ? `${n} injured MechWarrior${n === 1 ? ' recovers' : 's recover'} much faster.` : 'Nobody needed it after all. The money is spent.'; } },
       { text: 'Too risky. Stick with conventional care.', apply: () => 'The doctor sighs and returns to the medbay.' },
     ],
   },
@@ -232,7 +233,7 @@ export const EVENTS: GameEvent[] = [
     id: 'lostech-map', title: 'The Map', where: 'any',
     text: (c, x) => `${x.pilot.callsign} won a data chip in a card game. It claims to show a Star League supply cache — but the seller wants it back, badly.`,
     choices: [
-      { text: `Pay the techs to decrypt it (${cb(70000)}).`, req: funds(70000), apply: (c, x, r) => { pay(c, 70000); if (r.chance(0.45)) { const id = r.pick(['DHS', 'GAUSS', 'TTS2', 'GYRO2', 'CMD']); c.inventory[id] = (c.inventory[id] ?? 0) + 1; return `It's real. A recovery team comes back with a ${id}!`; } return 'The chip is a clever fake. The seller must be laughing.'; } },
+      { text: `Pay the techs to decrypt it (${cb(70000)}).`, req: funds(70000), apply: (c, x, r) => { pay(c, 70000); if (r.chance(0.45)) { const id = r.pick(['DHS', 'GAUSS', 'TTS2', 'GYRO2', 'CMD']); c.inventory[id] = (c.inventory[id] ?? 0) + 1; return `It's real. A recovery team comes back with ${/^[AEIOU]/.test(item(id).name) ? 'an' : 'a'} ${item(id).name}!`; } return 'The chip is a clever fake. The seller must be laughing.'; } },
       { text: 'Sell it back to the seller.', apply: (c) => { c.funds += 40000; return `The seller pays ${cb(40000)}, looking very relieved.`; } },
     ],
   },
@@ -347,10 +348,10 @@ export const EVENTS: GameEvent[] = [
   {
     id: 'damaged-mech', title: 'Cannibalize?', where: 'docked',
     weight: (c) => (c.mechs.some((m) => (m as any).wreck) ? 4 : 0),
-    text: () => 'The chief tech has a proposal: the wrecked \'Mech in bay four will take weeks to rebuild. Stripping it would get the rest of the lance back in fighting shape faster.',
+    text: (c) => { const w = c.mechs.find((m) => (m as any).wreck)!; const days = workQueueDays(c, w.uid); return `The chief tech has a proposal: the wrecked ${frameName(w)} ${days ? `will tie up the gantry for ${days} more day${days === 1 ? '' : 's'}` : 'needs a full rebuild'}. Stripping it would free the crew and put its chassis and surviving equipment in storage.`; },
     choices: [
       { text: 'Keep rebuilding it.', apply: (c) => { mor(c, 1); return 'The techs grumble, but they respect the decision. Morale +1.'; } },
-      { text: 'Strip it for parts.', apply: (c) => { const w = c.mechs.find((m) => (m as any).wreck)!; c.mechs = c.mechs.filter((m) => m !== w); c.lance = c.lance.map((u) => (u === w.uid ? null : u)); c.parts[w.defId] = (c.parts[w.defId] ?? 0) + 2; for (const it of w.items) if (!it.dead) c.inventory[it.id] = (c.inventory[it.id] ?? 0) + 1; c.work = c.work.filter((o) => o.mechUid !== w.uid); return 'The wreck is stripped to the frame: 2 chassis parts and its surviving equipment go into storage.'; } },
+      { text: 'Strip it for parts.', apply: (c) => { const w = c.mechs.find((m) => (m as any).wreck)!; c.mechs = c.mechs.filter((m) => m !== w); c.lance = c.lance.map((u) => (u === w.uid ? null : u)); c.parts[w.defId] = (c.parts[w.defId] ?? 0) + 2; for (const it of w.items) if (!it.dead) c.inventory[it.id] = (c.inventory[it.id] ?? 0) + 1; let refund = 0; for (const o of c.work.filter((q) => q.mechUid === w.uid)) refund += Math.round((o.cost ?? 0) * (o.hours / Math.max(1, o.total))); c.funds += refund; c.work = c.work.filter((o) => o.mechUid !== w.uid); return `The wreck is stripped to the frame: 2 chassis parts and its surviving equipment go into storage.${refund ? ` Unspent repair funds returned: ${cb(refund)}.` : ''}`; } },
     ],
   },
   {
@@ -378,10 +379,13 @@ export function pickEvent(c: Company, r: RNG, where: 'travel' | 'docked'): { ev:
     if (p) focal.set(e.id, p);
     return !!p;
   });
-  const ev = r.weighted(pool, (e) => e.weight?.(c) ?? 1);
+  // Events already seen this career grow steadily rarer
+  const seen = (c.eventCounts ??= {});
+  const ev = r.weighted(pool, (e) => (e.weight?.(c) ?? 1) / (1 + (seen[e.id] ?? 0) * 2));
   if (!ev || (ev.weight && ev.weight(c) <= 0)) return null;
   c.lastEventDay = c.day;
-  c.recentEvents = [...recent, ev.id].slice(-6);
+  c.recentEvents = [...recent, ev.id].slice(-12);
+  seen[ev.id] = (seen[ev.id] ?? 0) + 1;
   const pa = r.shuffle([...alive]);
   const f = focal.get(ev.id);
   if (f) { pa.splice(pa.indexOf(f), 1); pa.unshift(f); }

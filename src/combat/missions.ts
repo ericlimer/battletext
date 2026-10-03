@@ -364,7 +364,7 @@ function installHooks(rt: MissionRuntime): void {
         if (eo.status === 'active' && esc.every((u) => !u.alive)) eo.status = 'done';
         if (tg && !tg.alive) { obj(rt, 'target')!.status = 'done'; return 'win'; }
         if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `round ${b.round} of 9 — bolts then, or sooner if badly hurt`;
-        if (tg && tg.fled) { obj(rt, 'target')!.status = 'failed'; return 'loss'; }
+        if (tg && tg.fled) { const o = obj(rt, 'target')!; o.status = 'failed'; o.progress = 'escaped'; return 'loss'; }
         break;
       }
       case 'destroybase': {

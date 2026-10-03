@@ -144,7 +144,9 @@ export class ArgoScreen implements Screen {
     x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}{#6d7f8a}·${c.mrb}{/}`, C.dim) + 2;
     const s = sys(c);
     const loc = c.travel ? `→ ${sys(c, c.travel.dest).name} ${travelDaysLeft(c)}d` : `${s.name}`;
-    d.text(x, 0, loc, c.travel ? C.cyan : C.text, undefined, Math.max(0, COLS - 30 - x));
+    const room = Math.max(0, COLS - 39 - x);
+    d.text(x, 0, loc.length > room ? loc.slice(0, Math.max(0, room - 1)) + '…' : loc, c.travel ? C.cyan : C.text, undefined, room);
+    if (loc.length > room && ui.hover(x, 0, room, 1)) ui.setTip([loc]);
     // time controls
     const bx = COLS - 36;
     if (ui.button(bx, 0, this.advancing ? '❚❚ Pause' : '▸ Advance', { key: ' ', keyLabel: '␣', tip: 'Pass time continuously until something completes (repairs, healing, arrival) or an event happens.' , style: 'plain', fg: this.advancing ? C.accent : C.text })) {
@@ -306,14 +308,15 @@ export class ArgoScreen implements Screen {
     // Bank credit: a lump sum now against a bigger repayment later, one loan at a time
     const loanAmt = 750000 + mrbLevel(c) * 250000, loanDue = Math.round(loanAmt * 1.25);
     const hasBank = (c.debts ?? []).some((db) => db.who === 'Aurigan Merchant Bank');
-    if (!hasBank) {
+    if (!hasBank && (c.funds < 0 || c.negativeMonths)) d.text(x + 3, y + 34, 'Bank credit: refused while the company is in debt.', C.faint);
+    else if (!hasBank) {
       d.ctext(x + 3, y + 34, `Bank credit: {#f0c850}${cbk(loanAmt)}{/} now, repay {#f0c850}${cbk(loanDue)}{/} in 90 days.`, C.dim);
       const armed = this.confirmBuy === 'loan';
       if (ui.button(x + 56, y + 34, armed ? 'CONFIRM?' : 'Borrow', { w: 11, fg: armed ? C.accent : undefined, tip: 'Click twice. The bank collects automatically on the due date, even if it puts you in the red.' })) {
         if (!armed) this.confirmBuy = 'loan';
         else {
           this.confirmBuy = '';
-          c.funds += loanAmt; (c.debts ??= []).push({ day: c.day + 90, amount: loanDue, who: 'Aurigan Merchant Bank' });
+          c.funds += loanAmt; c.borrowed = (c.borrowed ?? 0) + loanAmt; (c.debts ??= []).push({ day: c.day + 90, amount: loanDue, who: 'Aurigan Merchant Bank' });
           addLog(c, `Borrowed ${cb(loanAmt)} from the Aurigan Merchant Bank; ${cb(loanDue)} due ${dateStr(c.day + 90)}.`, '#f0c850');
           saveGame(c); this.notify(`Borrowed ${cbk(loanAmt)}`, C.cbill);
         }
@@ -331,6 +334,7 @@ export class ArgoScreen implements Screen {
         d.text(x + 3, ly0 + i, dateStr(L.day).slice(3), C.dim);
         d.text(x + 13, ly0 + i, cbk(L.contracts).padStart(10), C.cbill);
         d.text(x + 25, ly0 + i, cbk(L.sales).padStart(8), C.cbill);
+        if (L.loans) d.text(x + 60, ly0 + i, "+loan", C.warn);
         d.text(x + 35, ly0 + i, cbk(-(L.other + L.operating)).padStart(11), C.dim);
         d.text(x + 48, ly0 + i, `${net >= 0 ? '+' : ''}${cbk(net)}`.padStart(10), net >= 0 ? C.green : C.red);
       });
@@ -344,11 +348,12 @@ export class ArgoScreen implements Screen {
     const ch = 10, cy = y + h - ch - 9, cx = x + 77, cw = w - 74 - 14;
     const hist = [...(c.fundsHistory ?? []), c.funds].slice(-cw);
     const hi = Math.max(1, ...hist), lo = Math.min(0, ...hist);
-    d.text(x + 75, cy - 2, 'FUNDS · LAST ' + Math.max(1, (hist.length - 1) * 3) + ' DAYS', C.accent, undefined, 99, true);
+    d.text(x + 75, cy - 2, hist.length < 3 ? 'FUNDS' : 'FUNDS · LAST ' + (hist.length - 1) * 3 + ' DAYS', C.accent, undefined, 99, true);
     d.text(x + 75, cy - 1, cbk(hi), C.faint);
     d.text(x + 75, cy + ch - 1, cbk(lo), C.faint);
     // Stretch whatever history exists across the full chart width
-    for (let col = 0; col < cw; col++) {
+    if (hist.length < 3) d.text(cx + 6, cy + (ch >> 1), 'The chart fills in as the days pass.', C.faint);
+    else for (let col = 0; col < cw; col++) {
       const i = Math.min(hist.length - 1, Math.floor((col * hist.length) / cw));
       const v = hist[i], top = ((v - lo) / (hi - lo || 1)) * ch * 8;
       for (let r = 0; r < ch; r++) {
@@ -359,9 +364,12 @@ export class ArgoScreen implements Screen {
     }
     // Month ticks under the chart
     const span = Math.max(1, (hist.length - 1) * 3), startDay = c.day - span;
-    for (let day = Math.ceil(startDay / 30) * 30; day <= c.day; day += 30) {
+    // Ticks sit on the first day of each calendar month
+    let lastCol = -99;
+    for (let day = Math.max(0, startDay); day <= c.day; day++) {
+      if (!dateStr(day).startsWith('01')) continue;
       const col = Math.round(((day - startDay) / span) * (cw - 1));
-      if (col >= 0 && col < cw - 6) d.text(cx + 6 + col, cy + ch, `┴${dateStr(day + 1).slice(3, 6)}`, C.faint);
+      if (col >= 0 && col < cw - 4 && col - lastCol >= 5) { d.text(cx + 6 + col, cy + ch, `┴${dateStr(day).slice(3, 6)}`, C.faint); lastCol = col; }
     }
     const st = c.stats;
     const ly = cy + ch + 2;

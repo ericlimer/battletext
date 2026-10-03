@@ -3,7 +3,8 @@
 
 import { Display } from '../engine/display';
 import { C, lerp, scale } from '../engine/color';
-import { Contract, Company, mechReady } from '../game/company';
+import { Contract, Company, mechReady, workQueueDays, travelMult } from '../game/company';
+import { route } from '../game/world';
 import { setupMission, MissionRuntime } from '../combat/missions';
 import { BIOME_INFO } from '../combat/terrain';
 import { SIDE } from '../combat/battle';
@@ -14,33 +15,33 @@ const cache = new Map<string, MissionRuntime>();
 
 export type DropSlot = { mech: string | null; pilot: string | null };
 
-/** The lance the drop screen starts with: the last lance where still ready, blanks filled heaviest-'Mech/best-pilot first.
- *  With best=true the remembered lance is ignored. Contract odds use the same lance, so the estimate matches the drop. */
-export function defaultSlots(c: Company, best = false): DropSlot[] {
-  const readyM = c.mechs.filter((m) => mechReady(c, m));
-  const readyP = c.pilots.filter(isAvailable);
-  const slots: DropSlot[] = [0, 1, 2, 3].map((i) => ({
-    mech: !best && c.lance[i] && readyM.find((x) => x.uid === c.lance[i]) ? c.lance[i] : null,
-    pilot: !best && c.lancePilots[i] && readyP.find((x) => x.id === c.lancePilots[i]) ? c.lancePilots[i] : null,
-  }));
+/** The lance the drop screen starts with: the heaviest ready 'Mechs, each paired with the best available MechWarrior.
+ *  readyIn counts 'Mechs and pilots that will be ready within that many days (for contracts reached by travel).
+ *  Contract odds use the same lance, so the estimate matches the drop. */
+export function defaultSlots(c: Company, readyIn = 0): DropSlot[] {
+  const readyM = c.mechs.filter((m) => mechReady(c, m) || (readyIn > 0 && m.struct.CT > 0 && m.struct.HD > 0 && workQueueDays(c, m.uid) <= readyIn));
+  const readyP = c.pilots.filter((p) => isAvailable(p) || (readyIn > 0 && !p.dead && p.healDays <= readyIn));
+  const slots: DropSlot[] = [0, 1, 2, 3].map(() => ({ mech: null, pilot: null }));
   const byTons = [...readyM].sort((a, b) => frameTons(b) - frameTons(a) || frameStats(b).alphaDmg - frameStats(a).alphaDmg);
   const bySkill = [...readyP].sort((a, b) => skillTotal(b) - skillTotal(a));
-  for (const s of slots) {
-    if (!s.mech) { const m = byTons.find((x) => !slots.some((o) => o.mech === x.uid)); if (m) s.mech = m.uid; }
-    if (s.mech && !s.pilot) { const p = bySkill.find((x) => !slots.some((o) => o.pilot === x.id)); if (p) s.pilot = p.id; }
-    if (!s.mech) s.pilot = null;
-  }
+  slots.forEach((s, i) => { if (byTons[i] && bySkill[i]) { s.mech = byTons[i].uid; s.pilot = bySkill[i].id; } });
   return slots;
 }
 
 /** The 'Mechs that would actually drop (those with a pilot). */
-export function likelyLance(c: Company): Frame[] {
-  return defaultSlots(c).filter((s) => s.mech && s.pilot).map((s) => c.mechs.find((m) => m.uid === s.mech)!).filter(Boolean);
+export function likelyLance(c: Company, readyIn = 0): Frame[] {
+  return defaultSlots(c, readyIn).filter((s) => s.mech && s.pilot).map((s) => c.mechs.find((m) => m.uid === s.mech)!).filter(Boolean);
+}
+
+/** Days until a contract's battle: the trip there for travel contracts. */
+export function daysToContract(c: Company, k: Contract): number {
+  if (!k.sysId || k.sysId === c.location) return 0;
+  return route(c.systems, c.location, k.sysId, travelMult(c))?.days ?? 0;
 }
 
 /** Builds (once) the mission a contract would launch, using placeholder 'Mechs for the player. */
 export function surveyOf(c: Company, k: Contract): MissionRuntime {
-  const lance = likelyLance(c);
+  const lance = likelyLance(c, daysToContract(c, k));
   const key = `${k.id}:${k.seed}:${lance.map((m) => m.uid).join(',')}`;
   let rt = cache.get(key);
   if (!rt) {

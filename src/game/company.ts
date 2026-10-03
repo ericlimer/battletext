@@ -123,15 +123,19 @@ export interface Company {
   debts?: { day: number; amount: number; who: string }[];
   /** Recently posted contract names, so the boards don't repeat themselves. */
   recentNames?: string[];
+  /** How often each random event has fired this career. */
+  eventCounts?: Record<string, number>;
   fundsHistory?: number[]; // sampled every 3 days
   blackMarket?: boolean; // membership bought from a pirate contact
-  monthStart?: { day: number; funds: number; earned: number; spent: number };
+  monthStart?: { day: number; funds: number; earned: number; spent: number; borrowed?: number };
+  /** C-Bills borrowed from the bank over the career. */
+  borrowed?: number;
   ledger?: MonthLedger[];
   blackStores?: Record<string, StoreItem[]>;
   blackStoreDay?: Record<string, number>;
 }
 
-export interface MonthLedger { day: number; start: number; end: number; contracts: number; operating: number; other: number; sales: number; }
+export interface MonthLedger { day: number; start: number; end: number; contracts: number; operating: number; other: number; sales: number; loans?: number; }
 export const BLACK_MARKET_FEE = 300000;
 /** Pirate havens and frontier worlds host a black market. */
 export function hasBlackMarket(s: StarSystem): boolean { return s.owner === 'pirates' || s.tags.includes('frontier'); }
@@ -293,6 +297,8 @@ export function companyValue(c: Company): number {
   let v = c.funds;
   for (const m of [...c.mechs, ...c.storage]) v += frameValue(m) * 0.6;
   for (const [id, n] of Object.entries(c.inventory)) v += item(id).cost * 0.4 * n;
+  // Outstanding loans are owed in full
+  for (const db of c.debts ?? []) v -= db.amount;
   return Math.round(v);
 }
 
@@ -444,8 +450,11 @@ function genHires(c: Company, r: RNG, s: StarSystem): Pilot[] {
   const taken = new Set(c.pilots.map((p) => p.callsign));
   const out: Pilot[] = [];
   for (let i = 0; i < n; i++) {
-    const tier = Math.max(0, Math.min(4, Math.floor(s.diff / 3) + r.int(-1, 1)));
-    const p = makePilot(r, tier);
+    // Capitals draw veterans; nowhere is the hall all rookies
+    const tier = Math.max(0, Math.min(4, Math.floor(s.diff / 3) + r.int(0, 1) + (s.tags.includes('capital') ? 1 : 0)));
+    let p = makePilot(r, tier);
+    const firsts = new Set([...c.pilots, ...out].map((q) => q.name.split(' ')[0]));
+    for (let k = 0; k < 6 && firsts.has(p.name.split(' ')[0]); k++) p = makePilot(r, tier);
     p.callsign = uniqueCallsign(r, taken);
     taken.add(p.callsign);
     p.hireCost = Math.round((salary(p) * 5 + tier * 40000) / 1000) * 1000;
@@ -585,9 +594,10 @@ export function advanceDay(c: Company): DayReport {
     const ms = c.monthStart ?? { day: c.day - 30, funds: c.funds + e.total, earned: c.stats.earned, spent: c.stats.spent - e.total };
     const contracts = c.stats.earned - ms.earned, spentAll = c.stats.spent - ms.spent;
     const other = spentAll - e.total;
-    const sales = c.funds - ms.funds - contracts + spentAll;
-    c.ledger = [...(c.ledger ?? []), { day: c.day, start: ms.funds, end: c.funds, contracts, operating: e.total, other, sales }].slice(-12);
-    c.monthStart = { day: c.day, funds: c.funds, earned: c.stats.earned, spent: c.stats.spent };
+    const loans = (c.borrowed ?? 0) - (ms.borrowed ?? 0);
+    const sales = c.funds - ms.funds - contracts + spentAll - loans;
+    c.ledger = [...(c.ledger ?? []), { day: c.day, start: ms.funds, end: c.funds, contracts, operating: e.total, other, sales, loans }].slice(-12);
+    c.monthStart = { day: c.day, funds: c.funds, earned: c.stats.earned, spent: c.stats.spent, borrowed: c.borrowed ?? 0 };
     const mor = morale(c);
     if (mor >= 40) say('The crew is inspired. MechWarriors will learn faster on the next contracts.', '#6ad46a');
     if (mor < 12) {
