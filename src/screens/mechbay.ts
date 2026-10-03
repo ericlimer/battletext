@@ -1,3 +1,4 @@
+import { portraitOf, drawPortrait, locTip } from './portrait';
 // Mech Bay: roster, repair, storage, assembly from parts, sale.
 
 import { UI } from '../engine/ui';
@@ -110,11 +111,20 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     simpleBar(d, dx + 34, y + 5 + i * 2, 24, s.frac, '#4a8ee8');
     if (ui.hover(dx + 34, y + 4 + i * 2, 24, 2)) ui.setTip(s.tip);
   });
-  // Loadout
+  // Loadout, or the 'Mech's portrait ([P] toggles; the choice sticks)
   let ly = y + 15;
-  d.text(dx + 2, ly++, 'LOADOUT', C.accent, undefined, 99, true);
+  const art = portraitOf(m);
+  const showArt = !!art && (st as any).portrait !== false;
+  d.text(dx + 2, ly, showArt ? 'PORTRAIT' : 'LOADOUT', C.accent, undefined, 99, true);
+  if (art && ui.button(dx + 13, ly, showArt ? 'Loadout' : 'Portrait', { key: 'p', style: 'plain', tip: 'Toggle between the hardpoint loadout and the \'Mech\'s portrait. Damaged parts are tinted.' })) (st as any).portrait = !showArt;
+  ly++;
   const colW = Math.floor((dw - 4) / 4);
-  MECH_LOCS.forEach((l, i) => {
+  if (showArt && art) {
+    const aw = Math.max(...art.rows.map((r) => r.length));
+    let hov: string | null = null;
+    drawPortrait(d, art, dx + Math.max(2, (dw - aw) >> 1), ly + 1, { frame: m, ui, onHover: (l) => { hov = l; } });
+    if (hov) ui.setTip(locTip(m, hov));
+  } else MECH_LOCS.forEach((l, i) => {
     const cx = dx + 2 + (i % 4) * colW, cy = ly + Math.floor(i / 4) * 9;
     const hp = ch.hardpoints[l] ?? [];
     d.ctext(cx, cy, `{#f2f6f8}${LOC_NAMES[l]}{/} ${hp.map((hh) => `{${HARD_COLORS[hh]}}${hh}{/}`).join('')}`, C.text, undefined, colW - 1);

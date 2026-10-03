@@ -12,6 +12,7 @@ import { BIOME_INFO, TERRAIN, dist, dirTo, DIRS, Structure } from '../combat/ter
 import { item, ItemDef } from '../data/items';
 import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
+import { portraitOf, drawPortrait, locTip } from './portrait';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
@@ -61,6 +62,8 @@ export class CombatScreen implements Screen {
   elevMode = (() => { try { return Math.max(0, Math.min(ELEV_MODES.length - 1, +(localStorage.getItem('bt.elevMode') ?? 0) || 0)); } catch { return 0; } })();
   get showHeights(): boolean { return ELEV_MODES[this.elevMode] === 'Tint'; }
   showHelp = false;
+  /** Unit shown in the [I]nspect portrait view. */
+  inspect: Unit | null = null;
   confirmWithdraw = false;
   time = 0;
   facingDir = 0;
@@ -666,6 +669,7 @@ export class CombatScreen implements Screen {
     this.draw(ui);
     if (this.briefingOpen) this.drawBriefing(ui);
     if (this.showHelp) this.drawHelp(ui);
+    if (this.inspect) this.drawInspect(ui);
     if (this.confirmWithdraw) this.drawWithdraw(ui);
     if (this.b.result && idle && !this.queue.length) this.drawResult(ui);
   }
@@ -681,7 +685,7 @@ export class CombatScreen implements Screen {
   }
 
   handleInput(ui: UI): void {
-    if (this.briefingOpen || this.showHelp || this.confirmWithdraw || (this.b.result && !this.queue.length)) return;
+    if (this.briefingOpen || this.showHelp || this.inspect || this.confirmWithdraw || (this.b.result && !this.queue.length)) return;
     const b = this.b;
     const m = b.map;
     // Camera
@@ -698,6 +702,13 @@ export class CombatScreen implements Screen {
       this.flashMsg = { text: `Elevation: ${ELEV_MODES[this.elevMode]} — ${ELEV_HELP[ELEV_MODES[this.elevMode]]}`, until: this.time + 4, color: C.cyan };
     }
     if (ui.key('?') || ui.key('F1') || ui.key('h')) this.showHelp = true;
+    if (ui.key('i')) {
+      // Inspect what's under the mouse, else the target, else the selected unit
+      const ht = this.mouseTile();
+      const hu = ht >= 0 ? b.unitAt(ht % m.w, (ht / m.w) | 0) : undefined;
+      const pick = [hu, this.target, this.sel, b.active].find((x) => x && x.alive && (SIDE(x.team) === 0 || b.seen[0].has(x.id)));
+      if (pick) this.inspect = pick;
+    }
     if (ui.key('+') || ui.key('=')) this.speed = Math.min(4, this.speed * 2);
     if (ui.key('-')) this.speed = Math.max(0.5, this.speed / 2);
     this.hoverTile = this.mouseTile();
@@ -1429,7 +1440,7 @@ export class CombatScreen implements Screen {
         return `${this.autoPicked ? `Auto-target {#f2f6f8}${tag}{/}: click it or` : `Click ${tag} again or`} [F] to FIRE ${fs.n} weapon${fs.n === 1 ? '' : 's'}${this.multi.size ? ` at ${new Set(this.multi.values()).size + 1} targets` : ''} (~${Math.round(fs.ev)} dmg, +${fs.heat} heat).`;
       })() :
       u.moved || u.attacked ? (b.canAttack(u) ? 'Click a target and [F]ire, or [E] to end.' : '[E] to choose facing and end.') :
-      'Move, attack or brace. [Tab] next unit. [?] help.';
+      'Move, attack or brace. [Tab] next unit. [I] inspect. [?] help.';
     if (this.flashMsg && this.time < this.flashMsg.until) ui.d.text(x, y + 2, this.flashMsg.text, this.flashMsg.color ?? C.red, undefined, 62);
     else ui.d.ctext(x, y + 2, `{#6d7f8a}${hint}{/}`, C.dim, undefined, 62);
   }
@@ -1914,12 +1925,48 @@ export class CombatScreen implements Screen {
       '{#f0a830}HEAT{/}  Weapons and jumping generate heat. Over 75%: overheating damage.',
       '  At 100% your \'Mech shuts down and is easy to hit. Water helps cooling.',
       '{#f0a830}INITIATIVE{/}  Lights act in phase 4, mediums 3, heavies 2, assaults 1.',
-      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation views · [Tab] next unit · [+/-] speed',
+      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation · [I] inspect · [Tab] next unit · [+/-] speed',
     ];
     const w = 94, h = lines.length + 5, x = MX + VW - w / 2, y = MY + 4;
     ui.panel(x, y, w, h, 'FIELD MANUAL', { fg: C.borderHi, bg: '#0a1016', style: 'double' });
     lines.forEach((l, i) => d.ctext(x + 2, y + 2 + i, l, C.text));
     if (ui.button(x + w / 2 - 5, y + h - 2, 'Close', { key: 'Escape' }) || ui.anyKey() || ui.inp.clicked) this.showHelp = false;
+  }
+
+  /** Full-size portrait of a unit with per-location damage, opened with [I]. */
+  drawInspect(ui: UI): void {
+    const d = ui.d, u = this.inspect!, b = this.b;
+    const art = portraitOf(u.frame);
+    const aw = art ? Math.max(...art.rows.map((r) => r.length)) : 30, ah = art ? art.rows.length : 6;
+    const w = Math.max(76, aw + 46), h = Math.max(ah, 16) + 7;
+    const x = MX + VW - (w >> 1), y = MY + Math.max(1, (VH - h) >> 1);
+    const side = SIDE(u.team);
+    ui.panel(x, y, w, h, '', { fg: side === 0 ? '#3a9ac0' : '#c04a3a', bg: '#070a0e', style: 'double' });
+    const who = u.team === 0 && u.pilot ? `${u.pilot.callsign.toUpperCase()} · ` : '';
+    d.text(x + 2, y + 1, `${this.glyphOf(u)}`, side === 0 ? (u.pilot?.color ?? C.player) : C.enemy, undefined, 99, true);
+    if (u.team === 0 && u.pilot) d.text(x + 5, y + 1, u.pilot.sigil, u.pilot.color);
+    d.text(x + 7, y + 1, `${who}${frameTitle(u.frame)}`, C.bright, undefined, w - 10, true);
+    d.text(x + w - 2 - classTag(u.frame).length, y + 1, classTag(u.frame), C.dim);
+    let hov: string | null = null;
+    if (art) drawPortrait(d, art, x + 2, y + 3, { frame: u.frame, ui, onHover: (l) => { hov = l; } });
+    else d.text(x + 2, y + 4, 'No portrait for vehicles and emplacements.', C.faint);
+    // Per-location readout
+    const rx = x + aw + 5;
+    d.text(rx, y + 3, 'LOCATION        ARMOR   STRUCT', C.faint);
+    const locs = u.frame.kind === 'mech' ? ['HD', 'CT', 'LT', 'RT', 'LA', 'RA', 'LL', 'RL'] : Object.keys(u.frame.maxStruct);
+    locs.forEach((l, i) => {
+      const f = u.frame, st = f.struct[l] ?? 0;
+      const a = (f.armor[l] ?? 0) + (f.armor[l + 'R'] ?? 0), ma = (f.maxArmor[l] ?? 0) + (f.maxArmor[l + 'R'] ?? 0);
+      const col = st <= 0 ? '#6a3030' : hov === l ? C.bright : C.text;
+      d.text(rx, y + 4 + i, locName(l).padEnd(15), col);
+      d.text(rx + 16, y + 4 + i, st <= 0 ? 'DESTROYED' : `${a}/${ma}`.padStart(7), st <= 0 ? '#a04030' : healthColor(a / Math.max(1, ma)));
+      if (st > 0) d.text(rx + 25, y + 4 + i, `${st}/${f.maxStruct[l]}`.padStart(7), healthColor(st / Math.max(1, f.maxStruct[l])));
+    });
+    const ws = b.weaponsOf(u).map((wc) => item(wc.id).short);
+    wrap(`Weapons: ${ws.join(' ') || 'none'}`, w - aw - 8).slice(0, 3).forEach((l, i) => d.text(rx, y + 5 + locs.length + i, l, C.dim));
+    if (hov) ui.setTip(locTip(u.frame, hov));
+    d.text(x + 2, y + h - 2, '[I] / [Esc] / click to close', C.faint);
+    if (ui.key('i') || ui.key('Escape') || ui.inp.clicked) this.inspect = null;
   }
 
   drawWithdraw(ui: UI): void {

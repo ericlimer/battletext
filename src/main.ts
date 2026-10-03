@@ -4,6 +4,7 @@ import { UI } from './engine/ui';
 import { App, setApp } from './screens/app';
 import { TitleScreen } from './screens/title';
 import { quickSkirmish } from './screens/skirmish';
+import { ArtSheetScreen } from './screens/portrait';
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById('screen') as HTMLCanvasElement;
@@ -22,7 +23,8 @@ async function boot(): Promise<void> {
   (window as any).__app = app;
   window.addEventListener('resize', () => d.resize());
   const params = new URLSearchParams(location.search);
-  if (params.has('skirmish')) quickSkirmish(params.get('skirmish') || 'battle', +(params.get('seed') ?? 1));
+  if (params.has('artsheet')) { const sh = new ArtSheetScreen(); sh.page = +(params.get('page') ?? 0); app.push(sh); }
+  else if (params.has('skirmish')) quickSkirmish(params.get('skirmish') || 'battle', +(params.get('seed') ?? 1));
   else app.push(new TitleScreen());
   let last = performance.now();
   const loop = (t: number) => {
