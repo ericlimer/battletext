@@ -183,7 +183,7 @@ export class Battle {
   enemiesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) !== SIDE(u.team)); }
   alliesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) === SIDE(u.team) && o !== u); }
   isMech(u: Unit): boolean { return u.frame.kind === 'mech'; }
-  displayName(u: Unit): string { return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : u.mapTag ? `${u.mapTag} ${frameShort(u.frame)}` : frameShort(u.frame); }
+  displayName(u: Unit): string { if (SIDE(u.team) === 1 && u.alive && u.deployed && !this.seen[0].has(u.id)) return 'Unknown contact'; return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : u.mapTag ? `${u.mapTag} ${frameShort(u.frame)}` : frameShort(u.frame); }
   fullName(u: Unit): string { return frameName(u.frame); }
 
   emit(e: BEvent): void { this.events.push(e); }
@@ -583,14 +583,14 @@ export class Battle {
     if (eh > th) mods.push(['Height advantage', 10]);
     else if (eh < th) mods.push(['Target elevated', -5]);
     if (t) {
-      const pips = Math.max(0, t.pips - (t.sensorLocked > 0 ? 2 : 0));
+      // Sensor lock strips its pips once, when applied
+      const pips = t.pips;
       if (pips > 0) mods.push([`Evasion ${'◆'.repeat(pips)}`, -8 * pips]);
       if (t.shutdown) mods.push(['Target shut down', 40]);
       else if (t.prone) mods.push(['Target prone', 20]);
       if (t.frame.kind === 'turret') mods.push(['Stationary target', 10]);
     } else if (struct) mods.push(['Structure', 30]);
     if (m.night && !hasQuirk(pil, 'nightowl')) mods.push(['Night', -5]);
-    if (called) mods.push(['Precision Strike', 0]);
     let c = 0;
     for (const [, v] of mods) c += v;
     res.chance = Math.max(5, Math.min(95, c));
@@ -604,8 +604,8 @@ export class Battle {
     mods.push([`Piloting ${pil}`, 60 + pil * 3]);
     if (dfa) mods.push(['Death From Above', -10]);
     if (hasQuirk(a.pilot, 'brawler') || hasQuirk(a.pilot, 'reckless')) mods.push([hasQuirk(a.pilot, 'brawler') ? 'Brawler' : 'Reckless', 5]);
-    const pips = Math.max(0, t.pips - (t.sensorLocked > 0 ? 2 : 0));
-    if (pips > 0) mods.push([`Evasion ${'◆'.repeat(pips)}`, -5 * pips]);
+    const pips = t.pips;
+    if (pips > 0) mods.push([`Evasion ${'◆'.repeat(pips)} (-5 each in melee)`, -5 * pips]);
     if (t.shutdown) mods.push(['Target shut down', 40]);
     else if (t.prone) mods.push(['Target prone', 20]);
     if (t.frame.kind !== 'mech') mods.push(['Vehicle target', 15]);
@@ -865,7 +865,7 @@ export class Battle {
     this.float(t.x, t.y, `CRIT: ${d.short}`, '#f0d050');
     t.stats = frameStats(f);
     if (d.kind === 'ammo' && (c.ammo ?? 0) > 0 && (d.explode ?? 0) > 0) {
-      const boom = Math.min(400, Math.round((c.ammo ?? 0) * (d.explode ?? 0) * 0.6));
+      const boom = Math.min(180, Math.round((c.ammo ?? 0) * (d.explode ?? 0) * 0.35));
       c.ammo = 0;
       this.say(`AMMO EXPLOSION in ${this.displayName(t)}'s ${LOC_NAMES[sl]}! ${boom} damage.`, '#ff6a2a');
       this.float(t.x, t.y, 'AMMO EXPLOSION', '#ff6a2a', true);

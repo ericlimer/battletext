@@ -182,7 +182,8 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
   switch (t) {
     case 'battle': {
       playerUnits = place(b, spec.player, 0, pStart[0], pStart[1], 2);
-      enemyUnits = place(b, enemyLance(4), 1, eStart[0], eStart[1], 6);
+      // Meeting engagement: the lances start close enough to make contact by round 2
+      enemyUnits = place(b, enemyLance(4), 1, W - 20, eStart[1], 6);
       if (d >= 6 && !spec.enemies) {
         const reinf = generateForce(r, d - 1, spec.target, 2);
         const ru = place(b, reinf, 1, W - 4, r.chance(0.5) ? 5 : H - 6, 6, { deployRound: 3, deployed: false });

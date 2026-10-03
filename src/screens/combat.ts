@@ -494,16 +494,46 @@ export class CombatScreen implements Screen {
     });
   }
 
-  fire(u: Unit): void {
-    if (!this.b.canAttack(u)) return;
+  /** Every weapon that would fire right now, grouped by target (primary first, then multi-target picks). */
+  firePlan(u: Unit): Assignment[] {
     const plan: Assignment[] = [];
     if (this.target || this.tStruct) plan.push({ target: this.target, struct: this.tStruct, weapons: this.selectedWeapons(u, this.target, this.tStruct) });
-    // Multi-target extra assignments
     const groups = new Map<Unit, Component[]>();
     for (const [w, t] of this.multi) { if (!groups.has(t)) groups.set(t, []); groups.get(t)!.push(w); }
     for (const [t, ws] of groups) plan.push({ target: t, weapons: ws.filter((w) => this.b.hitChance(u, t, item(w.id)).ok && this.b.hasAmmo(u, w)) });
+    return plan;
+  }
+
+  /** Weapon count, expected damage and heat for the whole volley. */
+  fireSummary(u: Unit): { n: number; ev: number; heat: number } {
+    const from = this.plan ?? u;
+    let n = 0, ev = 0, heat = 0;
+    for (const p of this.firePlan(u)) {
+      n += p.weapons.length;
+      for (const wc of p.weapons) heat += item(wc.id).heat ?? 0;
+      if (p.target) ev += this.b.expectedDamage(u, p.target, from, p.weapons);
+      else if (p.struct) for (const wc of p.weapons) { const w = item(wc.id); const hc = this.b.hitChance(u, null, w, from, undefined, false, p.struct); if (hc.ok) ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1); }
+    }
+    return { n, ev, heat };
+  }
+
+  /** Why nothing can fire at the current target, for the hint line. */
+  noFireReason(u: Unit): string {
+    const ws = this.b.weaponsOf(u);
+    if (!ws.length) return 'No working weapons.';
+    if (ws.every((w) => this.weaponsOff.has(w))) return 'All weapons are toggled off.';
+    const hc = ws.map((w) => this.b.hitChance(u, this.target, item(w.id), this.plan ?? u, undefined, false, this.tStruct ?? undefined));
+    const maxR = Math.max(...ws.map((w) => item(w.id).lr ?? 0));
+    const d = hc[0]?.range ?? 0;
+    if (d > maxR) return `Out of range: ${d.toFixed(1)} tiles, longest weapon reaches ${maxR}.`;
+    return hc.find((h) => !h.ok)?.reason ?? 'No weapon can fire.';
+  }
+
+  fire(u: Unit): void {
+    if (!this.b.canAttack(u)) return;
+    const plan = this.firePlan(u);
     const total = plan.reduce((a, p) => a + p.weapons.length, 0);
-    if (!total) return;
+    if (!total) { if (this.target || this.tStruct) this.flashMsg = { text: this.noFireReason(u), until: this.time + 3 }; return; }
     if (this.b.isMech(u) && this.b.projectedHeat(u, plan.flatMap((p) => p.weapons)) >= u.stats.heatCap && !this.heatConfirm) {
       this.heatConfirm = true;
       this.b.say('WARNING: this attack will SHUT DOWN your \'Mech. Fire again to confirm.', '#ff6a2a');
@@ -648,10 +678,12 @@ export class CombatScreen implements Screen {
     if (ui.key('x') && b.isMech(u)) this.actEject(u);
     if (ui.key('p')) this.togglePrecision(u);
     if (ui.key('l') && has(u.pilot ?? undefined, 'sensorlock') && b.canAttack(u)) this.mode = this.mode === 'lock' ? 'move' : 'lock';
-    if (ui.key('e') || ui.key(' ')) {
+    // Space only confirms (a previewed move or a facing); ending the turn takes a deliberate [E]
+    const kE = ui.key('e'), kSpace = ui.key(' ');
+    if (kE || kSpace) {
       if (this.mode === 'facing') this.confirmFacing(u);
       else if (this.pending) this.doMove(u, this.pending.tile, this.pending.mode);
-      else { this.mode = 'facing'; this.facingDir = u.facing; }
+      else if (kE) { this.mode = 'facing'; this.facingDir = u.facing; }
     }
     if (this.pending && ui.key('Enter')) this.doMove(u, this.pending.tile, this.pending.mode);
 
@@ -1148,7 +1180,7 @@ export class CombatScreen implements Screen {
     d.fill(0, 0, COLS, 1, ' ', C.text, '#0c1218');
     const mi = MISSION_INFO[this.rt.spec.type];
     let x = 1;
-    x += d.text(x, 0, `${mi.glyph} ${this.title || mi.name.toUpperCase()}`, C.accent, undefined, 36, true) + 2;
+    x += d.text(x, 0, `${mi.glyph} ${this.title || mi.name.toUpperCase()}`, C.accent, undefined, 40, true) + 2;
     x += d.text(x, 0, `ROUND ${b.round}`, C.bright, undefined, 99, true) + 2;
     for (let p = 5; p >= 1; p--) {
       const cur = p === b.phase;
@@ -1202,7 +1234,9 @@ export class CombatScreen implements Screen {
     for (const l of this.logLines) wrap(l.text, lw - 2).forEach((w, k) => { if (k) for (const v of wrap(w, lw - 4)) lines.push({ text: '  ' + v, color: l.color }); else lines.push({ text: w, color: l.color }); });
     const vis = lh;
     if (this.logScroll.scroll > lines.length - vis) this.logScroll.scroll = Math.max(0, lines.length - vis);
-    const whl = ui.wheel(0, ly, lw, lh);
+    let whl = ui.wheel(0, ly, lw, lh);
+    if (ui.key('PageUp')) whl -= vis - 1;
+    if (ui.key('PageDown')) whl += vis - 1;
     if (whl) this.logScroll.scroll = Math.max(0, Math.min(lines.length - vis, this.logScroll.scroll + whl));
     for (let k = 0; k < vis; k++) {
       const l = lines[this.logScroll.scroll + k];
@@ -1210,6 +1244,7 @@ export class CombatScreen implements Screen {
       const age = lines.length - (this.logScroll.scroll + k);
       d.ctext(1, ly + k, l.text, age <= 3 ? l.color ?? C.text : scale(l.color ?? C.text, 0.7), C.panel, lw - 2);
     }
+    if (this.logScroll.scroll < lines.length - vis) d.text(lw - 14, ROWS - 1, '▼ more · PgDn', C.accent, C.panel);
     // Objectives
     const ox = lw + 1;
     d.vline(ox - 1, ly - 1, lh + 1, C.border);
@@ -1259,12 +1294,16 @@ export class CombatScreen implements Screen {
       if (this.mode === 'facing') this.confirmFacing(u); else { this.mode = 'facing'; this.facingDir = u.facing; }
     });
     // Mode hint line
-    const hint = this.mode === 'facing' ? 'Point to choose facing. Click or [E] to confirm.' :
-      this.mode === 'called' ? 'PRECISION: click a location on the target doll, [F]ire.' :
+    const hint = this.mode === 'facing' ? 'Point to choose facing. Click or [E] to confirm, [Esc] to go back.' :
+      this.mode === 'called' ? (this.calledLoc ? `PRECISION: aiming at the ${locName(this.calledLoc)}. [F]ire, or click another location.` : 'PRECISION: click a location on the target doll, then [F]ire.') :
       this.mode === 'melee' || this.mode === 'dfa' ? (this.meleeTarget ? 'Click a highlighted tile, or the target again.' : 'Click an adjacent-reachable enemy.') :
       this.mode === 'lock' ? 'Click a detected enemy to Sensor Lock.' :
-      this.pending ? `Click again/[Space] to move. Evasion: ${pipStr(this.b.pipsFor(u, this.pending.mode, this.pendingSteps(u)), this.b.maxPips(u))}${this.pending.mode === 'jump' ? ` · {#ff8a4a}+${this.pendingSteps(u) * 3} heat → ${Math.round(u.heat + this.pendingSteps(u) * 3)}/${u.stats.heatCap}{/}` : ''}` :
-      this.target && b.canAttack(u) && !this.autoPicked ? `Click ${this.glyphOf(this.target)} again or [F] to FIRE ${this.selectedWeapons(u, this.target).length} weapon${this.selectedWeapons(u, this.target).length === 1 ? '' : 's'} (~${Math.round(this.b.expectedDamage(u, this.target, u, this.selectedWeapons(u, this.target)))} dmg).` :
+      this.pending ? `[Space]/click again to move · ${pipStr(this.b.pipsFor(u, this.pending.mode, this.pendingSteps(u)), this.b.maxPips(u))}${this.pending.mode === 'jump' ? ` · {#ff8a4a}+${this.pendingSteps(u) * 3} heat → ${Math.round(u.heat + this.pendingSteps(u) * 3)}/${u.stats.heatCap}{/}` : ''}` :
+      (this.target || this.tStruct) && b.canAttack(u) ? (() => {
+        const fs = this.fireSummary(u), tag = this.target ? this.glyphOf(this.target) : 'it';
+        if (!fs.n) return `{#e8503a}${this.noFireReason(u)}{/}`;
+        return `${this.autoPicked ? `Auto-target {#f2f6f8}${tag}{/}: click it or` : `Click ${tag} again or`} [F] to FIRE ${fs.n} weapon${fs.n === 1 ? '' : 's'} (~${Math.round(fs.ev)} dmg, +${fs.heat} heat).`;
+      })() :
       u.moved || u.attacked ? (b.canAttack(u) ? 'Click a target and [F]ire, or [E] to end.' : '[E] to choose facing and end.') :
       'Move, attack or brace. [Tab] next unit. [?] help.';
     if (this.flashMsg && this.time < this.flashMsg.until) ui.d.text(x, y + 2, this.flashMsg.text, C.red, undefined, 62);
@@ -1409,7 +1448,7 @@ export class CombatScreen implements Screen {
     const sx = x + 32;
     const s = u.stats;
     if (b.isMech(u)) {
-      const wOn = this.sel === u ? this.selectedWeapons(u, this.target, this.tStruct) : [];
+      const wOn = this.sel === u ? this.firePlan(u).flatMap((p) => p.weapons) : [];
       const proj = b.projectedHeat(u, wOn) + (this.pending?.mode === 'jump' ? this.pendingSteps(u) * 3 : 0);
       d.text(sx, y, 'HEAT', '#ff8a4a');
       d.text(sx + 10, y, `${Math.round(u.heat)}/${s.heatCap}`, C.text);
@@ -1504,9 +1543,11 @@ export class CombatScreen implements Screen {
       let red = 1;
       if (t) { const cov = TERRAIN[b.map.terr[t.y * b.map.w + t.x]].cover; const breach = has(u.pilot ?? undefined, 'breaching') && sel.length === 1; if (!breach) red = (1 - cov) * (t.guarded && attackArc(t, from.x, from.y) !== 'rear' ? 0.6 : 1); }
       for (const wc of sel) { const w = item(wc.id); const hc = b.hitChance(u, t, w, from, undefined, false, s ?? undefined); if (!hc.ok) continue; ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1) * red; heat += w.heat ?? 0; }
-      d.ctext(x + 1, y, `Selected: {#f2f6f8}${sel.length}{/} · expected {#f0d050}${Math.round(ev)}{/} dmg${red < 1 ? ` {#6ad46a}(-${Math.round((1 - red) * 100)}% cover/guard){/}` : ''} · {#ff8a4a}+${heat}{/} heat`, C.dim, undefined, PW - 2);
+      if (this.multi.size) { const fs = this.fireSummary(u); ev = fs.ev; heat = fs.heat; }
+      const nSel = this.multi.size ? this.fireSummary(u).n : sel.length;
+      d.ctext(x + 1, y, `Selected: {#f2f6f8}${nSel}{/} · expected {#f0d050}${Math.round(ev)}{/} dmg${red < 1 ? ` {#6ad46a}(-${Math.round((1 - red) * 100)}% cover/guard){/}` : ''} · {#ff8a4a}+${heat}{/} heat`, C.dim, undefined, PW - 2);
       y++;
-      if (b.isMech(u) && b.projectedHeat(u, sel) >= u.stats.heatCap) { d.text(x + 1, y, this.heatConfirm ? '⚠ SHUTDOWN — press F again to fire' : '⚠ THIS ATTACK WILL SHUT YOU DOWN', '#ff6a2a', undefined, PW - 2, true); y++; }
+      if (b.isMech(u) && b.projectedHeat(u, this.firePlan(u).flatMap((p) => p.weapons)) >= u.stats.heatCap) { d.text(x + 1, y, this.heatConfirm ? '⚠ SHUTDOWN — press F again to fire' : '⚠ THIS ATTACK WILL SHUT YOU DOWN', '#ff6a2a', undefined, PW - 2, true); y++; }
       if (this.plan) { d.text(x + 1, y, `(odds shown from the planned destination)`, C.faint); y++; }
     }
     return y;
@@ -1515,7 +1556,7 @@ export class CombatScreen implements Screen {
   drawTargetCard(ui: UI, a: Unit | null, t: Unit, x: number, y: number): void {
     const d = ui.d, b = this.b;
     const side = SIDE(t.team);
-    const hdr = side === 0 && t.pilot ? `${t.pilot.callsign.toUpperCase()} · ${frameTitle(t.frame)}` : `${t.tag === 'target' ? '◎ TARGET · ' : ''}${frameTitle(t.frame)}`;
+    const hdr = side === 0 && t.pilot ? `${this.glyphOf(t)} ${t.pilot.callsign.toUpperCase()} · ${frameTitle(t.frame)}` : `${this.glyphOf(t)} · ${t.tag === 'target' ? '◎ TARGET · ' : ''}${frameTitle(t.frame)}`;
     ui.header(x, y, PW, hdr, C.bg, side === 0 ? '#2a7a9a' : '#a03a2a');
     d.text(x + PW - 1 - classTag(t.frame).length, y, classTag(t.frame), C.bg, undefined, 99, true);
     y++;
@@ -1525,6 +1566,7 @@ export class CombatScreen implements Screen {
     if (t.pilot && side === 1) tags.push(skillLine(t.pilot));
     tags.push(`{#8ab4ff}${pipStr(t.pips, b.maxPips(t))}{/}`);
     if (t.guarded) tags.push('{#8ab4ff}GUARDED -40%{/}');
+    if (t.sensorLocked > 0) tags.push('{#5fd0e8}LOCKED{/}');
     const tcov = TERRAIN[b.map.terr[t.y * b.map.w + t.x]].cover;
     if (tcov) tags.push(`{#6ad46a}COVER -${Math.round(tcov * 100)}%{/}`);
     if (t.unsteady) tags.push('{#f0d050}UNSTEADY{/}');
@@ -1604,7 +1646,7 @@ export class CombatScreen implements Screen {
       const w0 = sel[0] ?? this.b.weaponsOf(a)[0];
       if (w0) {
         const hc: HitCalc = b.hitChance(a, t, item(w0.id), pf ?? a, undefined, !!this.calledLoc);
-        d.text(x + 1, y, `TO-HIT (${item(w0.id).short})`, C.faint);
+        d.text(x + 1, y, `TO-HIT (${item(w0.id).short}) · range ${hc.range.toFixed(1)} of ${item(w0.id).lr}`, C.faint);
         y++;
         if (!hc.ok) d.text(x + 1, y, hc.reason, C.red);
         else {
@@ -1654,13 +1696,15 @@ export class CombatScreen implements Screen {
       '{#f0a830}ATTACKING{/}  Click an enemy to target, click again or [F] to fire. [1]-[9] toggle weapons.',
       '  Hover a weapon for its hit breakdown. Rear shots hit weak rear armor.',
       '  [P] Precision Strike (Resolve): pick the location on the target doll.',
+      '  Multi-Target pilots: Shift-click a 2nd/3rd enemy to split weapons (→tag shown in orange).',
+      '  [L] Sensor Lock (pilot ability): strips 2 evasion pips and reveals the target; uses the attack.',
       '  [M] Melee / [D] Death From Above. Great for knocking down Unsteady targets.',
       '{#f0a830}DEFENSE{/}  [B] Brace: Guarded (-40% dmg), clears stability. Forests give cover.',
       '  [V] Vigilance (Resolve): Guarded + Entrenched. [R] Reserve: act one phase later.',
       '{#f0a830}HEAT{/}  Weapons and jumping generate heat. Over 75%: overheating damage.',
       '  At 100% your \'Mech shuts down and is easy to hit. Water helps cooling.',
       '{#f0a830}INITIATIVE{/}  Lights act in phase 4, mediums 3, heavies 2, assaults 1.',
-      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation · [Tab] next unit · [+/-] speed',
+      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation tint (bright = high) · [Tab] next unit · [+/-] speed',
     ];
     const w = 94, h = lines.length + 5, x = MX + VW - w / 2, y = MY + 4;
     ui.panel(x, y, w, h, 'FIELD MANUAL', { fg: C.borderHi, bg: '#0a1016', style: 'double' });
@@ -1689,7 +1733,7 @@ export class CombatScreen implements Screen {
     const title = win ? 'MISSION SUCCESS' : b.result === 'withdraw' ? 'WITHDRAWN' : 'MISSION FAILED';
     d.text(x + Math.floor((w - title.length) / 2), y + 2, title, win ? C.green : C.red, undefined, 99, true);
     obs.forEach((o, i) => {
-      const mark = o.status === 'done' ? '{#6ad46a}■{/}' : o.status === 'failed' ? '{#e8503a}✕{/}' : '{#6d7f8a}□{/}';
+      const mark = o.status === 'done' ? '{#6ad46a}■{/}' : o.status === 'failed' || !win ? '{#e8503a}✕{/}' : '{#6d7f8a}□{/}';
       d.ctext(x + 3, y + 4 + i, `${mark} ${o.text}`, o.primary ? C.text : C.dim, undefined, w - 6);
     });
     const yy = y + 5 + obs.length;

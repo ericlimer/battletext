@@ -96,6 +96,15 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     if (lk && b.round - lk[2] <= 5) known.push({ ...e, x: lk[0], y: lk[1] } as Unit);
   }
 
+  // ---- A lone surviving vehicle breaks off rather than be hunted down ---------------------
+  if (side === 1 && u.frame.kind === 'vehicle' && !u.tag && !(u as any)._fleeing && enemies.length >= 2 && b.alliesOf(u).length === 0
+    && !b.units.some((v) => v !== u && SIDE(v.team) === side && v.alive && !v.deployed)) {
+    (u as any)._fleeing = true;
+    const edges: [number, number][] = [[0, u.y], [m.w - 1, u.y], [u.x, 0], [u.x, m.h - 1]];
+    u.ai.goal = edges.sort((p, q) => dist(u.x, u.y, p[0], p[1]) - dist(u.x, u.y, q[0], q[1]))[0];
+    b.say(`${b.displayName(u)} breaks off and runs for the map edge!`, '#f0a830');
+  }
+
   // ---- Convoys drive for the exit -----------------------------------------------------
   if ((u.tag === 'convoy' || (u as any)._fleeing) && u.ai.goal) {
     // Escorted convoys wait for their escort to catch up; hunted convoys run when they see trouble
@@ -104,7 +113,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     const hostileClose = enemies.some((e) => e.alive && e.deployed && b.seen[side].has(e.id) && dist(e.x, e.y, u.x, u.y) <= 8);
     if (friendlyConvoy && (!escortNear || hostileClose)) { b.finishActivation(u); return; }
     const threatened = visible.some((e) => dist(e.x, e.y, u.x, u.y) <= 10);
-    moveToward(b, u, u.ai.goal[0], u.ai.goal[1], u.tag === 'convoy' && !friendlyConvoy && threatened && unitHealth(u) < 0.5 ? 'sprint' : 'walk');
+    moveToward(b, u, u.ai.goal[0], u.ai.goal[1], (u.tag === 'convoy' && !friendlyConvoy && threatened && unitHealth(u) < 0.5) || ((u as any)._fleeing && !u.tag) ? 'sprint' : 'walk');
     const [gx, gy] = u.ai.goal;
     if (dist(u.x, u.y, gx, gy) <= 2.5) {
       u.fled = true;
@@ -274,8 +283,9 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     // No shot: sensor lock, vigilance or brace; face the nearest threat
     const lockT = visNow.find((t) => t.pips >= 3);
     if (u.pilot?.abilities.includes('sensorlock') && lockT) b.sensorLock(u, lockT);
-    else if (hp < 0.55 && b.resolve[side] >= b.resolveCost() && known.length && u.frame.kind === 'mech') b.vigilance(u);
-    else if (u.frame.kind === 'mech' && (hp < 0.8 || u.stab > u.stats.stabMax * 0.3)) b.brace(u);
+    // Only dig in when someone close could actually shoot back
+    else if (hp < 0.55 && b.resolve[side] >= b.resolveCost() && threatAt(b, u, u.x, u.y, u.pips, known) > 20 && u.frame.kind === 'mech') b.vigilance(u);
+    else if (u.frame.kind === 'mech' && (u.stab > u.stats.stabMax * 0.3 || (hp < 0.8 && threatAt(b, u, u.x, u.y, u.pips, known) > 10))) b.brace(u);
     const near = known.reduce((a, t) => (dist(u.x, u.y, t.x, t.y) < dist(u.x, u.y, a.x, a.y) ? t : a), known[0]);
     if (near && u.frame.kind === 'mech') b.setFacing(u, dirTo(u.x, u.y, near.x, near.y));
   }
