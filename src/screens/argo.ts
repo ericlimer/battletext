@@ -389,13 +389,16 @@ export class ArgoScreen implements Screen {
         else if (inst) d.text(bx + bw - 16, by + 1, `INSTALLING ${Math.max(0, inst.doneDay - c.day)}d`, C.warn);
         wrap(u.desc, bw - 4).slice(0, 2).forEach((l, k) => d.text(bx + 2, by + 2 + k, l, C.dim));
         const days = Math.max(3, Math.round(u.cost / 180000));
+        // Refit crews work one module at a time: a new purchase queues behind the last
+        const queueEnd = Math.max(c.day, ...(c.installing ?? []).map((q) => q.doneDay));
+        const total = queueEnd - c.day + days;
         if (locked) d.ctext(bx + 2, by + 4, `{#e8503a}requires ${UPGRADES.find((q) => q.id === u.requires)!.name}{/}`, C.dim, undefined, bw - 4);
         else d.ctext(bx + 2, by + 4, `{#f0c850}${cbk(u.cost)}{/} · ${cbk(u.upkeep)}/mo${!owned && !inst ? ` · ${days}d` : ''}`, C.dim, undefined, bw - 15);
-        if (!owned && !locked && !inst && ui.button(bx + bw - 12, by + 4, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { w: 10, disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : `Click twice to purchase. Upkeep ${cb(u.upkeep)}/month; ${days} days to install.` })) {
+        if (!owned && !locked && !inst && ui.button(bx + bw - 12, by + 4, this.confirmBuy === u.id ? 'CONFIRM?' : 'Purchase', { w: 10, disabled: c.funds < u.cost || !!c.travel, fg: this.confirmBuy === u.id ? C.accent : undefined, tip: c.travel ? 'Must be docked to refit.' : c.funds < u.cost ? 'Not enough funds.' : `Click twice to purchase. Upkeep ${cb(u.upkeep)}/month; ${days} days to install${total > days ? ` after the current refit (ready in ${total} days)` : ''}.` })) {
           if (this.confirmBuy !== u.id) this.confirmBuy = u.id;
           else {
-            c.funds -= u.cost; c.stats.spent += u.cost; (c.installing ??= []).push({ id: u.id, doneDay: c.day + days });
-            saveGame(c); this.notify(`${u.name}: refit crews need ${days} days`, C.cyan); this.confirmBuy = '';
+            c.funds -= u.cost; c.stats.spent += u.cost; (c.installing ??= []).push({ id: u.id, doneDay: c.day + total });
+            saveGame(c); this.notify(total > days ? `${u.name}: queued behind the current refit, ready in ${total} days` : `${u.name}: refit crews need ${days} days`, C.cyan); this.confirmBuy = '';
           }
         }
       });

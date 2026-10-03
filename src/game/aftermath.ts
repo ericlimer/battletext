@@ -23,6 +23,8 @@ export interface MissionResult {
   xp: [Pilot, number][];
   casualties: string[];
   mechsLost: string[];
+  /** 'Mechs written off this mission, with why the wreck was not recovered. */
+  writtenOff?: [string, string][];
   pool: SalvageEntry[];
   salvageShares: number;
   priority: number;
@@ -133,6 +135,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
         const back = wiped ? 0 : 1;
         if (back) c.parts[m.defId] = (c.parts[m.defId] ?? 0) + back;
         res.mechsLost.push(`${frameName(m)} was destroyed and could not be recovered${back ? ' — your techs salvaged 1 part' : ''}.`);
+        (res.writtenOff ??= []).push([frameName(m), wiped ? 'lance wiped out — no recovery team reached the wreck' : win ? 'wreck too badly burned to haul out (15% chance)' : `field abandoned before the wreck could be hauled out${back ? '; 1 part salvaged' : ''}`]);
       }
     }
   }

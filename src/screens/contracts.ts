@@ -347,6 +347,12 @@ export class AftermathScreen implements Screen {
       if (wo) d.text(110, y, `Repair ~${workQueueDays(c, m.uid)}d · ${cb(e.cost)}`, C.dim);
       y++;
     }
+    for (const [n, why] of r.writtenOff ?? []) {
+      d.text(4, y, n.padEnd(24).slice(0, 24), C.faint);
+      d.text(30, y, 'WRITTEN OFF', C.red);
+      d.text(52, y, why, C.dim, undefined, COLS - 58);
+      y++;
+    }
     const next = r.pool.length ? 'SALVAGE' : 'CONTINUE';
     d.ctext(3, ROWS - 3, `Deployment took {#f2f6f8}${r.days}{/} days; they pass as you return to the Argo.`, C.faint);
     if (ui.button(COLS - 22, ROWS - 3, next, { key: 'Enter', style: 'block', w: 18, center: true })) {
