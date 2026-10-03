@@ -167,8 +167,40 @@ const BIO_C = ['Quiet, methodical, and deeply superstitious about their cockpit.
   'Believes, sincerely, that the Star League will return.', 'Sings off-key during combat drops.', 'Once walked a legged Centurion forty kilometers home.',
   'Keeps the company\'s morale up with an endless supply of bad jokes.', 'Speaks rarely; when they do, people listen.',
   'Survived an ejection at 400 meters and has not stopped talking about it.', 'Is convinced the dropship\'s coffee is poisoned.'];
-const SIGILS = ['☼', '♠', '♣', '♦', '♥', '§', '¤', 'Ω', 'Δ', 'Ψ', 'Σ', '†', '‡', '¥', '∞', '≡', 'Φ', 'Θ', 'λ', 'µ'];
-const COLORS = ['#5fc8f0', '#f0a830', '#8ae878', '#e878b0', '#b27ae8', '#f0d050', '#6ab8e8', '#e86a5a', '#78e8d0', '#d8a878'];
+// Pilot icons: a symbol + colour pair unique within the company. Symbols avoid glyphs the battle map uses.
+export const SIGILS = ['☼', '♦', '♥', '§', 'Ω', 'Δ', 'Ψ', 'Σ', '†', '‡', '¥', 'Φ', 'Θ', 'λ', 'µ', '☾', '✦', '♪', '¶', 'Ж'];
+export const COLORS = ['#ff6a5a', '#f0a830', '#f0e050', '#8ae878', '#4ad8c8', '#5fa8ff', '#b27ae8', '#ff7ad0', '#e8e8e8', '#c89a68'];
+
+/** Gives p an icon nobody in `others` has, preferring a symbol and a colour that are both unused. */
+export function assignIcon(p: Pilot, others: Pilot[], rnd: () => number = Math.random): void {
+  const live = others.filter((o) => o !== p && !o.dead);
+  const usedS = new Set(live.map((o) => o.sigil)), usedC = new Set(live.map((o) => o.color));
+  const usedPair = new Set(live.map((o) => o.sigil + o.color));
+  const shuffled = <T,>(a: T[]) => a.map((v) => [rnd(), v] as const).sort((x, y) => x[0] - y[0]).map((x) => x[1]);
+  let best: [string, string] | null = null, bestScore = -1;
+  for (const sg of shuffled(SIGILS)) for (const col of shuffled(COLORS)) {
+    if (usedPair.has(sg + col)) continue;
+    const sc = (usedS.has(sg) ? 0 : 2) + (usedC.has(col) ? 0 : 1);
+    if (sc > bestScore) { bestScore = sc; best = [sg, col]; if (sc === 3) break; }
+    if (bestScore === 3) break;
+  }
+  if (best) { p.sigil = best[0]; p.color = best[1]; }
+}
+
+/** Repairs duplicate or legacy icons (the commander keeps the gold star). */
+export function ensureIcons(pilots: Pilot[]): void {
+  const seen = new Set<string>();
+  for (const p of pilots) {
+    if (p.dead) continue;
+    if (p.commander) { p.sigil = '★'; p.color = '#f0a830'; seen.add(p.sigil + p.color); continue; }
+    const key = p.sigil + p.color;
+    if (!SIGILS.includes(p.sigil) || !COLORS.includes(p.color) || seen.has(key)) assignIcon(p, pilots.filter((q) => q !== p && (q.commander || seen.has(q.sigil + q.color))));
+    seen.add(p.sigil + p.color);
+  }
+}
+
+/** Markup for a pilot's icon, for ctext. */
+export function iconTag(p: Pilot): string { return `{${p.color}}${p.sigil}{/}`; }
 
 let pid = 0;
 export function makePilot(r: RNG, tier: number, opts: Partial<Pilot> = {}): Pilot {

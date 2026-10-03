@@ -11,7 +11,7 @@ import { FX, lightAt } from '../combat/fx';
 import { BIOME_INFO, TERRAIN, dist, dirTo, DIRS, Structure } from '../combat/terrain';
 import { item, ItemDef } from '../data/items';
 import { Component, frameGlyph } from '../game/frame';
-import { has, health, ability } from '../game/pilot';
+import { has, health, ability, iconTag } from '../game/pilot';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
@@ -46,7 +46,7 @@ export class CombatScreen implements Screen {
   shownPos = new Map<number, [number, number]>();
   animPos = new Map<number, [number, number]>();
   ghosts = new Set<number>();
-  logLines: { text: string; color?: string }[] = [];
+  logLines: { text: string; color?: string; icon?: [string, string] }[] = [];
   flashMsg: { text: string; until: number; color?: string } | null = null;
   logScroll = { scroll: 0 };
   banner: { text: string; sub: string; t: number; color: string } | null = null;
@@ -276,7 +276,11 @@ export class CombatScreen implements Screen {
         this.wait = 0.02;
         break;
       case 'log':
-        if (!this.mergeLog(e.text)) this.logLines.push({ text: e.text, color: e.color });
+        if (!this.mergeLog(e.text)) {
+          // Lines about one of your pilots carry that pilot's icon in the margin
+          const pu = this.rt.playerUnits.find((u) => u.pilot && e.text.startsWith(u.pilot.callsign));
+          this.logLines.push({ text: e.text, color: e.color, icon: pu?.pilot ? [pu.pilot.sigil, pu.pilot.color] : undefined });
+        }
         if (this.logLines.length > 400) this.logLines.splice(0, 100);
         this.logScroll.scroll = 1e9;
         this.wait = 0;
@@ -1116,7 +1120,8 @@ export class CombatScreen implements Screen {
         d.wide(sx, sy, '?', lerp('#401010', '#e05030', pulse), '#1a0806');
         continue;
       }
-      const col = un.team === 0 ? C.player : un.team === 2 ? C.ally : C.enemy;
+      // Your 'Mechs wear their pilot's colour, so the map tag matches the pilot icon everywhere else
+      const col = un.team === 0 ? (un.pilot?.color ?? C.player) : un.team === 2 ? C.ally : C.enemy;
       let bg = un.team === 0 ? '#0e3a58' : un.team === 2 ? '#18401a' : '#5a1409';
       let fg = col;
       if (un === this.sel) { bg = lerp(bg, '#3a8ab0', 0.5 + 0.2 * Math.sin(this.time * 5)); fg = '#ffffff'; }
@@ -1295,8 +1300,9 @@ export class CombatScreen implements Screen {
       d.text(x, 0, ` ${p} `, cur ? C.bg : C.dim, bg, 99, true);
       x += 3;
       for (const u of us) {
-        const col = u.team === 0 ? C.player : u.team === 2 ? C.ally : C.enemy;
+        const col = u.team === 0 ? (u.pilot?.color ?? C.player) : u.team === 2 ? C.ally : C.enemy;
         const g = this.glyphOf(u);
+        if (u.team === 0 && u.pilot) { d.text(x, 0, u.pilot.sigil, u.acted ? scale(col, 0.4) : col, '#0c1218'); x++; }
         d.text(x, 0, g, u.acted ? scale(col, 0.4) : col, '#0c1218', 99, true);
         x += g.length + 1;
       }
@@ -1346,8 +1352,8 @@ export class CombatScreen implements Screen {
     // Log
     const ly = y0 + 4, lh = ROWS - ly;
     const lw = 62;
-    const lines: { text: string; color?: string }[] = [];
-    for (const l of this.logLines) wrap(l.text, lw - 2).forEach((w, k) => { if (k) for (const v of wrap(w, lw - 4)) lines.push({ text: '  ' + v, color: l.color }); else lines.push({ text: w, color: l.color }); });
+    const lines: { text: string; color?: string; icon?: [string, string] }[] = [];
+    for (const l of this.logLines) wrap(l.text, lw - 4).forEach((w, k) => { if (k) for (const v of wrap(w, lw - 6)) lines.push({ text: '  ' + v, color: l.color }); else lines.push({ text: w, color: l.color, icon: l.icon }); });
     const scrolledUp = this.logScroll.scroll < lines.length - lh;
     const vis = scrolledUp ? lh - 1 : lh;
     if (this.logScroll.scroll > lines.length - vis) this.logScroll.scroll = Math.max(0, lines.length - vis);
@@ -1359,7 +1365,8 @@ export class CombatScreen implements Screen {
       const l = lines[this.logScroll.scroll + k];
       if (!l) break;
       const age = lines.length - (this.logScroll.scroll + k);
-      d.ctext(1, ly + k, l.text, age <= 3 ? l.color ?? C.text : scale(l.color ?? C.text, 0.7), C.panel, lw - 2);
+      if (l.icon) d.text(1, ly + k, l.icon[0], age <= 3 ? l.icon[1] : scale(l.icon[1], 0.7), C.panel);
+      d.ctext(3, ly + k, l.text, age <= 3 ? l.color ?? C.text : scale(l.color ?? C.text, 0.7), C.panel, lw - 4);
     }
     if (scrolledUp) d.text(1, ROWS - 1, '▼ newer entries below · PgDn / wheel', C.accent, C.panel);
     // Objectives
@@ -1563,8 +1570,9 @@ export class CombatScreen implements Screen {
       const bg = hov ? '#16222c' : C.panel;
       d.fill(x, yy, PW, 2, ' ', C.text, bg);
       const col = !u.alive ? C.faint : u.team === 0 ? C.player : C.ally;
-      d.text(x + 1, yy, this.glyphOf(u), col, bg, 99, true);
-      d.text(x + 4, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 13), u.alive ? C.bright : C.faint, bg);
+      d.text(x + 1, yy, this.glyphOf(u), u.alive && u.team === 0 && u.pilot ? u.pilot.color : col, bg, 99, true);
+      if (u.team === 0 && u.pilot) d.text(x + 4, yy, u.pilot.sigil, u.alive ? u.pilot.color : C.faint, bg);
+      d.text(x + 6, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 11), u.alive ? C.bright : C.faint, bg);
       d.text(x + 18, yy, frameTitle(f).slice(0, 18), C.dim, bg);
       const status = !u.alive ? (u.fled ? 'EXITED' : u.destroyHow === 'eject' ? 'EJECTED' : 'DESTROYED') : u.acted ? 'done' : u.shutdown ? 'SHUTDOWN' : u.phase === b.phase ? 'READY' : `ph ${u.phase}`;
       d.text(x + PW - 1 - status.length, yy, status, !u.alive ? (u.fled ? C.green : C.red) : status === 'SHUTDOWN' ? '#ff6a2a' : status === 'READY' ? C.accent : C.faint, bg);
@@ -1635,7 +1643,7 @@ export class CombatScreen implements Screen {
     y++;
     if (u.pilot) {
       const p = u.pilot;
-      d.ctext(x + 1, y, `${u.team === 0 ? p.name : 'Enemy pilot'}  ${skillLine(p)}  ${healthPips(p)}`, C.text);
+      d.ctext(x + 1, y, `${u.team === 0 ? `${iconTag(p)} ${p.name}` : 'Enemy pilot'}  ${skillLine(p)}  ${healthPips(p)}`, C.text);
       const abil = p.abilities.map((a) => ability(a).name).join(', ');
       if (abil) d.text(x + 1, y + 1, abil, C.dim, undefined, PW - 2);
       if (ui.hover(x, y, PW, 2)) ui.setTip([`{#f2f6f8}${p.name}{/} "${p.callsign}"`, `Gunnery ${p.gun} · Piloting ${p.pil} · Guts ${p.gut} · Tactics ${p.tac}`, `Health ${health(p) - p.injuries}/${health(p)}`, ...p.abilities.map((a) => `{#f0a830}${ability(a).name}{/}: ${ability(a).desc}`)]);

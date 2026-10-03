@@ -231,7 +231,7 @@ export class ArgoScreen implements Screen {
     }
     if (!c.work.length) d.text(x + 3, yy++, 'No work orders pending.', C.faint);
     yy++;
-    for (const p of c.pilots.filter((q) => q.injuries > 0 && !q.dead).slice(0, 5)) d.ctext(x + 3, yy++, `{#f08a30}✚{/} ${p.callsign} recovering: ${p.healDays} day${p.healDays === 1 ? "" : "s"}`, C.text);
+    for (const p of c.pilots.filter((q) => q.injuries > 0 && !q.dead).slice(0, 5)) d.ctext(x + 3, yy++, `{#f08a30}✚{/} {${p.color}}${p.sigil}{/} ${p.callsign} recovering: ${p.healDays} day${p.healDays === 1 ? "" : "s"}`, C.text);
     yy++;
     d.text(x + 3, yy++, "'MECHS", C.accent, undefined, 99, true);
     for (const m of c.mechs) {
@@ -245,7 +245,8 @@ export class ArgoScreen implements Screen {
       d.text(x + 24, yy, `${ch.tons}t`, C.faint);
       const af = st.armorTotal / Math.max(1, st.armorMax);
       d.text(x + 29, yy, `${Math.round(af * 100)}%`.padStart(4) + ' armor', healthColor(af));
-      d.text(x + 41, yy, wo ? `${wo.kind} ${workQueueDays(c, m.uid)}d` : pl ? pl.callsign.slice(0, 14) : 'ready', wo ? C.warn : pl ? C.cyan : C.green, undefined, 16);
+      if (!wo && pl) { d.text(x + 41, yy, pl.sigil, pl.color); d.text(x + 43, yy, pl.callsign.slice(0, 12), C.cyan, undefined, 14); }
+      else d.text(x + 41, yy, wo ? `${wo.kind} ${workQueueDays(c, m.uid)}d` : 'ready', wo ? C.warn : C.green, undefined, 16);
       yy++;
     }
     // Middle: reputation
@@ -392,7 +393,8 @@ export class ArgoScreen implements Screen {
     d.ctext(x + 75, ly + 1, `Kills {#f2f6f8}${st.kills}{/}   'Mechs lost {#f2f6f8}${st.mechsLost}{/}   MechWarriors lost {#f2f6f8}${st.pilotsLost}{/}`, C.dim, undefined, w - 78);
     for (const p of c.pilots.filter((q) => !q.dead)) {
       if (yy >= cy - 3) break;
-      d.text(x + 75, yy, `${p.callsign}`, C.text);
+      d.text(x + 75, yy, p.sigil, p.color);
+      d.text(x + 77, yy, `${p.callsign}`, C.text);
       d.text(x + 110, yy, (p.commander ? 'owner' : cb(Math.round(salaryOf(p) * e.mult))).padStart(10), C.dim);
       yy++;
     }

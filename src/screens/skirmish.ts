@@ -1,3 +1,4 @@
+import { ensureIcons } from '../game/pilot';
 // Skirmish mode: build two lances under a C-Bill budget and fight on any biome/mission.
 
 import { Screen, app } from './app';
@@ -151,6 +152,7 @@ export class SkirmishScreen implements Screen {
     const type = MTYPES[this.mtype];
     const avgTons = player.reduce((a, c) => a + (c.frame.kind === 'mech' ? chassis(c.frame.defId).tons : 40), 0) / player.length;
     const diff = Math.max(1, Math.min(10, Math.round((avgTons - 22) / 7.2)));
+    ensureIcons(player.map((x) => x.pilot).filter((q): q is Pilot => !!q));
     const rt = setupMission({ type, difficulty: diff, biome: BIOMES[this.biome] as Biome, seed: r.seed(), night: this.night, employer: 'davion', target: 'liao', player, enemies: type === 'battle' || type === 'assassinate' ? enemies : undefined, basePay: 0 });
     void pilotTier;
     app.push(new CombatScreen(rt, () => { app.pop(); }, `SKIRMISH: ${MISSION_INFO[type].name.toUpperCase()}`));
@@ -164,6 +166,7 @@ export function quickSkirmish(type: string, seed: number): void {
   const r = new RNG(seed);
   const taken = new Set<string>();
   const player: Combatant[] = ['HBK-4G', 'CN9-A', 'JR7-D', 'CPLT-C1'].map((id) => { const p = makePilot(r, 2); p.callsign = uniqueCallsign(r, taken); taken.add(p.callsign); return { frame: newMechFrame(id), pilot: p }; });
+  ensureIcons(player.map((x) => x.pilot).filter((q): q is Pilot => !!q));
   const rt = setupMission({ type: type as MissionType, difficulty: 4, biome: BIOMES[seed % BIOMES.length], seed, night: new URLSearchParams(location.search).has('night'), employer: 'davion', target: 'liao', player, basePay: 400000 });
   const cs = new CombatScreen(rt, () => app.pop(), `SKIRMISH · ${MISSION_INFO[type as MissionType].name.toUpperCase()}`);
   const q = new URLSearchParams(location.search);

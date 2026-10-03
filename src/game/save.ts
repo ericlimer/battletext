@@ -1,6 +1,7 @@
 // Persistence: localStorage autosave plus JSON export/import.
 
 import { Company } from './company';
+import { ensureIcons } from './pilot';
 
 const KEY = 'battletext.career.v1';
 export let company: Company | null = null;
@@ -12,6 +13,7 @@ export function hasSave(): boolean {
 
 export function saveGame(c: Company | null = company): boolean {
   if (!c) return false;
+  ensureIcons(c.pilots);
   try { localStorage.setItem(KEY, JSON.stringify(c)); return true; } catch { return false; }
 }
 
@@ -28,6 +30,7 @@ export function loadGame(): Company | null {
     if (!valid(c)) return null;
     // Older saves could keep fallen MechWarriors assigned to the lance
     c.lancePilots = c.lancePilots.map((id: string | null) => (id && c.pilots.some((p: { id: string; dead?: boolean }) => p.id === id && !p.dead) ? id : null));
+    ensureIcons(c.pilots);
     company = c;
     return c;
   } catch { return null; }

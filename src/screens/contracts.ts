@@ -212,7 +212,8 @@ export class DropScreen implements Screen {
       if (ui.click(55, y + 1, 32, 6)) this.pick = { i, what: 'pilot' };
       d.vline(54, y + 1, 6, C.border);
       if (p) {
-        d.text(56, y + 1, `${p.callsign}`, C.bright, undefined, 30, true);
+        d.text(56, y + 1, p.sigil, p.color, undefined, 99, true);
+        d.text(58, y + 1, `${p.callsign}`, C.bright, undefined, 28, true);
         d.text(56, y + 2, p.name, C.dim, undefined, 30);
         d.ctext(56, y + 3, skillLine(p), C.text);
         d.ctext(56, y + 4, healthPips(p), C.text);
@@ -244,7 +245,8 @@ export class DropScreen implements Screen {
           const used = this.slots.some((s, si) => si !== i && s.pilot === p.id);
           const bg = hov ? '#16222c' : C.panel;
           d.fill(lx, ly, lw, 2, ' ', C.text, bg);
-          d.text(lx + 1, ly, `${p.callsign}`, ok && !used ? C.bright : C.faint, bg);
+          d.text(lx + 1, ly, p.sigil, ok && !used ? p.color : C.faint, bg);
+          d.text(lx + 3, ly, `${p.callsign}`, ok && !used ? C.bright : C.faint, bg);
           d.ctext(lx + 16, ly, skillLine(p), C.text, bg);
           d.text(lx + 1, ly + 1, !ok ? `Injured (${p.healDays} day${p.healDays === 1 ? '' : 's'})` : used ? 'Assigned' : p.name, !ok ? C.warn : C.dim, bg);
         }, 2);
@@ -325,7 +327,8 @@ export class AftermathScreen implements Screen {
     ui.panel(74, 4, COLS - 76, topH, 'MECHWARRIORS');
     y = 6;
     for (const [p, xp] of r.xp) {
-      d.text(76, y, p.callsign.padEnd(14), p.dead ? C.red : C.bright);
+      d.text(76, y, p.sigil, p.dead ? C.faint : p.color);
+      d.text(78, y, p.callsign.padEnd(12).slice(0, 12), p.dead ? C.red : C.bright);
       d.ctext(91, y, p.dead ? '{#e8503a}KILLED IN ACTION{/}' : `+${xp} XP  ${healthPips(p)}`, C.text);
       y++;
     }

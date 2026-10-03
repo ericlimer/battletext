@@ -2,7 +2,7 @@
 
 import { RNG } from '../engine/rng';
 import { Frame, newMechFrame, frameTons, repairEstimate, repairFully, frameValue, frameSellPrice, refillAmmo, frameName, isFrameDamaged } from './frame';
-import { Pilot, makePilot, salary, health, uniqueCallsign, grantAbilities } from './pilot';
+import { Pilot, makePilot, salary, health, uniqueCallsign, grantAbilities, assignIcon } from './pilot';
 import { StarSystem, generateStarMap, route } from './world';
 import { MissionType, MISSION_INFO, pilotTier } from '../combat/missions';
 import { FACTIONS, faction, repLevel } from '../data/factions';
@@ -222,6 +222,7 @@ export function newCompany(opts: { name: string; commander: string; callsign: st
     const p = makePilot(r, t);
     p.callsign = uniqueCallsign(r, taken);
     taken.add(p.callsign);
+    assignIcon(p, pilots, () => r.next());
     pilots.push(p);
   }
   // Starting lance: two mediums, two lights (HBS-style random start)
@@ -457,6 +458,7 @@ function genHires(c: Company, r: RNG, s: StarSystem): Pilot[] {
     for (let k = 0; k < 6 && firsts.has(p.name.split(' ')[0]); k++) p = makePilot(r, tier);
     p.callsign = uniqueCallsign(r, taken);
     taken.add(p.callsign);
+    assignIcon(p, [...c.pilots, ...out], () => r.next());
     p.hireCost = Math.round((salary(p) * 5 + tier * 40000) / 1000) * 1000;
     out.push(p);
   }
