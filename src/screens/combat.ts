@@ -14,6 +14,7 @@ import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
 import { portraitOf, drawPortrait, locTip } from './portrait';
 import { track, flush } from '../game/telemetry';
+import { drawAttackMock } from './attackmock';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
@@ -957,6 +958,12 @@ export class CombatScreen implements Screen {
     this.drawTopBar(ui);
     this.drawBottom(ui);
     this.drawPanel(ui);
+    // Design mockups of an attack view (?mock=A|B|C&mf=1..3)
+    const mq = new URLSearchParams(location.search);
+    if (mq.has('mock')) {
+      const a = this.rt.playerUnits.find((u) => u.alive), t = this.b.units.find((u) => SIDE(u.team) === 1 && u.frame.kind === 'mech');
+      if (a && t) drawAttackMock(ui, mq.get('mock') ?? 'A', +(mq.get('mf') ?? 2), a, t);
+    }
     // Frame lines
     d.vline(PX - 1 + 0, MY, ROWS - MY, C.border);
     void COLS;
