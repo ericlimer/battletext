@@ -18,6 +18,8 @@ export interface Unit {
   name: string;
   /** Map tag shown on the battlefield (HB, sc, τ1, ■2); set by the combat screen. */
   mapTag?: string;
+  /** Overall heading of this round's sprint; facing afterwards stays within 45° of it. */
+  runDir?: number;
   x: number;
   y: number;
   facing: number;
@@ -516,6 +518,7 @@ export class Battle {
     const steps = mode === 'jump' ? Math.round(dist(path[0][0], path[0][1], ex, ey)) : path.length - 1;
     u.x = ex; u.y = ey;
     u.facing = facing ?? dirTo(px, py, ex, ey);
+    u.runDir = mode === 'sprint' ? dirTo(path[0][0], path[0][1], ex, ey) : undefined;
     u.moved = mode;
     u.movedSteps = steps;
     u.pips = this.pipsFor(u, mode, steps);
@@ -530,9 +533,17 @@ export class Battle {
   }
 
   setFacing(u: Unit, dir: number): void {
+    dir = this.allowedFacing(u, dir);
     if (u.facing === dir) return;
     u.facing = dir;
     this.emit({ k: 'face', u: u.id, dir });
+  }
+
+  /** A sprinting 'Mech can only turn 45° either side of the way it ran. */
+  allowedFacing(u: Unit, dir: number): number {
+    if (u.moved !== 'sprint' || u.runDir === undefined) return dir;
+    const diff = ((dir - u.runDir + 12) % 8) - 4; // -4..3
+    return (u.runDir + Math.max(-1, Math.min(1, diff)) + 8) % 8;
   }
 
   // ---- To-hit ----------------------------------------------------------------------------

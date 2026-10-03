@@ -107,7 +107,12 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
       // HBS-style: a cored 'Mech wounds its pilot; death comes from a destroyed cockpit or
       // from wounds exceeding the pilot's health.
       if (u.destroyHow === 'head') died = true;
-      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') { p.injuries++; if (p.injuries > health(p) || r.chance((u.destroyHow === 'ammo' ? 0.22 : 0.09) * Math.max(0.4, 1 - p.gut * 0.06))) died = true; }
+      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') {
+        p.injuries++;
+        const risk = (u.destroyHow === 'ammo' ? 0.22 : 0.09) * Math.max(0.4, 1 - p.gut * 0.06);
+        if (p.injuries > health(p) || r.chance(risk)) died = true;
+        else res.casualties.push(`${p.callsign} survived the loss of their ${frameName(u.frame)} — the ejection system fired as the ${u.destroyHow === 'ammo' ? 'ammunition cooked off' : 'reactor shielding failed'} (${Math.round(risk * 100)}% fatal at Guts ${p.gut}).`);
+      }
       else if (u.destroyHow === 'pilot') died = r.chance(0.2);
     }
     if (died && !p.commander) {

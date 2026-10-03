@@ -393,11 +393,20 @@ export function maxSlider(c: Company, k: Contract): number {
 
 export function negotiate(k: Contract, slider: number): Negotiation {
   // slider 0..10: 0 = all cash, 10 = maximum salvage
-  const cash = Math.round((k.pay * (1 - slider * 0.065)) / 1000) * 1000;
-  const salvage = Math.round((k.salvageMax * slider) / 10);
-  const priority = salvage > 0 ? Math.max(1, Math.ceil(salvage / 3)) : 0;
-  return { slider, cash, salvage, priority };
+  return negotiateShares(k, Math.round((k.salvageMax * slider) / 10));
 }
+
+/** Terms for a given number of salvage shares: each share costs the same slice of the cash payment. */
+export function negotiateShares(k: Contract, shares: number): Negotiation {
+  const salvage = Math.max(0, Math.min(k.salvageMax, shares));
+  const frac = salvage / Math.max(1, k.salvageMax);
+  const cash = Math.round((k.pay * (1 - frac * 0.65)) / 1000) * 1000;
+  const priority = salvage > 0 ? Math.max(1, Math.ceil(salvage / 3)) : 0;
+  return { slider: frac * 10, cash, salvage, priority };
+}
+
+/** Most salvage shares the employer will grant, given standing and MRB. */
+export function maxShares(c: Company, k: Contract): number { return Math.round((k.salvageMax * maxSlider(c, k)) / 10); }
 
 // ---- Market / hiring ------------------------------------------------------------------------
 export function priceMult(c: Company, s: StarSystem): number {

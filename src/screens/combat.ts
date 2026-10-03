@@ -21,7 +21,7 @@ import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
 const MX = 0, MY = 1, VW = 50, VH = 36;
 const PX = 100, PW = 50;
 
-type Mode = 'move' | 'jump' | 'melee' | 'dfa' | 'facing' | 'called' | 'lock';
+type Mode = 'move' | 'look' | 'jump' | 'melee' | 'dfa' | 'facing' | 'called' | 'lock';
 
 interface Reach { walk: Map<number, [number, number]>; sprint: Map<number, [number, number]>; jump: Map<number, [number, number]>; }
 
@@ -803,7 +803,7 @@ export class CombatScreen implements Screen {
     if (this.mode === 'facing') {
       if (ht >= 0) {
         const hx = ht % m.w, hy = (ht / m.w) | 0;
-        if (hx !== u.x || hy !== u.y) this.facingDir = dirTo(u.x, u.y, hx, hy);
+        if (hx !== u.x || hy !== u.y) this.facingDir = b.allowedFacing(u, dirTo(u.x, u.y, hx, hy));
       }
       if (ht >= 0 && ui.click(MX, MY, VW * 2, VH)) this.confirmFacing(u);
       return;
@@ -867,7 +867,7 @@ export class CombatScreen implements Screen {
       return;
     }
     // Movement
-    if (!canMove) return;
+    if (!canMove || this.mode === 'look') return;
     const r = this.getReach(u);
     const mode: MoveMode | null = this.mode === 'jump' ? (r.jump.has(ht) ? 'jump' : null) : r.walk.has(ht) ? 'walk' : r.sprint.has(ht) ? 'sprint' : null;
     if (!mode) {
@@ -1126,8 +1126,9 @@ export class CombatScreen implements Screen {
           else if (this.mode === 'move') {
             // Water is already blue, so reach over it is drawn paler to stay visible
             const wet = m.terr[i] === 'water' || m.terr[i] === 'deep';
-            if (reach.walk.has(i)) { bg = lerp(bg, wet ? '#a8d8ff' : '#3a8ae8', wet ? 0.42 : 0.34); fg = lerp(fg, '#b0d8ff', 0.35); }
-            else if (reach.sprint.has(i)) { bg = lerp(bg, '#c0a030', wet ? 0.36 : 0.24); fg = lerp(fg, '#f0e090', 0.25); }
+            // Reachable water drops its wave glyphs and takes a solid tint, so range reads as a shape, not noise
+            if (reach.walk.has(i)) { bg = lerp(bg, wet ? '#9cc8f0' : '#3a8ae8', wet ? 0.55 : 0.34); fg = lerp(fg, '#b0d8ff', 0.35); if (wet) ch = '·'; }
+            else if (reach.sprint.has(i)) { bg = lerp(bg, '#c0a030', wet ? 0.5 : 0.24); fg = lerp(fg, '#f0e090', 0.25); if (wet) ch = '·'; }
           }
         }
         if (facingU && Math.max(Math.abs(x - facingU.x), Math.abs(y - facingU.y)) <= 6 && (x !== facingU.x || y !== facingU.y)) {
@@ -1455,7 +1456,7 @@ export class CombatScreen implements Screen {
       if (ui.button(cx, by, label, { key, active, disabled, tip })) fn();
       cx += vlen(label) + key.length + 4;
     };
-    btn('Move', 'W', this.mode === 'move', !canMove, 'Click a blue tile to walk, amber to sprint. Click again (or Space) to confirm.', () => { this.mode = 'move'; });
+    btn('Move', 'W', this.mode === 'move', !canMove, 'Click a blue tile to walk, amber to sprint. Click again (or Space) to confirm. Press [W] again to hide the movement overlay and see the terrain.', () => { this.mode = this.mode === 'move' ? 'look' : 'move'; this.pending = null; });
     btn('Jump', 'J', this.mode === 'jump', !canMove || u.stats.jump <= 0, `Jump up to ${u.stats.jump} tiles over any terrain. Generates 3 heat per tile.`, () => { this.mode = this.mode === 'jump' ? 'move' : 'jump'; });
     btn('Melee', 'M', this.mode === 'melee', !canMove || !mech, `Move and strike an adjacent enemy for ${u.stats.meleeDmg} damage and heavy stability damage.`, () => { this.mode = this.mode === 'melee' ? 'move' : 'melee'; this.meleeTarget = null; });
     btn('DFA', 'D', this.mode === 'dfa', !canMove || !mech || u.stats.jump <= 0, `Death From Above: jump onto an enemy for ${u.stats.dfaDmg} damage. Damages your legs.`, () => { this.mode = this.mode === 'dfa' ? 'move' : 'dfa'; this.meleeTarget = null; });
@@ -1471,7 +1472,7 @@ export class CombatScreen implements Screen {
       if (this.mode === 'facing') this.confirmFacing(u); else { this.mode = 'facing'; this.facingDir = u.facing; }
     });
     // Mode hint line
-    const hint = u.shutdown ? '{#ff6a2a}SHUTDOWN{/} — [Space] restarts the reactor (this uses the whole activation).' : this.mode === 'facing' ? 'Point to set facing. Click/[E] confirms, [Esc] goes back.' :
+    const hint = this.mode === 'look' ? 'Movement overlay hidden. [W] shows it again.' : u.shutdown ? '{#ff6a2a}SHUTDOWN{/} — [Space] restarts the reactor (this uses the whole activation).' : this.mode === 'facing' ? (u.moved === 'sprint' ? 'After a sprint you can only turn 45° from your run. Click/[E] confirms.' : 'Point to set facing. Click/[E] confirms, [Esc] goes back.') :
       this.mode === 'called' ? (this.calledLoc ? `PRECISION: aiming at the ${locName(this.calledLoc)}. [F]ire, or click another location.` : 'PRECISION: click a location on the target doll, then [F]ire.') :
       this.mode === 'melee' || this.mode === 'dfa' ? (this.meleeTarget ? 'Click a highlighted tile, or the target again.' : 'Click an adjacent-reachable enemy.') :
       this.mode === 'lock' ? 'Click a detected enemy to Sensor Lock.' :
@@ -1743,8 +1744,21 @@ export class CombatScreen implements Screen {
       tx += tg.length + 1;
     }
     y += DOLL_H_PLUS;
-    if (full) y = this.drawWeaponList(ui, u, this.target, x, y, this.tStruct);
+    if (full) {
+      // A fixed-height weapon block keeps the panels below from jumping as you switch 'Mechs
+      const y0 = y;
+      y = Math.max(this.drawWeaponList(ui, u, this.target ?? this.hoverEnemy(u), x, y, this.tStruct), y0 + 11);
+    }
     return y;
+  }
+
+  /** A visible enemy under the mouse, for previewing hit chances before choosing a target. */
+  hoverEnemy(u: Unit): Unit | null {
+    if (u !== this.sel || u.team !== 0) return null;
+    const ht = this.hoverTile, m = this.b.map;
+    if (ht < 0) return null;
+    const e = this.b.unitAt(ht % m.w, (ht / m.w) | 0);
+    return e && SIDE(e.team) === 1 && this.b.seen[0].has(e.id) ? e : null;
   }
 
   isMechOverheat(u: Unit): boolean { return this.b.isMech(u) && u.heat > u.stats.heatCap * 0.75; }
@@ -1808,7 +1822,7 @@ export class CombatScreen implements Screen {
     });
     for (const wc of deadWs) { d.text(x + 5, y, `${item(wc.id).name} ✕`, '#5a3030'); y++; }
     // Expected damage summary
-    if (mine && (t || s) && this.mode !== 'melee' && this.mode !== 'dfa') {
+    if (mine && (this.target || s) && this.mode !== 'melee' && this.mode !== 'dfa') {
       const fs = this.fireSummary(u);
       d.ctext(x + 1, y, `Selected: {#f2f6f8}${fs.n}{/} · expected {#f0d050}${Math.round(fs.ev)}{/} dmg${fs.red < 1 ? ` {#6ad46a}(-${Math.round((1 - fs.red) * 100)}% cover){/}` : ''} · {#ff8a4a}+${fs.heat}{/} heat`, C.dim, undefined, PW - 2);
       y++;

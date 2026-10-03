@@ -7,7 +7,7 @@ import { COLS, ROWS } from '../engine/display';
 import type { ArgoScreen } from './argo';
 import { skulls } from './argo';
 import { company, saveGame, saveBackup } from '../game/save';
-import { Company, Contract, Negotiation, negotiate, maxContractDiff, sys, mechReady, mrbLevel, PARTS_NEEDED, maxSlider, contractDays, workQueueDays, startTravel, travelMult } from '../game/company';
+import { Company, Contract, Negotiation, negotiate, negotiateShares, maxShares, maxContractDiff, sys, mechReady, mrbLevel, PARTS_NEEDED, maxSlider, contractDays, workQueueDays, startTravel, travelMult } from '../game/company';
 import { route } from '../game/world';
 import { MISSION_INFO } from '../combat/missions';
 import { BIOME_INFO } from '../combat/terrain';
@@ -125,27 +125,28 @@ function threatText(d: number): string {
 export class NegotiateScreen implements Screen {
   modal = true;
   slider: number;
-  constructor(public k: Contract, public argo: ArgoScreen) { this.slider = Math.min(3, maxSlider(company!, k)); }
+  /** Salvage shares asked for: the slider steps one share at a time. */
+  constructor(public k: Contract, public argo: ArgoScreen) { this.slider = Math.min(Math.round(k.salvageMax * 0.3), maxShares(company!, k)); }
   render(ui: UI): void {
     const d = ui.d, k = this.k, c = company!;
     const w = 86, h = 23, x = (COLS - w) >> 1, y = 9;
     ui.panel(x, y, w, h, 'NEGOTIATION', { style: 'double', fg: C.borderHi, bg: '#0a1016' });
     const emp = faction(k.employer), tgt = faction(k.target);
-    const cap = maxSlider(c, k);
+    const cap = maxShares(c, k), full = k.salvageMax;
     d.ctext(x + 3, y + 2, `{${emp.color}}${emp.name}{/} representative is on the line.`, C.dim);
     d.text(x + 3, y + 3, '"Cash, or a share of the salvage. Within reason."', C.text, undefined, w - 6);
-    const n: Negotiation = negotiate(k, this.slider);
+    const n: Negotiation = negotiateShares(k, this.slider);
     d.text(x + 3, y + 6, 'C-BILLS', C.cbill, undefined, 99, true);
     d.text(x + w - 11, y + 6, 'SALVAGE', C.bright, undefined, 99, true);
     const sw = w - 25;
-    this.slider = Math.min(cap, ui.slider(x + 12, y + 6, sw, this.slider, 0, 10));
-    const capX = Math.round((cap / 10) * (sw - 1));
+    this.slider = Math.min(cap, Math.round(ui.slider(x + 12, y + 6, sw, this.slider, 0, full)));
+    const capX = Math.round((cap / Math.max(1, full)) * (sw - 1));
     for (let i = capX + 1; i < sw; i++) d.set(x + 12 + i, y + 6, '╌', '#8a3030');
-    if (cap < 10) { d.set(x + 12 + capX + 1, y + 5, '▼', C.red); if (ui.hover(x + 12 + capX + 1, y + 5, 1, 1)) ui.setTip(['Negotiation cap', 'Better standing with the employer and a higher MRB rating let you ask for more salvage.']); }
+    if (cap < full) { d.set(x + 12 + capX + 1, y + 5, '▼', C.red); if (ui.hover(x + 12 + capX + 1, y + 5, 1, 1)) ui.setTip(['Negotiation cap', 'Better standing with the employer and a higher MRB rating let you ask for more salvage.']); }
     if (ui.key('ArrowLeft')) this.slider = Math.max(0, this.slider - 1);
     if (ui.key('ArrowRight')) this.slider = Math.min(cap, this.slider + 1);
     const lv = repLevel(c.rep[k.employer] ?? 0);
-    if (cap < 10) d.ctext(x + 12, y + 7, `{#e8503a}▼{/} {#6d7f8a}Your standing ({${lv.color}}${lv.name}{/}{#6d7f8a}) and MRB cap salvage.{/}`, C.dim, undefined, sw);
+    if (cap < full) d.ctext(x + 12, y + 7, `{#e8503a}▼{/} {#6d7f8a}Your standing ({${lv.color}}${lv.name}{/}{#6d7f8a}) and MRB cap salvage.{/}`, C.dim, undefined, sw);
     d.ctext(x + 3, y + 9, `Payment on completion  {#f0c850}${cb(n.cash)}{/}`, C.dim);
     d.ctext(x + 3, y + 10, `Salvage shares        {#f2f6f8}${n.salvage}{/} {#6d7f8a}(${n.priority} priority, the rest chosen after the employer's cut){/}`, C.dim, undefined, w - 6);
     const opts = surveyOf(c, k).objectives.filter((o) => !o.primary);
