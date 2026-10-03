@@ -292,7 +292,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (const pu of playerUnits) { pu.tag = 'guard'; pu.ai.goal = [cu[0]?.x ?? 6, cu[0]?.y ?? rd.wy]; }
       objectives.push({ id: 'escort', text: 'At least 2 convoy vehicles reach the east edge', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'allsafe', text: 'All convoy vehicles survive', primary: false, status: 'active', bonus });
-      briefing.push(`${art(emp.short)} ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east.`);
+      briefing.push(`${art(emp.short)} ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east. The haulers only roll while one of your 'Mechs is within 10 tiles, and halt when hostiles close in.`);
       break;
     }
     case 'capture': {

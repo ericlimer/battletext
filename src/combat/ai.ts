@@ -97,12 +97,14 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   }
 
   // ---- A lone surviving vehicle breaks off rather than be hunted down ---------------------
-  if (side === 1 && u.frame.kind === 'vehicle' && !u.tag && !(u as any)._fleeing && enemies.length >= 2 && b.alliesOf(u).length === 0
-    && !b.units.some((v) => v !== u && SIDE(v.team) === side && v.alive && !v.deployed)) {
+  const dry = u.frame.kind === 'vehicle' && !b.weaponsOf(u).some((w) => b.hasAmmo(u, w));
+  if (side === 1 && u.frame.kind === 'vehicle' && (!u.tag || u.tag === 'escort') && !(u as any)._fleeing && (dry || (enemies.length >= 2 && b.alliesOf(u).length === 0
+    && !b.units.some((v) => v !== u && SIDE(v.team) === side && v.alive && !v.deployed)))) {
     (u as any)._fleeing = true;
+    if (dry) u.tag = ''; // a dry escort is no longer screening anything
     const edges: [number, number][] = [[0, u.y], [m.w - 1, u.y], [u.x, 0], [u.x, m.h - 1]];
     u.ai.goal = edges.sort((p, q) => dist(u.x, u.y, p[0], p[1]) - dist(u.x, u.y, q[0], q[1]))[0];
-    b.say(`${b.displayName(u)} breaks off and runs for the map edge!`, '#f0a830');
+    b.say(`${b.displayName(u)} ${dry ? 'is out of ammunition and' : ''} breaks off and runs for the map edge!`.replace('  ', ' '), '#f0a830');
   }
 
   // ---- Convoys drive for the exit -----------------------------------------------------

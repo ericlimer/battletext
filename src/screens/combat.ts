@@ -505,16 +505,25 @@ export class CombatScreen implements Screen {
   }
 
   /** Weapon count, expected damage and heat for the whole volley. */
-  fireSummary(u: Unit): { n: number; ev: number; heat: number } {
+  fireSummary(u: Unit): { n: number; ev: number; heat: number; red: number } {
     const from = this.plan ?? u;
-    let n = 0, ev = 0, heat = 0;
-    for (const p of this.firePlan(u)) {
+    const plan = this.firePlan(u);
+    const total = plan.reduce((a, p) => a + p.weapons.length, 0);
+    // Breaching Shot: a single weapon ignores cover and guard
+    const breach = has(u.pilot ?? undefined, 'breaching') && total === 1;
+    let n = 0, ev = 0, heat = 0, red = 1;
+    for (const p of plan) {
       n += p.weapons.length;
       for (const wc of p.weapons) heat += item(wc.id).heat ?? 0;
-      if (p.target) ev += this.b.expectedDamage(u, p.target, from, p.weapons);
-      else if (p.struct) for (const wc of p.weapons) { const w = item(wc.id); const hc = this.b.hitChance(u, null, w, from, undefined, false, p.struct); if (hc.ok) ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1); }
+      if (p.target) {
+        const t = p.target;
+        const cov = TERRAIN[this.b.map.terr[t.y * this.b.map.w + t.x]].cover;
+        const r = breach ? 1 : (1 - cov) * (t.guarded && attackArc(t, from.x, from.y) !== 'rear' ? 0.6 : 1);
+        if (t === this.target) red = r;
+        ev += this.b.expectedDamage(u, t, from, p.weapons) * r;
+      } else if (p.struct) for (const wc of p.weapons) { const w = item(wc.id); const hc = this.b.hitChance(u, null, w, from, undefined, false, p.struct); if (hc.ok) ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1); }
     }
-    return { n, ev, heat };
+    return { n, ev, heat, red };
   }
 
   /** Why nothing can fire at the current target, for the hint line. */
@@ -547,7 +556,7 @@ export class CombatScreen implements Screen {
     }
     this.b.attack(u, plan, called);
     this.pull();
-    if (u.alive && has(u.pilot ?? undefined, 'ace') && !u.moved) {
+    if (u.alive && has(u.pilot ?? undefined, 'ace') && !u.moved && !u.cannotMove && !u.prone) {
       this.clearTargeting();
       this.mode = 'move';
       this.b.say(`${u.name} (Ace Pilot) may still move.`, C.cyan);
@@ -735,10 +744,14 @@ export class CombatScreen implements Screen {
       if (!b.canAttack(u)) return;
       if (ui.inp.held.has('Shift') && has(u.pilot ?? undefined, 'multitarget') && this.target && hu !== this.target) {
         // assign currently enabled weapons that can reach this new target
-        const ws = this.selectedWeapons(u, this.target).filter((w) => b.hitChance(u, hu, item(w.id)).ok);
+        const prim = this.target;
+        const ws = this.selectedWeapons(u, prim).filter((w) => b.hitChance(u, hu, item(w.id)).ok);
         const targets = new Set([...this.multi.values()]);
         if (targets.size >= 2 && !targets.has(hu)) return;
-        for (const w of ws.slice(0, Math.max(1, Math.ceil(ws.length / 2)))) this.multi.set(w, hu);
+        // Send over the weapons that gain the most accuracy against the new target; click a weapon row to reassign
+        const gain = (w: Component) => b.hitChance(u, hu, item(w.id)).chance - b.hitChance(u, prim, item(w.id)).chance;
+        ws.sort((p, q) => gain(q) - gain(p));
+        for (const w of ws.slice(0, Math.max(1, Math.floor(ws.length / 2)))) this.multi.set(w, hu);
         return;
       }
       if (this.target === hu && !this.pending && !this.autoPicked) { this.fire(u); return; }
@@ -755,7 +768,13 @@ export class CombatScreen implements Screen {
     if (!canMove) return;
     const r = this.getReach(u);
     const mode: MoveMode | null = this.mode === 'jump' ? (r.jump.has(ht) ? 'jump' : null) : r.walk.has(ht) ? 'walk' : r.sprint.has(ht) ? 'sprint' : null;
-    if (!mode) return;
+    if (!mode) {
+      if (ht !== u.y * b.map.w + u.x && (this.mode === 'move' || this.mode === 'jump')) {
+        const tt = TERRAIN[b.map.terr[ht]];
+        this.flashMsg = { text: tt.cost === Infinity ? `Impassable: ${tt.name}.` : b.unitAt(ht % b.map.w, (ht / b.map.w) | 0) ? 'That tile is occupied.' : this.mode === 'jump' ? `Out of jump range (${u.stats.jump}).` : `Out of reach: sprint ${u.stats.sprint}, and terrain costs extra.`, until: this.time + 2 };
+      }
+      return;
+    }
     if (this.pending && this.pending.tile === ht) this.doMove(u, ht, mode);
     else this.pending = { tile: ht, mode };
   }
@@ -1225,7 +1244,7 @@ export class CombatScreen implements Screen {
       d.text(1, y0, info, C.dim, C.panel);
     }
     const bi = BIOME_INFO[m.biome];
-    const env = ` ${bi.name}${m.night ? ' · Night' : ''} · heat x${bi.heatMult} `;
+    const env = ` ${bi.name}${m.night ? ' · Night' : ''} · cooling ×${bi.heatMult} `;
     d.text(PX - 2 - env.length, y0, env, C.faint, C.panel);
     // Elevation tint legend while [Z] is on
     if (this.showHeights) {
@@ -1240,7 +1259,8 @@ export class CombatScreen implements Screen {
     const lw = 62;
     const lines: { text: string; color?: string }[] = [];
     for (const l of this.logLines) wrap(l.text, lw - 2).forEach((w, k) => { if (k) for (const v of wrap(w, lw - 4)) lines.push({ text: '  ' + v, color: l.color }); else lines.push({ text: w, color: l.color }); });
-    const vis = lh;
+    const scrolledUp = this.logScroll.scroll < lines.length - lh;
+    const vis = scrolledUp ? lh - 1 : lh;
     if (this.logScroll.scroll > lines.length - vis) this.logScroll.scroll = Math.max(0, lines.length - vis);
     let whl = ui.wheel(0, ly, lw, lh);
     if (ui.key('PageUp')) whl -= vis - 1;
@@ -1252,7 +1272,7 @@ export class CombatScreen implements Screen {
       const age = lines.length - (this.logScroll.scroll + k);
       d.ctext(1, ly + k, l.text, age <= 3 ? l.color ?? C.text : scale(l.color ?? C.text, 0.7), C.panel, lw - 2);
     }
-    if (this.logScroll.scroll < lines.length - vis) d.text(lw - 14, ROWS - 1, '▼ more · PgDn', C.accent, C.panel);
+    if (scrolledUp) d.text(1, ROWS - 1, '▼ newer entries below · PgDn / wheel', C.accent, C.panel);
     // Objectives
     const ox = lw + 1;
     d.vline(ox - 1, ly - 1, lh + 1, C.border);
@@ -1302,7 +1322,7 @@ export class CombatScreen implements Screen {
       if (this.mode === 'facing') this.confirmFacing(u); else { this.mode = 'facing'; this.facingDir = u.facing; }
     });
     // Mode hint line
-    const hint = this.mode === 'facing' ? 'Point to choose facing. Click or [E] to confirm, [Esc] to go back.' :
+    const hint = this.mode === 'facing' ? 'Point to set facing. Click/[E] confirms, [Esc] goes back.' :
       this.mode === 'called' ? (this.calledLoc ? `PRECISION: aiming at the ${locName(this.calledLoc)}. [F]ire, or click another location.` : 'PRECISION: click a location on the target doll, then [F]ire.') :
       this.mode === 'melee' || this.mode === 'dfa' ? (this.meleeTarget ? 'Click a highlighted tile, or the target again.' : 'Click an adjacent-reachable enemy.') :
       this.mode === 'lock' ? 'Click a detected enemy to Sensor Lock.' :
@@ -1310,7 +1330,7 @@ export class CombatScreen implements Screen {
       (this.target || this.tStruct) && b.canAttack(u) ? (() => {
         const fs = this.fireSummary(u), tag = this.target ? this.glyphOf(this.target) : 'it';
         if (!fs.n) return `{#e8503a}${this.noFireReason(u)}{/}`;
-        return `${this.autoPicked ? `Auto-target {#f2f6f8}${tag}{/}: click it or` : `Click ${tag} again or`} [F] to FIRE ${fs.n} weapon${fs.n === 1 ? '' : 's'} (~${Math.round(fs.ev)} dmg, +${fs.heat} heat).`;
+        return `${this.autoPicked ? `Auto-target {#f2f6f8}${tag}{/}: click it or` : `Click ${tag} again or`} [F] to FIRE ${fs.n} weapon${fs.n === 1 ? '' : 's'}${this.multi.size ? ` at ${new Set(this.multi.values()).size + 1} targets` : ''} (~${Math.round(fs.ev)} dmg, +${fs.heat} heat).`;
       })() :
       u.moved || u.attacked ? (b.canAttack(u) ? 'Click a target and [F]ire, or [E] to end.' : '[E] to choose facing and end.') :
       'Move, attack or brace. [Tab] next unit. [?] help.';
@@ -1397,10 +1417,12 @@ export class CombatScreen implements Screen {
         let hp = 0, mx = 0;
         for (const k in f.maxArmor) { hp += f.armor[k]; mx += f.maxArmor[k]; }
         for (const k in f.maxStruct) { hp += Math.max(0, f.struct[k]); mx += f.maxStruct[k]; }
-        const st = v.fled ? 'SAFE' : !v.alive ? 'LOST' : `${Math.round((hp / Math.max(1, mx)) * 100)}%`;
+        // Mirrors the convoy AI: haulers hold until a lance 'Mech is within 10 tiles and no hostile within 8
+        const waiting = v.alive && !v.fled && (!b.units.some((o) => o.team === 0 && o.alive && dist(o.x, o.y, v.x, v.y) <= 10) || b.units.some((o) => SIDE(o.team) === 1 && o.alive && o.deployed && !o.fled && b.seen[0].has(o.id) && dist(o.x, o.y, v.x, v.y) <= 8));
+        const st = v.fled ? 'SAFE' : !v.alive ? 'LOST' : `${Math.round((hp / Math.max(1, mx)) * 100)}%${waiting ? ' HOLD' : ''}`;
         d.text(x + 9 + i * 11, yy, this.glyphOf(v), v.alive || v.fled ? C.ally : C.faint);
         d.text(x + 12 + i * 11, yy, st, v.fled ? C.green : !v.alive ? C.red : healthColor(hp / Math.max(1, mx)));
-        if (ui.hover(x + 9 + i * 11, yy, 10, 1)) ui.setTip([`${b.fullName(v)}: ${v.fled ? 'reached the exit' : v.alive ? `armor+structure ${hp}/${mx}` : 'destroyed'}`]);
+        if (ui.hover(x + 9 + i * 11, yy, 10, 1)) ui.setTip([`${b.fullName(v)}: ${v.fled ? 'reached the exit' : v.alive ? `armor+structure ${hp}/${mx}` : 'destroyed'}`, ...(waiting ? ['HOLD: waiting — haulers only roll with one of your \'Mechs within 10 tiles, and stop while hostiles are within 8.'] : [])]);
       });
       yy += 2;
     }
@@ -1538,22 +1560,25 @@ export class CombatScreen implements Screen {
         if (hc && hc.ok) { tip.push(''); for (const [l, v] of hc.mods) tip.push(`${pad(l, 22)} ${v > 0 && l !== hc.mods[0][0] ? '+' : ''}${v}${l === hc.mods[0][0] ? '%' : ''}`); tip.push(`{#f2f6f8}${pad('Hit chance', 22)} ${Math.round(hc.chance)}%{/}`); }
         else if (hc) tip.push(`{#e8503a}${hc.reason}{/}`);
         ui.setTip(tip);
-        if (ui.click(x, y, PW, 1)) { if (off) this.weaponsOff.delete(wc); else this.weaponsOff.add(wc); this.multi.delete(wc); }
+        if (ui.click(x, y, PW, 1)) {
+          const alts = [...new Set(this.multi.values())];
+          if (alts.length && this.target) {
+            // Multi-target: cycle primary → each extra target → off → primary
+            const cyc: (Unit | 'off')[] = [this.target, ...alts, 'off'];
+            const cur = off ? 'off' : this.multi.get(wc) ?? this.target;
+            const nx = cyc[(cyc.indexOf(cur) + 1) % cyc.length];
+            this.weaponsOff.delete(wc); this.multi.delete(wc);
+            if (nx === 'off') this.weaponsOff.add(wc); else if (nx !== this.target) this.multi.set(wc, nx);
+          } else { if (off) this.weaponsOff.delete(wc); else this.weaponsOff.add(wc); this.multi.delete(wc); }
+        }
       }
       y++;
     });
     for (const wc of deadWs) { d.text(x + 5, y, `${item(wc.id).name} ✕`, '#5a3030'); y++; }
     // Expected damage summary
     if (mine && (t || s) && this.mode !== 'melee' && this.mode !== 'dfa') {
-      const sel = this.selectedWeapons(u, t, s);
-      let ev = 0, heat = 0;
-      const from = this.plan ?? u;
-      let red = 1;
-      if (t) { const cov = TERRAIN[b.map.terr[t.y * b.map.w + t.x]].cover; const breach = has(u.pilot ?? undefined, 'breaching') && sel.length === 1; if (!breach) red = (1 - cov) * (t.guarded && attackArc(t, from.x, from.y) !== 'rear' ? 0.6 : 1); }
-      for (const wc of sel) { const w = item(wc.id); const hc = b.hitChance(u, t, w, from, undefined, false, s ?? undefined); if (!hc.ok) continue; ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1) * red; heat += w.heat ?? 0; }
-      if (this.multi.size) { const fs = this.fireSummary(u); ev = fs.ev; heat = fs.heat; }
-      const nSel = this.multi.size ? this.fireSummary(u).n : sel.length;
-      d.ctext(x + 1, y, `Selected: {#f2f6f8}${nSel}{/} · expected {#f0d050}${Math.round(ev)}{/} dmg${red < 1 ? ` {#6ad46a}(-${Math.round((1 - red) * 100)}% cover/guard){/}` : ''} · {#ff8a4a}+${heat}{/} heat`, C.dim, undefined, PW - 2);
+      const fs = this.fireSummary(u);
+      d.ctext(x + 1, y, `Selected: {#f2f6f8}${fs.n}{/} · expected {#f0d050}${Math.round(fs.ev)}{/} dmg${fs.red < 1 ? ` {#6ad46a}(-${Math.round((1 - fs.red) * 100)}% cover){/}` : ''} · {#ff8a4a}+${fs.heat}{/} heat`, C.dim, undefined, PW - 2);
       y++;
       if (b.isMech(u) && b.projectedHeat(u, this.firePlan(u).flatMap((p) => p.weapons)) >= u.stats.heatCap) { d.text(x + 1, y, this.heatConfirm ? '⚠ SHUTDOWN — press F again to fire' : '⚠ THIS ATTACK WILL SHUT YOU DOWN', '#ff6a2a', undefined, PW - 2, true); y++; }
       if (this.plan) { d.text(x + 1, y, `(odds shown from the planned destination)`, C.faint); y++; }
@@ -1644,7 +1669,7 @@ export class CombatScreen implements Screen {
       const marc = attackArc(t, sx, sy);
       const mdmg = dfa ? a.stats.dfaDmg : a.stats.meleeDmg;
       d.ctext(x + 1, y + 1, `Hit {#f2f6f8}${Math.round(mc.chance)}%{/} · damage {#f0d050}${t.guarded && marc !== 'rear' ? Math.round(mdmg * 0.6) : mdmg}{/} · arc {${marc === 'rear' ? '#6ad46a' : '#c8d2d8'}}${marc.toUpperCase()}{/}${spots.has(ht) ? ' {#6d7f8a}(this spot){/}' : ' {#6d7f8a}(nearest spot){/}'}`, C.dim, undefined, PW - 2);
-      d.ctext(x + 1, y + 2, `Heavy stability damage${dfa ? ` · your legs take ~${Math.round(frameTons(a.frame) * 0.25)}` : ''}${b.weaponsOf(a).some((w) => item(w.id).hard === 'S') ? ' · support weapons fire too' : ''}`, C.faint, undefined, PW - 2);
+      d.ctext(x + 1, y + 2, `Heavy stability damage${dfa ? ` · your legs take ~${Math.round(frameTons(a.frame) * 0.25)}` : ''}${b.weaponsOf(a).some((w) => item(w.id).hard === 'S') ? ' · +support weapons' : ''}`, C.faint, undefined, PW - 2);
       mc.mods.forEach(([l, v], k) => { if (y + 3 + k < ROWS) { d.text(x + 1, y + 3 + k, l.slice(0, 20), C.dim); d.text(x + 22, y + 3 + k, (k === 0 ? `${v}%` : `${v > 0 ? '+' : ''}${v}`).padStart(5), k === 0 ? C.text : v > 0 ? C.green : C.red); } });
       return;
     }
@@ -1704,15 +1729,15 @@ export class CombatScreen implements Screen {
       '{#f0a830}ATTACKING{/}  Click an enemy to target, click again or [F] to fire. [1]-[9] toggle weapons.',
       '  Hover a weapon for its hit breakdown. Rear shots hit weak rear armor.',
       '  [P] Precision Strike (Resolve): pick the location on the target doll.',
-      '  Multi-Target pilots: Shift-click a 2nd/3rd enemy to split weapons (→tag shown in orange).',
-      '  [L] Sensor Lock (pilot ability): strips 2 evasion pips and reveals the target; uses the attack.',
+      '  Multi-Target: Shift-click a 2nd/3rd enemy to split fire; click a weapon to cycle its target.',
+      '  [L] Sensor Lock (ability): strips 2 evasion pips, reveals the target; uses your attack.',
       '  [M] Melee / [D] Death From Above. Great for knocking down Unsteady targets.',
       '{#f0a830}DEFENSE{/}  [B] Brace: Guarded (-40% dmg), clears stability. Forests give cover.',
       '  [V] Vigilance (Resolve): Guarded + Entrenched. [R] Reserve: act one phase later.',
       '{#f0a830}HEAT{/}  Weapons and jumping generate heat. Over 75%: overheating damage.',
       '  At 100% your \'Mech shuts down and is easy to hit. Water helps cooling.',
       '{#f0a830}INITIATIVE{/}  Lights act in phase 4, mediums 3, heavies 2, assaults 1.',
-      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation tint (bright = high) · [Tab] next unit · [+/-] speed',
+      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation tint · [Tab] next unit · [+/-] speed',
     ];
     const w = 94, h = lines.length + 5, x = MX + VW - w / 2, y = MY + 4;
     ui.panel(x, y, w, h, 'FIELD MANUAL', { fg: C.borderHi, bg: '#0a1016', style: 'double' });
@@ -1735,6 +1760,8 @@ export class CombatScreen implements Screen {
     const win = b.result === 'win';
     const w = 64;
     const obs = this.rt.objectives;
+    // On a loss or withdrawal anything still open has failed: keep the side panel in step with this screen
+    if (!win) for (const o of obs) if (o.status === 'active') o.status = 'failed';
     const h = 12 + obs.length;
     const x = MX + VW - w / 2, y = MY + 8;
     ui.panel(x, y, w, h, '', { fg: win ? C.green : C.red, bg: '#080c10', style: 'double' });
@@ -1745,7 +1772,7 @@ export class CombatScreen implements Screen {
       d.ctext(x + 3, y + 4 + i, `${mark} ${o.text}`, o.primary ? C.text : C.dim, undefined, w - 6);
     });
     const yy = y + 5 + obs.length;
-    const kills = this.rt.playerUnits.reduce((a, u) => a + u.kills, 0);
+    const kills = this.rt.enemyUnits.filter((u) => !u.alive && !u.fled).length;
     const lost = this.rt.playerUnits.filter((u) => !u.alive).length;
     d.ctext(x + 3, yy, `Rounds: {#f2f6f8}${b.round}{/}   Enemy destroyed: {#6ad46a}${kills}{/}   Units lost: {#e8503a}${lost}{/}`, C.dim);
     if (ui.button(x + w / 2 - 8, y + h - 2, 'CONTINUE', { key: 'Enter', style: 'block', w: 16, center: true })) this.onDone(this.rt);
