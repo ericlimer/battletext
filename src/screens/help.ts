@@ -32,7 +32,7 @@ const PAGES: [string, string[]][] = [
     '{#f0a830}Melee.{/} [M] moves adjacent and strikes with the \'Mech\'s full weight; [D]eath From Above jumps onto the target. Both deal heavy stability damage.',
   ]],
   ['MAP', [
-    '{#f0a830}Reading the battlefield.{/} Each map tile is one square. Brighter ground is higher ground: firing downhill is easier, uphill harder. A dark {#3a3a3a}▁{/} or {#3a3a3a}▏{/} edge marks a drop to lower ground. Press [Z] to tint the map by elevation.',
+    '{#f0a830}Reading the battlefield.{/} Each map tile is one square. Brighter ground is higher ground: firing downhill is easier, uphill harder. A dark {#3a3a3a}▁{/} or {#3a3a3a}▏{/} edge marks a drop to lower ground. Press [Z] to cycle elevation views: Shading, Tint (colour bands), Contours (lines on every drop), Terraces (strong brightness steps) and Numbers (height digits). Your choice is remembered.',
     '',
     '{#6ac46a}♣{/}  Light forest: 20% cover, slows movement, lightly obstructs fire through it.',
     '{#3a8a3a}♠{/}  Heavy forest: 35% cover, slow going, blocks sight after a few tiles.',

@@ -47,7 +47,7 @@ export class CombatScreen implements Screen {
   animPos = new Map<number, [number, number]>();
   ghosts = new Set<number>();
   logLines: { text: string; color?: string }[] = [];
-  flashMsg: { text: string; until: number } | null = null;
+  flashMsg: { text: string; until: number; color?: string } | null = null;
   logScroll = { scroll: 0 };
   banner: { text: string; sub: string; t: number; color: string } | null = null;
   /** The volley being played out: who is shooting whom, and the damage landed so far. */
@@ -57,7 +57,9 @@ export class CombatScreen implements Screen {
   aim: { ax: number; ay: number; tx: number; ty: number; until: number; t0: number } | null = null;
   aiTimer = 0;
   speed = 1;
-  showHeights = false;
+  /** Elevation display style, cycled with [Z] and remembered: shading, tint, contours, terraces, numbers. */
+  elevMode = (() => { try { return Math.max(0, Math.min(ELEV_MODES.length - 1, +(localStorage.getItem('bt.elevMode') ?? 0) || 0)); } catch { return 0; } })();
+  get showHeights(): boolean { return ELEV_MODES[this.elevMode] === 'Tint'; }
   showHelp = false;
   confirmWithdraw = false;
   time = 0;
@@ -686,7 +688,11 @@ export class CombatScreen implements Screen {
     if (ui.key('ArrowDown')) this.camY = Math.min(m.h - VH, this.camY + 3 * panSpeed);
     const wh = ui.wheel(MX, MY, VW * 2, VH);
     if (wh) { if (ui.inp.held.has('Shift')) this.camX = Math.max(0, Math.min(m.w - VW, this.camX + wh * 2)); else this.camY = Math.max(0, Math.min(m.h - VH, this.camY + wh * 2)); }
-    if (ui.key('z')) this.showHeights = !this.showHeights;
+    if (ui.key('z')) {
+      this.elevMode = (this.elevMode + 1) % ELEV_MODES.length;
+      try { localStorage.setItem('bt.elevMode', String(this.elevMode)); } catch { /* private mode */ }
+      this.flashMsg = { text: `Elevation: ${ELEV_MODES[this.elevMode]} — ${ELEV_HELP[ELEV_MODES[this.elevMode]]}`, until: this.time + 4, color: C.cyan };
+    }
     if (ui.key('?') || ui.key('F1') || ui.key('h')) this.showHelp = true;
     if (ui.key('+') || ui.key('=')) this.speed = Math.min(4, this.speed * 2);
     if (ui.key('-')) this.speed = Math.max(0.5, this.speed / 2);
@@ -970,12 +976,36 @@ export class CombatScreen implements Screen {
       case 'rubble': fg = '#7a6e5e'; bg = lerp(bg, '#1a1612', 0.5); break;
       case 'rough': fg = lerp(bg, scale(B.groundFg, 1.35), 0.75); bg = scale(bg, 0.88); break;
     }
-    // Contour ledges where the ground drops away to the south or west
-    if ((t === 'plain' || t === 'rough' || t === 'road')) {
-      const south = y + 1 < m.h ? m.elev[i + m.w] : e;
-      const west = x > 0 ? m.elev[i - 1] : e;
-      if (south < e) { ch = '▁'; fg = lerp(bg, '#000000', 0.55); }
-      else if (west < e) { ch = '▏'; fg = lerp(bg, '#000000', 0.45); }
+    const mode = ELEV_MODES[this.elevMode];
+    const ground = t === 'plain' || t === 'rough' || t === 'road';
+    const at = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h ? m.elev[yy * m.w + xx] : e; };
+    if (mode === 'Shading' && ground) {
+      // Contour ledges where the ground drops away to the south or west
+      if (at(0, 1) < e) { ch = '▁'; fg = lerp(bg, '#000000', 0.55); }
+      else if (at(-1, 0) < e) { ch = '▏'; fg = lerp(bg, '#000000', 0.45); }
+    } else if (mode === 'Contours') {
+      // Flatten the shading and draw a bright line on every edge where this tile stands above its neighbour
+      if (ground) { bg = scale(B.ground[1], 1.15 + s * 0.05); fg = lerp(bg, B.groundFg, 0.25); }
+      const drop = [at(0, 1), at(0, -1), at(-1, 0), at(1, 0)].map((n) => e - n);
+      const k = drop.findIndex((v) => v > 0);
+      if (k >= 0 && t !== 'building' && t !== 'wall') {
+        const big = Math.max(...drop) >= 2;
+        ch = ['▁', '▔', '▏', '▕'][k];
+        fg = big ? '#ffb040' : lerp('#e8f0d8', B.groundFg, 0.3);
+      }
+    } else if (mode === 'Terraces' && ground) {
+      // Strong steps of brightness, plus a hatch that thickens with height
+      // Strong, evenly spaced brightness steps with a shadowed lip on every drop
+      bg = scale(B.ground[1], [0.55, 1.0, 1.55, 2.2][e]);
+      ch = ['·', ' ', '∙', '•'][e];
+      fg = lerp(bg, '#ffffff', 0.2);
+      if (at(0, 1) < e) { ch = '▁'; fg = lerp(bg, '#000000', 0.65); }
+      else if (at(-1, 0) < e) { ch = '▏'; fg = lerp(bg, '#000000', 0.55); }
+    } else if (mode === 'Numbers' && ground) {
+      // Digits on the edge of each height band and on a sparse grid inside it, so the map stays legible
+      const edge = [at(0, 1), at(0, -1), at(-1, 0), at(1, 0)].some((n) => n !== e);
+      ch = edge || (x % 3 === 0 && y % 2 === 0) ? String(e) : ' ';
+      fg = ['#7a8a96', '#9ad0a0', '#f0d060', '#ff9050'][e];
     }
     if (m.scorch[i] > 0) bg = lerp(bg, '#0a0806', 0.5 * m.scorch[i]);
     const wr = m.wrecks.get(i) && !this.ghostAt(i) ? m.wrecks.get(i) : undefined;
@@ -1302,10 +1332,14 @@ export class CombatScreen implements Screen {
     const env = ` ${bi.name}${m.night ? ' · Night' : ''} · cooling ×${bi.heatMult} `;
     d.text(PX - 2 - env.length, y0, env, C.faint, C.panel);
     // Elevation tint legend while [Z] is on
-    if (this.showHeights) {
-      const lx = PX - 2 - env.length - 26;
-      d.text(lx, y0, ' ELEV', C.dim, C.panel);
-      ['#1a3a6a', '#2a7a4a', '#b0a030', '#c0502a'].forEach((col, k) => { d.text(lx + 6 + k * 5, y0, ` ${k} `, C.bright, col); });
+    {
+      const mode = ELEV_MODES[this.elevMode];
+      const lx = PX - 2 - env.length - 34;
+      d.text(lx, y0, ` [Z] ${mode.toUpperCase()}`.padEnd(14), C.dim, C.panel);
+      if (mode === 'Tint') ['#1a3a6a', '#2a7a4a', '#b0a030', '#c0502a'].forEach((col, k) => { d.text(lx + 14 + k * 5, y0, ` ${k} `, C.bright, col); });
+      else if (mode === 'Numbers') d.text(lx + 14, y0, ' digit = height ', C.faint, C.panel);
+      else if (mode === 'Contours') d.text(lx + 14, y0, ' line = drop ', C.faint, C.panel);
+      else if (mode === 'Terraces') d.text(lx + 14, y0, ' lighter = higher ', C.faint, C.panel);
     }
     // Action bar
     this.drawActions(ui, 1, y0 + 1);
@@ -1389,7 +1423,7 @@ export class CombatScreen implements Screen {
       })() :
       u.moved || u.attacked ? (b.canAttack(u) ? 'Click a target and [F]ire, or [E] to end.' : '[E] to choose facing and end.') :
       'Move, attack or brace. [Tab] next unit. [?] help.';
-    if (this.flashMsg && this.time < this.flashMsg.until) ui.d.text(x, y + 2, this.flashMsg.text, C.red, undefined, 62);
+    if (this.flashMsg && this.time < this.flashMsg.until) ui.d.text(x, y + 2, this.flashMsg.text, this.flashMsg.color ?? C.red, undefined, 62);
     else ui.d.ctext(x, y + 2, `{#6d7f8a}${hint}{/}`, C.dim, undefined, 62);
   }
 
@@ -1872,7 +1906,7 @@ export class CombatScreen implements Screen {
       '{#f0a830}HEAT{/}  Weapons and jumping generate heat. Over 75%: overheating damage.',
       '  At 100% your \'Mech shuts down and is easy to hit. Water helps cooling.',
       '{#f0a830}INITIATIVE{/}  Lights act in phase 4, mediums 3, heavies 2, assaults 1.',
-      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation tint · [Tab] next unit · [+/-] speed',
+      '{#f0a830}VIEW{/}  Arrows/wheel pan · [C] center · [Z] elevation views · [Tab] next unit · [+/-] speed',
     ];
     const w = 94, h = lines.length + 5, x = MX + VW - w / 2, y = MY + 4;
     ui.panel(x, y, w, h, 'FIELD MANUAL', { fg: C.borderHi, bg: '#0a1016', style: 'double' });
@@ -1917,5 +1951,13 @@ export class CombatScreen implements Screen {
 import { frameTons } from '../game/frame';
 function frameTonsOf(u: Unit): number { return frameTons(u.frame); }
 const DOLL_H = 10;
+const ELEV_MODES = ['Shading', 'Tint', 'Contours', 'Terraces', 'Numbers'] as const;
+const ELEV_HELP: Record<string, string> = {
+  Shading: 'brighter ground is higher; dark edges mark a drop',
+  Tint: 'colour bands: blue 0, green 1, yellow 2, red 3',
+  Contours: 'flat ground, bright lines on the high side of every drop (orange = cliff)',
+  Terraces: 'four strong brightness steps, lighter = higher',
+  Numbers: 'each tile shows its height 0-3',
+};
 const DOLL_H_PLUS = 11;
 void rgb; void hex; void Display;
