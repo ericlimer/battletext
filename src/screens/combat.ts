@@ -50,6 +50,11 @@ export class CombatScreen implements Screen {
   flashMsg: { text: string; until: number } | null = null;
   logScroll = { scroll: 0 };
   banner: { text: string; sub: string; t: number; color: string } | null = null;
+  /** The volley being played out: who is shooting whom, and the damage landed so far. */
+  vol: { a: Unit; t: Unit | null; tx: number; ty: number; n: number; fired: number; dmg: number; hits: number; shots: number; start: number; hp0: number; done: number; weapons: string[] } | null = null;
+  /** Damage tallies that land on the HUD when their projectiles arrive. */
+  volTicks: { at: number; dmg: number; hits: number; shots: number }[] = [];
+  aim: { ax: number; ay: number; tx: number; ty: number; until: number; t0: number } | null = null;
   aiTimer = 0;
   speed = 1;
   showHeights = false;
@@ -213,9 +218,42 @@ export class CombatScreen implements Screen {
       case 'face':
         this.wait = 0;
         break;
-      case 'fire':
-        this.wait = this.animateFire(e) / sp;
+      case 'volley': {
+        const a = b.unit(e.u), t = e.t >= 0 ? b.unit(e.t) : null;
+        const seen = SIDE(a.team) === 0 || b.seen[0].has(a.id) || (t && SIDE(t.team) === 0);
+        let hp0 = 0;
+        if (t) { for (const k in t.frame.maxArmor) hp0 += t.frame.armor[k]; for (const k in t.frame.maxStruct) hp0 += Math.max(0, t.frame.struct[k]); }
+        this.vol = { a, t, tx: e.tx, ty: e.ty, n: e.n, fired: 0, dmg: 0, hits: 0, shots: 0, start: this.time, hp0, done: 0, weapons: [] };
+        this.volTicks = [];
+        if (seen) {
+          // Aim: the camera frames the target and a targeting line draws in before the first shot
+          if (t && this.visibleUnit(t)) this.ensureVisible(e.tx, e.ty, 8);
+          const [ax, ay] = this.posOf(a);
+          this.aim = { ax, ay, tx: e.tx, ty: e.ty, until: this.time + 0.55 / sp, t0: this.time };
+          this.wait = 0.55 / sp;
+        } else this.wait = 0.1 / sp;
         break;
+      }
+      case 'volleyEnd':
+        if (this.vol) {
+          this.vol.done = this.time;
+          // Let the result sink in; heavier volleys hold longer
+          this.wait = (this.vol.fired ? 0.5 + Math.min(0.5, this.vol.dmg / 200) : 0.2) / sp;
+        }
+        break;
+      case 'fire': {
+        const dur = this.animateFire(e);
+        if (this.vol) {
+          this.vol.fired++;
+          this.vol.weapons.push(item(e.w).short);
+          this.volTicks.push({ at: this.time + (dur * 0.8) / sp, dmg: e.total, hits: e.shots.filter((x) => x.hit).length, shots: e.shots.length });
+        }
+        // Same weapon next: fire as a ripple. A new weapon group gets a beat of its own
+        const nx = this.queue.find((q) => q.k === 'fire' || q.k === 'volleyEnd');
+        const sameGroup = nx && nx.k === 'fire' && nx.w === e.w && nx.u === e.u;
+        this.wait = (sameGroup ? Math.max(0.16, dur * 0.35) : dur + 0.3) / sp;
+        break;
+      }
       case 'melee': {
         const a = b.unit(e.u), t = b.unit(e.t);
         const [ax, ay] = this.posOf(a), [tx, ty] = this.posOf(t);
@@ -251,7 +289,7 @@ export class CombatScreen implements Screen {
       case 'destroyed': {
         this.ghosts.delete(e.u);
         const u = b.unit(e.u);
-        if (e.how !== 'fled') { this.deadFx.set(u.y * b.map.w + u.x, this.time); if (u.frame.kind === 'mech' && e.how !== 'eject' && e.how !== 'pilot') { this.fx.flash = Math.max(this.fx.flash, 0.35); this.fx.shake = Math.max(this.fx.shake, 0.6); } }
+        if (e.how !== 'fled') { this.deadFx.set(u.y * b.map.w + u.x, this.time); if (u.frame.kind === 'mech' && e.how !== 'eject' && e.how !== 'pilot') { this.fx.flash = Math.max(this.fx.flash, 0.35); this.fx.shake = Math.max(this.fx.shake, 0.6); this.fx.glitch = Math.max(this.fx.glitch, 0.8); if (SIDE(u.team) === 0) this.fx.hurt = 1; } }
         this.wait = 0.2 / sp;
         break;
       }
@@ -318,14 +356,14 @@ export class CombatScreen implements Screen {
       const [ex, ey] = s.hit ? [tx, ty] : missPt();
       this.fx.beam(ax, ay, ex, ey, col, '#ffd0d0', base === 'LL' ? 0.45 : 0.3, 0);
       impact(ex, ey, s.hit, base === 'LL' ? 2 : 1);
-      dur = 0.35;
+      dur = 0.45;
     } else if (base === 'PPC') {
       const s = shots[0];
       const [ex, ey] = s.hit ? [tx, ty] : missPt();
       this.fx.beam(ax, ay, ex, ey, '#60a8ff', '#ffffff', 0.5, 0, true);
       this.fx.sparks(ex, ey, s.hit ? 10 : 3, ['#e0f0ff', '#2050c0'], 3);
       if (s.hit) this.fx.flash = Math.max(this.fx.flash, 0.12);
-      dur = 0.5;
+      dur = 0.6;
     } else if (base === 'FL') {
       for (let i = 0; i < 14; i++) {
         const f = Math.random();
@@ -362,18 +400,18 @@ export class CombatScreen implements Screen {
       shots.forEach((s, i) => {
         const [ex, ey] = s.hit ? [tx + (Math.random() - 0.5) * 0.8, ty + (Math.random() - 0.5) * 0.8] : missPt();
         const arc = lrm ? (e.indirect ? 5 : 2.5) * (Math.random() < 0.5 ? 1 : -1) * (0.6 + Math.random() * 0.6) : (Math.random() - 0.5) * 1.2;
-        const d = i * (lrm ? 0.035 : 0.05);
-        const t = this.fx.projectile(ax, ay, ex, ey, lrm ? '•' : '*', '#ffe0a0', '#f07030', lrm ? 22 : 26, d, () => {
+        const d = i * (lrm ? 0.06 : 0.08);
+        const t = this.fx.projectile(ax, ay, ex, ey, lrm ? '•' : '*', '#ffe0a0', '#f07030', lrm ? 15 : 19, d, () => {
           if (s.hit) { this.fx.parts.push({ x: ex, y: ey, vx: 0, vy: 0, life: 0, max: 0.25, glyph: '*', c0: '#fff0c0', c1: '#c04010', light: 2 }); }
           else impact(ex, ey, false, 0);
         }, arc, '·');
         last = Math.max(last, d + t);
       });
-      dur = Math.min(1.2, last + 0.1);
+      dur = Math.min(2.2, last + 0.15);
     }
     if (e.total > 0 && tu) this.fx.float(tx, ty, `${e.total}`, e.total >= 60 ? '#ffd050' : '#f2f6f8', e.total >= 60, dur * 0.8);
     else if (tu) this.fx.float(tx, ty, 'MISS', '#6d7f8a', false, dur * 0.8);
-    return Math.max(0.2, dur * 0.85);
+    return Math.max(0.25, dur);
   }
 
   // ---- Camera ---------------------------------------------------------------------------
@@ -1125,6 +1163,21 @@ export class CombatScreen implements Screen {
         d.set(cx, sy, f.text[c], col, lerp(d.getBg(cx, sy), '#000000', 0.72), f.big);
       }
     }
+    // Targeting line while a volley winds up
+    if (this.aim && this.time < this.aim.until) {
+      const A = this.aim, k = Math.min(1, (this.time - A.t0) / Math.max(0.01, A.until - A.t0) * 1.4);
+      const steps = Math.ceil(Math.hypot(A.tx - A.ax, A.ty - A.ay));
+      for (let i = 1; i < steps * k; i++) {
+        const x = Math.round(A.ax + ((A.tx - A.ax) * i) / steps), y = Math.round(A.ay + ((A.ty - A.ay) * i) / steps);
+        const sx = MX + (x - this.camX) * 2, sy = MY + (y - this.camY);
+        if (sx < MX || sy < MY || sx >= MX + VW * 2 - 1 || sy >= MY + VH || (x === A.tx && y === A.ty) || this.b.unitAt(x, y)) continue;
+        d.set(sx, sy, i % 2 ? '·' : ' ', '#ff6a4a');
+        d.set(sx + 1, sy, i % 2 ? ' ' : '·', '#ff6a4a');
+      }
+      const tsx = MX + (A.tx - this.camX) * 2, tsy = MY + (A.ty - this.camY);
+      if (k >= 1 && tsx >= MX + 1 && tsx < MX + VW * 2 - 3 && tsy >= MY && tsy < MY + VH) { d.set(tsx - 1, tsy, '[', '#ff6a4a'); d.set(tsx + 2, tsy, ']', '#ff6a4a'); }
+    }
+    this.drawVolleyHud(ui);
     // Round banner
     if (this.banner) {
       const t = this.banner;
@@ -1136,6 +1189,7 @@ export class CombatScreen implements Screen {
       d.hline(x, y + 2, w, lerp('#000', C.accent, a), '━');
       d.text(x + 4, y + 1, t.text, lerp('#000', t.color, a), undefined, 99, true);
     }
+    this.drawDistortion(d);
     // Screen flash
     if (this.fx.flash > 0) {
       for (let vy = 0; vy < VH; vy++) for (let vx = 0; vx < VW * 2; vx++) {
@@ -1336,6 +1390,86 @@ export class CombatScreen implements Screen {
       'Move, attack or brace. [Tab] next unit. [?] help.';
     if (this.flashMsg && this.time < this.flashMsg.until) ui.d.text(x, y + 2, this.flashMsg.text, C.red, undefined, 62);
     else ui.d.ctext(x, y + 2, `{#6d7f8a}${hint}{/}`, C.dim, undefined, 62);
+  }
+
+  /** A heavy hit lands: tear the picture, shake it, and freeze for a beat so it registers. */
+  onVolleyTick(v: NonNullable<CombatScreen['vol']>, dmg: number): void {
+    if (dmg <= 0) return;
+    const share = v.hp0 ? dmg / v.hp0 : 0;
+    const heavy = dmg >= 60 || share >= 0.2;
+    if (!heavy) return;
+    const k = Math.min(1, 0.35 + dmg / 180 + share);
+    this.fx.glitch = Math.max(this.fx.glitch, k);
+    this.fx.shake = Math.max(this.fx.shake, 0.3 + k * 0.5);
+    if (v.t && SIDE(v.t.team) === 0) this.fx.hurt = Math.max(this.fx.hurt, k);
+    this.wait += 0.12 * k; // hit-stop
+  }
+
+  /** Post-process the map: displaced scanline bands with a colour split, plus a red vignette when you're hurt. */
+  drawDistortion(d: Display): void {
+    const g = this.fx.glitch, h = this.fx.hurt;
+    if (g <= 0.02 && h <= 0.02) return;
+    if (g > 0.02) {
+      const bands = Math.ceil(g * 7);
+      for (let n = 0; n < bands; n++) {
+        const y0 = MY + Math.floor(Math.random() * VH), hgt = 1 + Math.floor(Math.random() * (1 + g * 2.5));
+        // Even offsets keep the two-column map tiles whole
+        const off = (Math.random() < 0.5 ? -2 : 2) * (1 + Math.floor(Math.random() * g * 2.5));
+        const tint = Math.random() < 0.5 ? '#ff3040' : '#30e0ff';
+        for (let y = y0; y < Math.min(MY + VH, y0 + hgt); y++) {
+          const row = y * COLS;
+          const ch = d.ch.slice(row + MX, row + MX + VW * 2), fg = d.fg.slice(row + MX, row + MX + VW * 2), bg = d.bg.slice(row + MX, row + MX + VW * 2), fl = d.fl.slice(row + MX, row + MX + VW * 2);
+          for (let x = 0; x < VW * 2; x++) {
+            const sx = Math.max(0, Math.min(VW * 2 - 1, x - off)), i = row + MX + x;
+            d.ch[i] = ch[sx]; d.fl[i] = fl[sx];
+            d.fg[i] = lerp(fg[sx], tint, 0.35 * g);
+            d.bg[i] = lerp(bg[sx], tint, 0.18 * g);
+          }
+        }
+      }
+      // Faint scanlines across the whole view
+      for (let y = MY; y < MY + VH; y += 2) for (let x = MX; x < MX + VW * 2; x++) { const i = y * COLS + x; d.bg[i] = lerp(d.bg[i], '#000000', 0.25 * g); }
+    }
+    if (h > 0.02) {
+      for (let y = MY; y < MY + VH; y++) for (let x = MX; x < MX + VW * 2; x++) {
+        const ex = Math.abs((x - MX) / (VW * 2) - 0.5) * 2, ey = Math.abs((y - MY) / VH - 0.5) * 2;
+        const e = Math.max(0, Math.max(ex, ey) - 0.55) / 0.45;
+        if (e > 0) { const i = y * COLS + x; d.bg[i] = lerp(d.bg[i], '#a01010', e * e * 0.6 * h); }
+      }
+    }
+  }
+
+  /** A running damage tally for the volley in progress, so the weight of an attack builds as it lands. */
+  drawVolleyHud(ui: UI): void {
+    const v = this.vol;
+    if (!v) return;
+    for (const tk of this.volTicks) if (this.time >= tk.at) { v.dmg += tk.dmg; v.hits += tk.hits; v.shots += tk.shots; tk.at = Infinity; this.onVolleyTick(v, tk.dmg); }
+    const age = v.done ? this.time - v.done : 0;
+    if (v.done && age > 1.6) { this.vol = null; return; }
+    const seen = SIDE(v.a.team) === 0 || this.b.seen[0].has(v.a.id) || (v.t && SIDE(v.t.team) === 0);
+    if (!seen) return;
+    const d = ui.d;
+    const fade = v.done ? Math.max(0, 1 - Math.max(0, age - 1.1) / 0.5) : 1;
+    const col = (c: string) => lerp('#000000', c, fade);
+    const bg = col('#0a0e12');
+    const aName = this.b.displayName(v.a), tName = v.t ? this.b.displayName(v.t) : 'structure';
+    const w = 50, x = MX + VW - (w >> 1), y = MY + VH - 5;
+    d.fill(x, y, w, 4, ' ', C.text, bg);
+    d.hline(x, y, w, col(SIDE(v.a.team) === 0 ? '#3a9ac0' : '#c04a3a'), '━');
+    d.text(x + 2, y + 1, `${aName} ▸ ${tName}`, col(C.bright), bg, w - 18, true);
+    const wl = v.weapons.join(' ');
+    d.text(x + 2, y + 2, wl.length > w - 18 ? '…' + wl.slice(-(w - 19)) : wl, col(C.dim), bg);
+    // Damage readout, coloured by how much of the target's remaining armour + structure it took
+    const sev = v.hp0 ? v.dmg / v.hp0 : 0;
+    const dc = v.dmg === 0 ? '#6d7f8a' : sev >= 0.35 ? '#ff5a3a' : sev >= 0.15 ? '#f0a830' : '#f2f6f8';
+    const num = `${v.dmg}`;
+    d.text(x + w - 14, y + 1, 'DAMAGE', col(C.faint), bg);
+    d.text(x + w - 2 - num.length, y + 1, num, col(dc), bg, 99, true);
+    d.text(x + w - 14, y + 2, (v.done && v.t && !v.t.alive ? 'DESTROYED' : `${v.hits}/${v.shots} hit`).padStart(12), col(v.done && v.t && !v.t.alive ? '#ff5a3a' : C.dim), bg, 99, v.done && v.t ? !v.t.alive : false);
+    if (v.t && v.hp0) {
+      const bw = w - 4, fill = Math.min(bw, Math.round((v.dmg / v.hp0) * bw));
+      for (let i = 0; i < bw; i++) d.set(x + 2 + i, y + 3, i < fill ? '▀' : '▔', col(i < fill ? dc : '#2a3238'), bg);
+    }
   }
 
   pendingSteps(u: Unit): number {

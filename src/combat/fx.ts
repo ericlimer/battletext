@@ -37,6 +37,10 @@ export class FX {
   floats: Floater[] = [];
   flash = 0; // screen flash intensity
   shake = 0;
+  /** Signal-tear distortion for heavy hits (0..1). */
+  glitch = 0;
+  /** Red damage vignette when one of your own units is hit hard (0..1). */
+  hurt = 0;
 
   busy(): boolean {
     return this.parts.some((p) => !p.gravity && p.max < 2 && p.life < p.max) || this.beams.length > 0;
@@ -58,6 +62,8 @@ export class FX {
     this.floats = this.floats.filter((f) => f.life < f.max);
     this.flash = Math.max(0, this.flash - dt * 3);
     this.shake = Math.max(0, this.shake - dt * 4);
+    this.glitch = Math.max(0, this.glitch - dt * 1.8);
+    this.hurt = Math.max(0, this.hurt - dt * 1.2);
   }
 
   lights(): Light[] {
@@ -99,7 +105,7 @@ export class FX {
       this.parts.push({ x: x + Math.cos(a) * 0.5, y: y + Math.sin(a) * 0.5, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 0.4, life: 0, max: 1.5 + Math.random() * 1.5 + size * 0.4,
         glyph: ['░', '▒', '░'], c0: '#5a5048', c1: '#1a1816', delay: delay + 0.15, gravity: -0.05 });
     }
-    if (size >= 2) { this.flash = Math.max(this.flash, 0.15 * size); this.shake = Math.max(this.shake, 0.3 * size); }
+    if (size >= 2) { this.flash = Math.max(this.flash, 0.15 * size); this.shake = Math.max(this.shake, 0.3 * size); this.glitch = Math.max(this.glitch, 0.25 * size); }
   }
 
   smoke(x: number, y: number): void {

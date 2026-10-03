@@ -71,6 +71,8 @@ export type BEvent =
   | { k: 'destroyed'; u: number; how: string }
   | { k: 'structure'; s: number; x: number; y: number }
   | { k: 'status'; u: number; text: string; color: string }
+  | { k: 'volley'; u: number; t: number; tx: number; ty: number; n: number }
+  | { k: 'volleyEnd'; u: number }
   | { k: 'end'; result: string };
 
 export const SIDE = (team: number) => (team === 0 || team === 2 ? 0 : 1);
@@ -674,6 +676,13 @@ export class Battle {
   attack(a: Unit, plan: Assignment[], called?: string): void {
     if (!this.canAttack(a)) return;
     this.volley = []; this.sayBuf = []; this.pendingKnock = new Set();
+    // Bracket the volley so the screen can build up to it and dwell on the result
+    const p0 = plan[0];
+    if (p0) {
+      const tx = p0.target ? p0.target.x : p0.struct ? p0.struct.tiles[0] % this.map.w : a.x;
+      const ty = p0.target ? p0.target.y : p0.struct ? (p0.struct.tiles[0] / this.map.w) | 0 : a.y;
+      this.emit({ k: 'volley', u: a.id, t: p0.target ? p0.target.id : -1, tx, ty, n: plan.reduce((x, p) => x + p.weapons.length, 0) });
+    }
     try { this.attackInner(a, plan, called); } finally {
       const buf = this.sayBuf ?? [], vol = this.volley ?? [], knock = this.pendingKnock ?? new Set<Unit>();
       this.sayBuf = null; this.volley = null; this.pendingKnock = null;
@@ -685,6 +694,7 @@ export class Battle {
       for (const m of buf) this.say(m.text, m.color);
       // As in HBS BattleTech, a knockdown lands once the whole volley has resolved
       for (const t of knock) if (t.alive && !t.prone && !t.shutdown) this.knockdown(t);
+      this.emit({ k: 'volleyEnd', u: a.id });
     }
   }
 
@@ -704,7 +714,9 @@ export class Battle {
       const pc = pi === 0 ? called : undefined;
       const t = p.target;
       if (t && !t.alive) continue;
-      for (const wc of p.weapons) {
+      // Weapon groups fire together: energy, then ballistics, missiles last
+      const order = (id: string) => { const w = item(id); return (w.ammo ? (w.shots ?? 1) > 1 ? 2 : 1 : 0) * 1000 - (w.dmg ?? 0) + (w.base ?? id).charCodeAt(0) * 0.001; };
+      for (const wc of [...p.weapons].sort((x, y) => order(x.id) - order(y.id) || x.id.localeCompare(y.id))) {
         if (wc.dead) continue;
         const w = item(wc.id);
         const hc = this.hitChance(a, t, w, a, undefined, !!pc, p.struct ?? undefined);
