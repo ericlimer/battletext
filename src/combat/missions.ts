@@ -8,7 +8,7 @@ import { faction } from '../data/factions';
 import { Frame, newMechFrame, newVehicleFrame } from '../game/frame';
 import { Pilot, makePilot, uniqueCallsign } from '../game/pilot';
 import { Battle, Unit, SIDE } from './battle';
-import { Biome, generateMap, MapGenOpts, TERRAIN, BattleMap, dist } from './terrain';
+import { Biome, generateMap, MapGenOpts, TERRAIN, BattleMap, dist, computeHillshade } from './terrain';
 
 export type MissionType = 'battle' | 'assassinate' | 'destroybase' | 'defendbase' | 'ambush' | 'escort' | 'capture';
 
@@ -38,6 +38,8 @@ export interface MissionSpec {
   difficulty: number; // 1..10 (half-skulls)
   biome: Biome;
   seed: number;
+  /** 0-7: quarter turns clockwise (k & 3), mirrored when 4+. Random when omitted. */
+  orientation?: number;
   night: boolean;
   employer: string;
   target: string;
@@ -156,7 +158,16 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
     for (const [fx, fy] of [[0.48, 0.22], [0.66, 0.5], [0.48, 0.78]]) beacons.push({ x: Math.round(W * fx) + r.int(-3, 3), y: Math.round(H * fy) + r.int(-3, 3), owner: 1 });
     for (const bc of beacons) mo.clear!.push({ x: bc.x, y: bc.y, r: 2 });
   }
-  mo.clear!.push({ x: pStart[0], y: pStart[1], r: 4 }, { x: eStart[0], y: eStart[1], r: 4 });
+  // Battles vary how the lances meet: a line-up, a split drop around the enemy, or a hot drop in the middle
+  const layout: 'line' | 'split' | 'center' = t === 'battle' ? r.pick(['line', 'line', 'split', 'center'] as const) : 'line';
+  const L = {
+    pA: [6, 6 + r.int(0, 8)] as [number, number], pB: [W - 7, H - 7 - r.int(0, 8)] as [number, number],
+    mid: [Math.floor(W / 2), Math.floor(H / 2) + r.int(-4, 4)] as [number, number],
+    eW: [6, Math.floor(H / 2) + r.int(-10, 10)] as [number, number], eE: [W - 7, Math.floor(H / 2) + r.int(-10, 10)] as [number, number],
+  };
+  if (layout === 'split') mo.clear!.push({ x: L.pA[0], y: L.pA[1], r: 4 }, { x: L.pB[0], y: L.pB[1], r: 4 }, { x: L.mid[0], y: L.mid[1], r: 4 });
+  else if (layout === 'center') mo.clear!.push({ x: L.mid[0], y: L.mid[1], r: 4 }, { x: L.eW[0], y: L.eW[1], r: 4 }, { x: L.eE[0], y: L.eE[1], r: 4 });
+  mo.clear!.push({ x: pStart[0], y: pStart[1], r: 4 }, { x: eStart[0], y: eStart[1], r: 4 }, { x: W - 20, y: eStart[1], r: 4 });
   const map: BattleMap = generateMap(r, mo);
   if (beacons.length) map.beacons = beacons;
   const b = new Battle(map, r);
@@ -181,9 +192,20 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
 
   switch (t) {
     case 'battle': {
-      playerUnits = place(b, spec.player, 0, pStart[0], pStart[1], 2);
-      // Meeting engagement: the lances start close enough to make contact by round 2
-      enemyUnits = place(b, enemyLance(4), 1, W - 20, eStart[1], 6);
+      if (layout === 'split') {
+        playerUnits = [...place(b, spec.player.slice(0, 2), 0, L.pA[0], L.pA[1], 2), ...place(b, spec.player.slice(2), 0, L.pB[0], L.pB[1], 6)];
+        enemyUnits = place(b, enemyLance(4), 1, L.mid[0], L.mid[1], 2);
+        briefing.push('Split drop: your lance lands in two pairs on opposite sides of the enemy. Link up, or catch them in the crossfire.');
+      } else if (layout === 'center') {
+        playerUnits = place(b, spec.player, 0, L.mid[0], L.mid[1], 2);
+        const el = enemyLance(4);
+        enemyUnits = [...place(b, el.slice(0, Math.ceil(el.length / 2)), 1, L.eW[0], L.eW[1], 2), ...place(b, el.slice(Math.ceil(el.length / 2)), 1, L.eE[0], L.eE[1], 6)];
+        briefing.push('Hot drop: your lance lands in the middle of the area of operations, with hostiles closing from both flanks.');
+      } else {
+        playerUnits = place(b, spec.player, 0, pStart[0], pStart[1], 2);
+        // Meeting engagement: the lances start close enough to make contact by round 2
+        enemyUnits = place(b, enemyLance(4), 1, W - 20, eStart[1], 6);
+      }
       if (d >= 6 && !spec.enemies) {
         const reinf = generateForce(r, d - 1, spec.target, 2);
         const ru = place(b, reinf, 1, W - 4, r.chance(0.5) ? 5 : H - 6, 6, { deployRound: 3, deployed: false });
@@ -331,8 +353,42 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
     }
   }
   const rt: MissionRuntime = { spec, battle: b, objectives, enemyUnits, playerUnits, briefing };
+  // Turn or mirror the whole battlefield, so drops come from any edge
+  orientMission(rt, spec.orientation ?? r.int(0, 7));
   installHooks(rt);
   return rt;
+}
+
+/** Rotates (k & 3 quarter turns clockwise) and optionally mirrors (k >= 4) the map and everything on it. */
+function orientMission(rt: MissionRuntime, k: number): void {
+  const b = rt.battle, m = b.map;
+  const W = m.w, H = m.h, rot = k & 3, flip = k >= 4;
+  if (!rot && !flip) return;
+  const nw = rot % 2 ? H : W, nh = rot % 2 ? W : H;
+  const pt = (x: number, y: number): [number, number] => {
+    let X = x, Y = y;
+    if (rot === 1) { X = H - 1 - y; Y = x; } else if (rot === 2) { X = W - 1 - x; Y = H - 1 - y; } else if (rot === 3) { X = y; Y = W - 1 - x; }
+    if (flip) X = nw - 1 - X;
+    return [X, Y];
+  };
+  const ix = (i: number) => { const [X, Y] = pt(i % W, (i / W) | 0); return Y * nw + X; };
+  const remap = <T,>(src: ArrayLike<T>, dst: { [n: number]: T }) => { for (let i = 0; i < W * H; i++) dst[ix(i)] = src[i]; return dst; };
+  m.terr = remap(m.terr, new Array(W * H)) as typeof m.terr;
+  m.glyph = remap(m.glyph, new Array(W * H)) as string[];
+  m.elev = remap(m.elev, new Uint8Array(W * H)) as Uint8Array;
+  m.shade = remap(m.shade, new Float32Array(W * H)) as Float32Array;
+  m.struct = remap(m.struct, new Int16Array(W * H)) as Int16Array;
+  m.scorch = remap(m.scorch, new Float32Array(W * H)) as Float32Array;
+  m.w = nw; m.h = nh;
+  for (const s of m.structures) s.tiles = s.tiles.map(ix);
+  if (m.beacons) for (const bc of m.beacons) [bc.x, bc.y] = pt(bc.x, bc.y);
+  const turn = (dir: number) => { let d = (dir + rot * 2) % 8; if (flip) d = (8 - d) % 8; return d; };
+  for (const u of b.units) {
+    [u.x, u.y] = pt(u.x, u.y);
+    u.facing = turn(u.facing);
+    if (u.ai.goal) u.ai.goal = pt(u.ai.goal[0], u.ai.goal[1]);
+  }
+  computeHillshade(m);
 }
 
 function obj(rt: MissionRuntime, id: string): Objective | undefined {
@@ -446,8 +502,14 @@ function installHooks(rt: MissionRuntime): void {
   b.hooks.roundStart = () => {
     // Escorts shadow the lead vehicle of the convoy
     if (t === 'escort') {
-      const lead = b.units.filter((v) => v.team === 2 && v.tag === 'convoy' && v.alive && !v.fled).sort((p, q) => q.x - p.x)[0];
-      if (lead) for (const u of rt.playerUnits) if (u.alive && u.tag === 'guard') u.ai.goal = [Math.min(b.map.w - 2, lead.x + 3), lead.y];
+      const toGo = (v: Unit) => (v.ai.goal ? dist(v.x, v.y, v.ai.goal[0], v.ai.goal[1]) : 0);
+      const lead = b.units.filter((v) => v.team === 2 && v.tag === 'convoy' && v.alive && !v.fled).sort((p, q) => toGo(p) - toGo(q))[0];
+      if (lead && lead.ai.goal) {
+        // Escorts take station three tiles ahead of the lead hauler, toward its exit
+        const [gx, gy] = lead.ai.goal, dd = Math.max(1, dist(lead.x, lead.y, gx, gy));
+        const ax = Math.round(lead.x + ((gx - lead.x) / dd) * 3), ay = Math.round(lead.y + ((gy - lead.y) / dd) * 3);
+        for (const u of rt.playerUnits) if (u.alive && u.tag === 'guard') u.ai.goal = [Math.max(1, Math.min(b.map.w - 2, ax)), Math.max(1, Math.min(b.map.h - 2, ay))];
+      }
     }
     // Beacon runners head for the nearest unsecured beacon
     const open = (b.map.beacons ?? []).filter((bc) => bc.owner !== 0);

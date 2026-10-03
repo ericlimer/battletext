@@ -82,23 +82,29 @@ function tileColor(rt: MissionRuntime, i: number): string {
   }
 }
 
-/** Draws the survey at (x, y): w = map width columns, map height / 2 rows. */
+/** Draws the survey with its top-left at (x, y), shrunk to fit maxRows; returns its size in cells. */
 const colorCache = new WeakMap<MissionRuntime, string[]>();
-export function drawSurvey(d: Display, rt: MissionRuntime, x: number, y: number): void {
+export function surveySize(rt: MissionRuntime, maxRows = 99): [number, number, number] {
+  const m = rt.battle.map;
+  const s = Math.max(1, m.h / 2 / maxRows);
+  return [Math.floor(m.w / s), Math.floor(m.h / 2 / s), s];
+}
+export function drawSurvey(d: Display, rt: MissionRuntime, x: number, y: number, maxRows = 99): [number, number] {
   const m = rt.battle.map;
   let cols = colorCache.get(rt);
   if (!cols) { cols = []; for (let i = 0; i < m.w * m.h; i++) cols.push(tileColor(rt, i)); colorCache.set(rt, cols); }
-  const tileColorC = (_rt: MissionRuntime, i: number) => cols![i];
-  for (let row = 0; row < m.h / 2; row++) {
-    for (let col = 0; col < m.w; col++) {
-      const top = tileColorC(rt, row * 2 * m.w + col);
-      const bot = row * 2 + 1 < m.h ? tileColorC(rt, (row * 2 + 1) * m.w + col) : top;
+  const [cw, ch, sc] = surveySize(rt, maxRows);
+  const at = (tx: number, ty: number) => cols![Math.min(m.h - 1, ty) * m.w + Math.min(m.w - 1, tx)];
+  for (let row = 0; row < ch; row++) {
+    for (let col = 0; col < cw; col++) {
+      const tx = Math.floor(col * sc), ty = Math.floor(row * 2 * sc);
+      const top = at(tx, ty), bot = at(tx, Math.floor((row * 2 + 1) * sc));
       d.set(x + col, y + row, '▀', m.night ? scale(top, 0.6) : top, m.night ? scale(bot, 0.6) : bot);
     }
   }
-  const mark = (tx: number, ty: number, ch: string, fg: string) => {
-    const cx = x + Math.max(0, Math.min(m.w - 1, tx)), cy = y + Math.max(0, Math.min(m.h / 2 - 1, ty >> 1));
-    d.set(cx, cy, ch, fg, '#05070a');
+  const mark = (tx: number, ty: number, chr: string, fg: string) => {
+    const cx = x + Math.max(0, Math.min(cw - 1, Math.floor(tx / sc))), cy = y + Math.max(0, Math.min(ch - 1, Math.floor(ty / 2 / sc)));
+    d.set(cx, cy, chr, fg, '#05070a');
   };
   // Drop zone
   for (const u of rt.playerUnits) mark(u.x, u.y, '▲', C.cyan);
@@ -108,6 +114,7 @@ export function drawSurvey(d: Display, rt: MissionRuntime, x: number, y: number)
   }
   for (const bc of rt.battle.map.beacons ?? []) mark(bc.x, bc.y, '◎', '#f0c040');
   if (rt.spec.type === 'escort') for (const u of rt.battle.units.filter((v) => v.tag === 'convoy')) mark(u.x, u.y, '■', '#6ad46a');
+  return [cw, ch];
 }
 
 /** Fighting power of one unit: expected damage per volley (scaled by gunnery) and how much it can soak. */

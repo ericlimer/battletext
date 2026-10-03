@@ -18,7 +18,7 @@ import { Pilot, isAvailable, health, skillTotal } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
-import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots, daysToContract, fightOdds, oddsText, MISSION_RISK } from './survey';
+import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots, daysToContract, fightOdds, oddsText, MISSION_RISK, surveySize } from './survey';
 import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
@@ -95,11 +95,13 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
     app.push(new NegotiateScreen(k, argo));
   }
   // Battlefield survey
-  const sm = rt.battle.map, sy = Math.max(yy + 3, y + h - sm.h / 2 - 1), sx = dx + 3;
-  if (sy + sm.h / 2 <= y + h - 1) {
+  const sm = rt.battle.map, room = y + h - 1 - (yy + 3);
+  const [sw, sh] = surveySize(rt, room);
+  const sy = Math.max(yy + 3, y + h - sh - 1), sx = dx + 3;
+  if (sh >= 12) {
     d.text(sx, sy - 1, 'BATTLEFIELD SURVEY', C.accent, undefined, 99, true);
-    drawSurvey(d, rt, sx, sy);
-    const lx = sx + sm.w + 3;
+    drawSurvey(d, rt, sx, sy, room);
+    const lx = sx + sw + 3;
     const legend = ['{#5fd0e8}▲{/} drop zone'];
     if (k.type === 'escort' || k.type === 'ambush' || k.type === 'assassinate') legend.push('{#f0c040}×{/} exit');
     if (k.type === 'escort') legend.push('{#6ad46a}■{/} convoy');

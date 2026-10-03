@@ -148,7 +148,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     if (!goal || u.tag === '' || u.tag === 'escort') {
       let best: [number, number, number] | null = null;
       for (const a of [u, ...b.alliesOf(u)]) for (const [, lk] of a.ai.lastKnown) if (!best || lk[2] > best[2]) best = lk;
-      goal = best ? [best[0], best[1]] : (u.ai.goal ?? (side === 1 ? [8, Math.floor(m.h / 2)] : [m.w - 8, Math.floor(m.h / 2)]));
+      goal = best ? [best[0], best[1]] : (u.ai.goal ?? forceCentre(b, enemies));
     }
     if (u.frame.kind !== 'turret') moveToward(b, u, goal[0], goal[1], dist(u.x, u.y, goal[0], goal[1]) > 14 ? 'sprint' : 'walk');
     b.finishActivation(u);
@@ -328,6 +328,13 @@ function flowField(b: Battle, u: Unit, gx: number, gy: number): Float32Array {
   if (per.size > 24) per.clear();
   per.set(key, f);
   return f;
+}
+
+/** Rough centre of a force: where to search when nothing has been seen yet. */
+function forceCentre(b: Battle, us: Unit[]): [number, number] {
+  const live = us.filter((u) => u.alive && !u.fled);
+  if (!live.length) return [Math.floor(b.map.w / 2), Math.floor(b.map.h / 2)];
+  return [Math.round(live.reduce((a, u) => a + u.x, 0) / live.length), Math.round(live.reduce((a, u) => a + u.y, 0) / live.length)];
 }
 
 function moveToward(b: Battle, u: Unit, gx: number, gy: number, mode: MoveMode): void {

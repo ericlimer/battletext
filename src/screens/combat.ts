@@ -466,8 +466,14 @@ export class CombatScreen implements Screen {
   // ---- Camera ---------------------------------------------------------------------------
   centerOn(x: number, y: number): void {
     const m = this.b.map;
-    this.camX = Math.max(0, Math.min(m.w - VW, Math.round(x - VW / 2)));
-    this.camY = Math.max(0, Math.min(m.h - VH, Math.round(y - VH / 2)));
+    this.camX = Math.round(x - VW / 2); this.camY = Math.round(y - VH / 2);
+    this.clampCam();
+  }
+  /** Keeps the view on the map; a map narrower or shorter than the view is centred in it. */
+  clampCam(): void {
+    const m = this.b.map;
+    this.camX = m.w <= VW ? -Math.floor((VW - m.w) / 2) : Math.max(0, Math.min(m.w - VW, this.camX));
+    this.camY = m.h <= VH ? -Math.floor((VH - m.h) / 2) : Math.max(0, Math.min(m.h - VH, this.camY));
   }
   ensureVisible(x: number, y: number, margin = 6): void {
     if (x < this.camX + margin || x >= this.camX + VW - margin || y < this.camY + margin || y >= this.camY + VH - margin) this.centerOn(x, y);
@@ -731,12 +737,12 @@ export class CombatScreen implements Screen {
     const m = b.map;
     // Camera
     const panSpeed = 1;
-    if (ui.key('ArrowLeft')) this.camX = Math.max(0, this.camX - 3 * panSpeed);
-    if (ui.key('ArrowRight')) this.camX = Math.min(m.w - VW, this.camX + 3 * panSpeed);
-    if (ui.key('ArrowUp')) this.camY = Math.max(0, this.camY - 3 * panSpeed);
-    if (ui.key('ArrowDown')) this.camY = Math.min(m.h - VH, this.camY + 3 * panSpeed);
+    if (ui.key('ArrowLeft')) { this.camX -= 3 * panSpeed; this.clampCam(); }
+    if (ui.key('ArrowRight')) { this.camX += 3 * panSpeed; this.clampCam(); }
+    if (ui.key('ArrowUp')) { this.camY -= 3 * panSpeed; this.clampCam(); }
+    if (ui.key('ArrowDown')) { this.camY += 3 * panSpeed; this.clampCam(); }
     const wh = ui.wheel(MX, MY, VW * 2, VH);
-    if (wh) { if (ui.inp.held.has('Shift')) this.camX = Math.max(0, Math.min(m.w - VW, this.camX + wh * 2)); else this.camY = Math.max(0, Math.min(m.h - VH, this.camY + wh * 2)); }
+    if (wh) { if (ui.inp.held.has('Shift')) this.camX += wh * 2; else this.camY += wh * 2; this.clampCam(); }
     if (ui.key('z')) {
       this.elevMode = (this.elevMode + 1) % ELEV_MODES.length;
       try { localStorage.setItem('bt.elevMode', String(this.elevMode)); } catch { /* private mode */ }
@@ -1023,6 +1029,15 @@ export class CombatScreen implements Screen {
         const S: Record<string, string> = { '0000': '□', '1100': '│', '0011': '─', '0101': '┌', '0110': '┐', '1001': '└', '1010': '┘', '1101': '├', '1110': '┤', '0111': '┬', '1011': '┴', '1111': '┼', '1000': '│', '0100': '│', '0010': '─', '0001': '─' };
         const D: Record<string, string> = { '0000': '■', '1100': '║', '0011': '═', '0101': '╔', '0110': '╗', '1001': '╚', '1010': '╝', '1101': '╠', '1110': '╣', '0111': '╦', '1011': '╩', '1111': '▓', '1000': '║', '0100': '║', '0010': '═', '0001': '═' };
         ch = (dbl ? D : S)[key] ?? '■';
+        if (st?.name === 'Wrecked DropShip') {
+          // A gunmetal hull: solid plating at the edges, buckled interior, glowing breaches
+          const inner = u2 && d2 && l2 && r2;
+          ch = inner ? ((x * 3 + y) % 4 === 0 ? '▓' : '▒') : '█';
+          fg = inner ? '#5a5e64' : '#7a7e84';
+          bg = '#1e2024';
+          if (inner && (x * 7 + y * 5) % 9 === 0) fg = lerp('#ff7a30', '#5a5e64', 0.5 + 0.5 * Math.sin(tt * 2 + x));
+          break;
+        }
         const frac = st ? Math.max(0, st.hp) / st.maxHp : 1;
         fg = obj ? (SIDE(st.team) === 0 ? '#6fd8ff' : '#ff7a58') : t === 'wall' ? '#c0c0b4' : '#b0b0a8';
         bg = obj ? (SIDE(st.team) === 0 ? '#0e2a3a' : '#3a1610') : t === 'wall' ? '#24262a' : '#2e3034';

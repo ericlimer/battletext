@@ -189,13 +189,15 @@ export function assignIcon(p: Pilot, others: Pilot[], rnd: () => number = Math.r
 
 /** Repairs duplicate or legacy icons (the commander keeps the gold star). */
 export function ensureIcons(pilots: Pilot[]): void {
-  const seen = new Set<string>();
-  for (const p of pilots) {
-    if (p.dead) continue;
-    if (p.commander) { p.sigil = '★'; p.color = '#f0a830'; seen.add(p.sigil + p.color); continue; }
-    const key = p.sigil + p.color;
-    if (!SIGILS.includes(p.sigil) || !COLORS.includes(p.color) || seen.has(key)) assignIcon(p, pilots.filter((q) => q !== p && (q.commander || seen.has(q.sigil + q.color))));
-    seen.add(p.sigil + p.color);
+  const done: Pilot[] = [];
+  const live = pilots.filter((p) => !p.dead);
+  const symbolsLeft = live.length <= SIGILS.length;
+  for (const p of live) {
+    if (p.commander) { p.sigil = '★'; p.color = '#f0a830'; done.push(p); continue; }
+    // While there are symbols to spare, each pilot gets their own symbol, not just their own colour
+    const clash = done.some((q) => q.sigil === p.sigil && (symbolsLeft || q.color === p.color));
+    if (!SIGILS.includes(p.sigil) || !COLORS.includes(p.color) || clash) assignIcon(p, done);
+    done.push(p);
   }
 }
 

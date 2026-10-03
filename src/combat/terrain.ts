@@ -127,6 +127,8 @@ export interface MapGenOpts {
   road?: 'h' | 'v' | null;
   base?: { x: number; y: number; w: number; h: number; buildings: number; walls: boolean; team: number; objectiveCount: number } | null;
   clear?: { x: number; y: number; r: number }[];
+  /** Mesas, stray buildings and wreckage that break up open ground (default on). */
+  features?: boolean;
 }
 
 export function generateMap(r: RNG, o: MapGenOpts): BattleMap {
@@ -196,6 +198,8 @@ export function generateMap(r: RNG, o: MapGenOpts): BattleMap {
       }
     }
   }
+  // Hard cover: mesas, stray buildings, a downed DropShip
+  if (o.features !== false) addFeatures(m, r, o);
   // Roads
   if (o.road) carveRoad(m, r, o.road);
   // Base compound
@@ -283,6 +287,85 @@ function carveRoad(m: BattleMap, r: RNG, dir: 'h' | 'v'): void {
       if (r.chance(0.18)) x += r.chance(0.5) ? 1 : -1;
       x = Math.max(3, Math.min(w - 4, x));
       for (const xx of [x, x + 1]) m.terr[y * w + xx] = 'road';
+    }
+  }
+}
+
+const STRAY_NAMES = ['Farmstead', 'Relay Tower', 'Water Tower', 'Grain Silo', 'Pump Station', 'Ruined Chapel', 'Abandoned Barracks', 'Comms Shack', 'Mining Office', 'Weather Station'];
+
+/** Impassable features that block movement and line of sight, kept clear of deployment zones and objectives. */
+function addFeatures(m: BattleMap, r: RNG, o: MapGenOpts): void {
+  const { w, h, biome } = m;
+  // The convoy road wanders through the middle band of the map: keep cliffs and hulks out of its way
+  const roadBand = (x: number, y: number, pad: number) => (o.road === 'h' ? y + pad > h * 0.24 && y - pad < h * 0.76 : o.road === 'v' ? x + pad > w * 0.24 && x - pad < w * 0.76 : false);
+  const keepClear = (x: number, y: number, pad: number) =>
+    roadBand(x, y, Math.min(pad, 3)) ||
+    (o.clear ?? []).some((c) => Math.hypot(x - c.x, y - c.y) < c.r + pad) ||
+    (o.base ? x > o.base.x - 4 - pad && x < o.base.x + o.base.w + 4 + pad && y > o.base.y - 4 - pad && y < o.base.y + o.base.h + 4 + pad : false);
+  // Mesas: ragged plateaus of sheer rock, more of them in broken country
+  const nMesa = biome === 'badlands' ? r.int(3, 5) : biome === 'desert' || biome === 'highlands' || biome === 'martian' || biome === 'lunar' ? r.int(2, 4) : r.int(1, 3);
+  for (let k = 0, tries = 0; k < nMesa && tries < 40; tries++) {
+    const cx = r.int(8, w - 9), cy = r.int(5, h - 6), rad = r.range(1.8, 3.6);
+    if (keepClear(cx, cy, rad + 3)) continue;
+    const stretch = r.range(0.7, 1.6), rot = r.range(0, Math.PI);
+    for (let y = Math.floor(cy - rad * 2); y <= cy + rad * 2; y++) for (let x = Math.floor(cx - rad * 2); x <= cx + rad * 2; x++) {
+      if (!inb(m, x, y)) continue;
+      const dx = x - cx, dy = y - cy;
+      const u = dx * Math.cos(rot) + dy * Math.sin(rot), v = -dx * Math.sin(rot) + dy * Math.cos(rot);
+      const dd = Math.hypot(u / stretch, v * stretch * 0.9) + r.range(-0.45, 0.45);
+      const i = y * w + x;
+      if (m.terr[i] === 'water' || m.terr[i] === 'deep') continue;
+      if (dd < rad) { m.terr[i] = 'rock'; m.elev[i] = 3; }
+      else if (dd < rad + 1 && m.terr[i] === 'plain' && r.chance(0.5)) m.terr[i] = 'rough';
+    }
+    k++;
+  }
+  // Stray buildings: farmsteads, towers and ruins dotted across the field
+  const nB = r.int(1, 4);
+  const names = r.shuffle([...STRAY_NAMES]);
+  for (let k = 0, tries = 0; k < nB && tries < 60; tries++) {
+    const bw = r.int(1, 3), bh = r.int(1, 2);
+    const x = r.int(4, w - 5 - bw), y = r.int(3, h - 4 - bh);
+    if (keepClear(x, y, 4)) continue;
+    let ok = true;
+    for (let yy = y - 1; yy <= y + bh && ok; yy++) for (let xx = x - 1; xx <= x + bw; xx++) {
+      const i = yy * w + xx;
+      if (!inb(m, xx, yy) || m.struct[i] >= 0 || m.terr[i] === 'water' || m.terr[i] === 'deep' || m.terr[i] === 'rock') { ok = false; break; }
+    }
+    if (!ok) continue;
+    const tiles: number[] = [];
+    const e = m.elev[y * w + x];
+    for (let yy = y; yy < y + bh; yy++) for (let xx = x; xx < x + bw; xx++) { tiles.push(yy * w + xx); m.elev[yy * w + xx] = e; }
+    addStructure(m, tiles, names[k % names.length], 120 + bw * bh * 40, false, 2, 'building');
+    k++;
+  }
+  // A downed DropShip: a long, near-indestructible hulk in a field of debris
+  if (r.chance(0.4)) {
+    for (let tries = 0; tries < 30; tries++) {
+      const horiz = r.chance(0.5), len = r.int(7, 10);
+      const x0 = r.int(6, w - 7 - (horiz ? len : 3)), y0 = r.int(4, h - 5 - (horiz ? 3 : len));
+      const cx = x0 + (horiz ? len / 2 : 1), cy = y0 + (horiz ? 1 : len / 2);
+      if (keepClear(cx, cy, len / 2 + 3)) continue;
+      const tiles: number[] = [];
+      for (let k = 0; k < len; k++) for (let j = 0; j < 3; j++) {
+        // Tapered nose and tail
+        if ((k === 0 || k === len - 1) && j !== 1) continue;
+        const x = horiz ? x0 + k : x0 + j, y = horiz ? y0 + j : y0 + k;
+        if (!inb(m, x, y)) continue;
+        tiles.push(y * w + x);
+      }
+      if (tiles.some((i) => m.struct[i] >= 0)) continue;
+      for (const i of tiles) m.elev[i] = m.elev[tiles[0]];
+      addStructure(m, tiles, 'Wrecked DropShip', 2500, false, 2, 'wall');
+      // Debris and scorching around the hulk
+      for (let y = Math.floor(cy - len); y <= cy + len; y++) for (let x = Math.floor(cx - len); x <= cx + len; x++) {
+        if (!inb(m, x, y)) continue;
+        const i = y * w + x, dd = Math.hypot(x - cx, y - cy);
+        if (m.struct[i] >= 0) continue;
+        if (dd < len * 0.75) m.scorch[i] = Math.max(m.scorch[i], 0.6 * (1 - dd / (len * 0.75)));
+        if (dd < len * 0.7 && (m.terr[i] === 'plain' || m.terr[i] === 'rough') && r.chance(0.22)) m.terr[i] = 'rubble';
+      }
+      break;
     }
   }
 }
