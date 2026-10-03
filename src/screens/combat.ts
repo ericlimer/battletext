@@ -65,6 +65,8 @@ export class CombatScreen implements Screen {
   showHelp = false;
   /** Unit shown in the [I]nspect portrait view. */
   inspect: Unit | null = null;
+  /** A lance member shown in the unit card for reference while another unit acts. */
+  view: Unit | null = null;
   missionT0 = Date.now();
   confirmWithdraw = false;
   time = 0;
@@ -483,6 +485,7 @@ export class CombatScreen implements Screen {
   select(u: Unit): void {
     if (this.b.active && this.b.active !== u) return; // must finish current activation
     this.sel = u;
+    this.view = null;
     this.clearTargeting();
     this.mode = 'move';
     this.pending = null;
@@ -762,6 +765,7 @@ export class CombatScreen implements Screen {
     if (!this.canAct(u)) return;
     const canMove = !u.moved && !u.cannotMove && !u.prone && !u.shutdown && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
     // Hotkeys
+    if (this.view && ui.key('Escape')) { this.view = null; return; }
     if (ui.key('Escape') || ui.inp.rclicked) {
       ui.inp.rclicked = false;
       if (this.mode === 'facing' && u.moved === 'sprint') { /* must face */ }
@@ -810,7 +814,7 @@ export class CombatScreen implements Screen {
     const hs = b.structAt(hx, hy);
     if (!ui.click(MX, MY, VW * 2, VH)) return;
     // Clicking
-    if (hu && hu.team === 0 && hu !== u && !b.active) { this.select(hu); return; }
+    if (hu && hu.team === 0 && hu !== u) { if (!b.active && this.canAct(hu)) this.select(hu); else this.view = this.view === hu ? null : hu; return; }
     if (this.mode === 'lock') {
       if (hu && SIDE(hu.team) === 1 && b.detected[0].has(hu.id)) {
         if (!this.commit(u)) return;
@@ -1579,9 +1583,11 @@ export class CombatScreen implements Screen {
     const m = b.map;
     const ht = this.hoverTile;
     const hovered = ht >= 0 ? b.unitAt(ht % m.w, (ht / m.w) | 0) : undefined;
-    const u = this.sel ?? b.active ?? this.rt.playerUnits.find((x) => x.alive) ?? null;
+    if (this.view && !this.view.alive && !this.view.fled) this.view = null;
+    const u = this.view ?? this.sel ?? b.active ?? this.rt.playerUnits.find((x) => x.alive) ?? null;
     let y = MY;
     if (u) y = this.drawUnitCard(ui, u, PX, y, true);
+    if (this.view && u === this.view) d.text(PX + 1, y, '◂ viewing — click it again or [Esc] to return', C.cyan, C.panel, PW - 2);
     // Target / hover card
     let t: Unit | null = null;
     if (hovered && hovered !== u && (SIDE(hovered.team) === 0 || b.seen[0].has(hovered.id))) t = hovered;
@@ -1632,7 +1638,7 @@ export class CombatScreen implements Screen {
         if (ui.hover(x, yy, PW, 2)) ui.setTip([`${u.name}: armor ${arm}/${marm}, structure ${st}/${mst}${b.isMech(u) ? `, heat ${Math.round(u.heat)}/${u.stats.heatCap}` : ''}`]);
         if (u.pilot && u.team === 0) d.ctext(x + 41, yy + 1, healthPips(u.pilot), C.text, bg);
       }
-      if (hov) { ui.cursor = 'pointer'; if (ui.click(x, yy, PW, 2)) { if (this.canAct(u) && !b.active) this.select(u); this.centerOn(u.x, u.y); } }
+      if (hov) { ui.cursor = 'pointer'; if (ui.click(x, yy, PW, 2)) { if (this.canAct(u) && !b.active) this.select(u); else if (u !== this.sel) this.view = this.view === u ? null : u; this.centerOn(u.x, u.y); } }
       yy += 2;
     }
     // Escorted convoy: one compact row, a health block per vehicle

@@ -151,6 +151,10 @@ export type Bonus = 'd' | 'a' | 'h' | 's' | 'c';
 const BONUS_NAMES: Record<Bonus, string> = { d: 'Damage', a: 'Accuracy', h: 'Heat', s: 'Stability dmg', c: 'Crit chance' };
 const MFR = ['Magna', 'Diverse Optics', 'Martell', 'Defiance', 'Harmon', 'Imperator', 'Federated', 'Corean', 'Delta', 'Holly', 'Zeus', 'Kali Yama', 'Armstrong', 'Mydron'];
 
+// Each weapon class handles differently: precise small arms and light rifles hit more often, heavy
+// autocannons and missile clusters less. Unlisted weapons keep their own acc (or 0).
+const CLASS_ACC: Record<string, number> = { SL: 10, MG: 5, FL: 5, ML: 0, LL: 0, PPC: -5, AC2: 5, AC5: 0, AC10: -5, AC20: -10, GAUSS: 5, SRM2: -5, SRM4: -5, SRM6: -5, LRM5: -5, LRM10: -5, LRM15: -5, LRM20: -5 };
+for (const w of W) if (CLASS_ACC[w.id] !== undefined) w.acc = CLASS_ACC[w.id];
 const REG = new Map<string, ItemDef>();
 for (const w of W) REG.set(w.id, { ...w, base: w.id, kind: 'weapon' } as ItemDef);
 for (const a of AMMO) REG.set(a.id, { ...a, base: a.id, kind: 'ammo' } as ItemDef);

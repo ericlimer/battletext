@@ -28,11 +28,18 @@ export class Input {
       const [x, y] = d.toCell(e.clientX, e.clientY);
       this.mx = x; this.my = y; this.moved = true;
     });
+    // The canvas must hold keyboard focus: inside the artifact viewer's frame, a click elsewhere takes it
+    // away, and preventDefault on mousedown below would otherwise stop clicks from ever giving it back.
+    c.tabIndex = 0;
+    c.style.outline = 'none';
+    const grab = () => { try { if (document.activeElement !== c) c.focus({ preventScroll: true }); window.focus(); } catch { /* ignore */ } };
     c.addEventListener('mousedown', (e) => {
       unlockAudio();
       if (e.button === 0) this.down = true;
       e.preventDefault();
+      grab();
     });
+    setTimeout(grab, 0);
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0 && this.down) {
         this.down = false;

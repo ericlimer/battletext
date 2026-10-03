@@ -148,7 +148,7 @@ export function weaponTip(id: string): string[] {
   if (w.kind === 'weapon') {
     out.push(`Damage {#f2f6f8}${w.dmg}${(w.shots ?? 1) > 1 ? ` x${w.shots}` : ''}{/}  Heat {#ff6a2a}${w.heat}{/}  Stability {#8ab4ff}${w.stab}{/}`);
     out.push(`Range ${w.min ? `{#e8503a}min ${w.min}{/} · ` : ''}short ${w.sr} · med ${w.mr} · long ${w.lr} tiles`);
-    if (w.acc) out.push(`Accuracy {#6ad46a}+${w.acc}%{/}`);
+    if (w.acc) out.push(`Accuracy ${w.acc > 0 ? `{#6ad46a}+${w.acc}%{/}` : `{#e8803a}${w.acc}%{/}`}`);
     if (w.bonusText) out.push(`{#f0a830}${w.bonusText}{/}`);
   }
   if (w.kind === 'ammo') out.push(w.explode ? `${w.ammoShots} shots · explodes if critted (up to ${Math.min(180, Math.round((w.ammoShots ?? 0) * w.explode * 0.35))} damage when full)` : `${w.ammoShots} shots`);
