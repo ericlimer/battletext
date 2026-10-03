@@ -18,7 +18,7 @@ import { Pilot, isAvailable, health, skillTotal } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
-import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots, daysToContract } from './survey';
+import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots, daysToContract, fightOdds, oddsText, MISSION_RISK } from './survey';
 import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
@@ -77,8 +77,9 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   const est = oppositionEstimate(rt);
   const lanceT = likelyLance(c, daysToContract(c, k)).reduce((a, m) => a + frameTons(m), 0);
   d.ctext(dx + 3, yy++, `Enemy forces: ${threatText(k.diff)}  {#6d7f8a}· intel: ~${est.units} units, ~${est.tons}t{/}`, C.dim, undefined, dw - 6);
-  const ratio = lanceT / Math.max(1, est.tons);
-  d.ctext(dx + 3, yy++, `Your lance: {#f2f6f8}${lanceT}t{/}  {${ratio >= 1.1 ? '#6ad46a' : ratio >= 0.8 ? '#f0c040' : '#e8503a'}}${ratio >= 1.1 ? 'favourable odds' : ratio >= 0.8 ? 'an even fight' : 'outgunned'}{/}`, C.dim);
+  const odds = fightOdds(c, k), [ot, oc] = oddsText(odds.ratio);
+  d.ctext(dx + 3, yy++, `Your lance: {#f2f6f8}${lanceT}t{/}  {${oc}}${ot}{/} {#6d7f8a}(firepower × armor, pilots counted · ${odds.ratio.toFixed(2)}×){/}${c.storage.length ? ` {#f0c040}· ${c.storage.length} in storage{/}` : ''}`, C.dim, undefined, dw - 6);
+  if (MISSION_RISK[k.type]) d.ctext(dx + 3, yy++, `{#6d7f8a}Risk:{/} ${MISSION_RISK[k.type]}`, C.dim, undefined, dw - 6);
   yy += 1;
   for (const o of rt.objectives) {
     d.ctext(dx + 3, yy++, `${o.primary ? '{#f0a830}■ PRIMARY{/} ' : '{#6d7f8a}◇ OPTIONAL{/}'} ${o.text}${o.bonus ? ` {#f0c850}(+${cbk(o.bonus)}){/}` : ''}`, C.text, undefined, dw - 6);
@@ -203,7 +204,9 @@ export class DropScreen implements Screen {
         d.text(4, y + 3, weaponSummary(m).slice(0, 48), C.text);
         const e = repairEstimate(m);
         if (e.armorPts || e.structPts) d.text(4, y + 5, `Damaged: ${e.armorPts} armor, ${e.structPts} structure missing`, C.warn);
+        const hp = Object.values(chassis(m.defId).hardpoints).flat().filter((h) => h !== 'S').length;
         if (!st.weapons.length) d.text(4, y + 6, '⚠ NO WEAPONS MOUNTED — refit in the Mech Lab', C.red);
+        else if (hp - st.weapons.length >= 2) d.text(4, y + 6, `⚠ ${hp - st.weapons.length} empty hardpoints — under-armed`, C.warn);
       } else d.text(4, y + 2, '— click to assign a \'Mech —', C.faint);
       // Pilot
       if (ui.click(55, y + 1, 32, 6)) this.pick = { i, what: 'pilot' };
@@ -251,16 +254,16 @@ export class DropScreen implements Screen {
       ui.panel(px, 4, pw, 36, 'INTEL');
       // Same intel and verdict as the contract board, for the lance as currently assigned
       const est = oppositionEstimate(surveyOf(c, k));
-      const ratio = tons / Math.max(1, est.tons);
+      const odds = fightOdds(c, k, this.slots), [ot, oc] = oddsText(odds.ratio);
       d.text(px + 2, 6, 'Contract difficulty', C.dim);
       d.text(px + 24, 6, skulls(k.diff), '#e8503a');
       d.text(px + 2, 7, 'Enemy (intel)', C.dim);
       d.text(px + 24, 7, `~${est.units} units, ~${est.tons}t`, C.text);
       d.text(px + 2, 8, 'Your lance', C.dim);
-      d.ctext(px + 24, 8, `${tons}t  {${ratio >= 1.1 ? '#6ad46a' : ratio >= 0.8 ? '#f0c040' : '#e8503a'}}${ratio >= 1.1 ? 'favourable odds' : ratio >= 0.8 ? 'an even fight' : 'outgunned'}{/}`, C.text);
-      wrap(`Expected opposition: ${threatText(k.diff).replace(/\{[^}]*\}/g, '')}.`, pw - 4).forEach((l, j) => d.text(px + 2, 10 + j, l, C.text));
-      d.text(px + 2, 13, 'Negotiated terms', C.dim);
-      d.ctext(px + 2, 14, `{#f0c850}${cb(this.n.cash)}{/} · ${this.n.salvage} salvage (${this.n.priority} priority)`, C.text);
+      d.ctext(px + 24, 8, `${tons}t  {${oc}}${ot}{/}`, C.text);
+      wrap(`Expected opposition: ${threatText(k.diff).replace(/\{[^}]*\}/g, '')}. ${MISSION_RISK[k.type] ?? ''}`, pw - 4).slice(0, 3).forEach((l, j) => d.text(px + 2, 10 + j, l, C.text));
+      d.text(px + 2, 14, 'Negotiated terms', C.dim);
+      d.ctext(px + 2, 15, `{#f0c850}${cb(this.n.cash)}{/} · ${this.n.salvage} salvage (${this.n.priority} priority)`, C.text);
     }
     const ready = this.slots.filter((s) => s.mech && s.pilot);
     if (ui.button(2, ROWS - 3, 'Cancel contract', { key: 'Escape' })) app.pop();

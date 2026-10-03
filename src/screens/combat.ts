@@ -701,7 +701,7 @@ export class CombatScreen implements Screen {
     }
     if (ui.key('c') && u) this.centerOn(u.x, u.y);
     if (!this.canAct(u)) return;
-    const canMove = !u.moved && !u.cannotMove && !u.prone && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
+    const canMove = !u.moved && !u.cannotMove && !u.prone && !u.shutdown && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
     // Hotkeys
     if (ui.key('Escape') || ui.inp.rclicked) {
       ui.inp.rclicked = false;
@@ -727,6 +727,7 @@ export class CombatScreen implements Screen {
     if (ui.key('l') && has(u.pilot ?? undefined, 'sensorlock') && b.canAttack(u)) this.mode = this.mode === 'lock' ? 'move' : 'lock';
     // Space only confirms (a previewed move or a facing); ending the turn takes a deliberate [E]
     const kE = ui.key('e'), kSpace = ui.key(' ');
+    if (u.shutdown && (kE || kSpace)) { this.commit(u); return; } // restarting the reactor is the whole activation
     if (kE || kSpace) {
       if (this.mode === 'facing') this.confirmFacing(u);
       else if (this.pending) this.doMove(u, this.pending.tile, this.pending.mode);
@@ -990,7 +991,7 @@ export class CombatScreen implements Screen {
     const ambient = m.night ? 0.55 : 1;
     const u = this.sel;
     const act = this.playerTurn() && this.canAct(u);
-    const reach = act && u ? this.getReach(u) : null;
+    const reach = act && u && !u.shutdown ? this.getReach(u) : null;
     const pathTiles = new Set<number>();
     let pendingTile = -1, pendingMode: MoveMode | null = null;
     const ht = this.hoverTile;
@@ -1353,7 +1354,7 @@ export class CombatScreen implements Screen {
       if (who) ui.d.text(x, y + 1, '[+/-] change speed', C.faint);
       return;
     }
-    const canMove = !u.moved && !u.cannotMove && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
+    const canMove = !u.moved && !u.cannotMove && !u.prone && !u.shutdown && !(u.attacked && !has(u.pilot ?? undefined, 'ace'));
     const mech = b.isMech(u);
     let cx = x, by = y;
     const btn = (label: string, key: string, active: boolean, disabled: boolean, tip: string, fn: () => void) => {
@@ -1376,7 +1377,7 @@ export class CombatScreen implements Screen {
       if (this.mode === 'facing') this.confirmFacing(u); else { this.mode = 'facing'; this.facingDir = u.facing; }
     });
     // Mode hint line
-    const hint = this.mode === 'facing' ? 'Point to set facing. Click/[E] confirms, [Esc] goes back.' :
+    const hint = u.shutdown ? '{#ff6a2a}SHUTDOWN{/} — [Space] restarts the reactor (this uses the whole activation).' : this.mode === 'facing' ? 'Point to set facing. Click/[E] confirms, [Esc] goes back.' :
       this.mode === 'called' ? (this.calledLoc ? `PRECISION: aiming at the ${locName(this.calledLoc)}. [F]ire, or click another location.` : 'PRECISION: click a location on the target doll, then [F]ire.') :
       this.mode === 'melee' || this.mode === 'dfa' ? (this.meleeTarget ? 'Click a highlighted tile, or the target again.' : 'Click an adjacent-reachable enemy.') :
       this.mode === 'lock' ? 'Click a detected enemy to Sensor Lock.' :
@@ -1531,8 +1532,8 @@ export class CombatScreen implements Screen {
       d.text(x + 1, yy, this.glyphOf(u), col, bg, 99, true);
       d.text(x + 4, yy, (u.team === 0 ? u.name : b.chassisName(u)).slice(0, 13), u.alive ? C.bright : C.faint, bg);
       d.text(x + 18, yy, frameTitle(f).slice(0, 18), C.dim, bg);
-      const status = !u.alive ? (u.fled ? 'EXITED' : u.destroyHow === 'eject' ? 'EJECTED' : 'DESTROYED') : u.acted ? 'done' : u.phase === b.phase ? 'READY' : `ph ${u.phase}`;
-      d.text(x + PW - 1 - status.length, yy, status, !u.alive ? (u.fled ? C.green : C.red) : status === 'READY' ? C.accent : C.faint, bg);
+      const status = !u.alive ? (u.fled ? 'EXITED' : u.destroyHow === 'eject' ? 'EJECTED' : 'DESTROYED') : u.acted ? 'done' : u.shutdown ? 'SHUTDOWN' : u.phase === b.phase ? 'READY' : `ph ${u.phase}`;
+      d.text(x + PW - 1 - status.length, yy, status, !u.alive ? (u.fled ? C.green : C.red) : status === 'SHUTDOWN' ? '#ff6a2a' : status === 'READY' ? C.accent : C.faint, bg);
       if (u.alive) {
         d.text(x + 1, yy + 1, 'A', C.faint, bg); simpleBar(d, x + 2, yy + 1, 12, arm / Math.max(1, marm), '#a8b8c0', '#161c22');
         d.text(x + 15, yy + 1, 'S', C.faint, bg); simpleBar(d, x + 16, yy + 1, 10, st / Math.max(1, mst), healthColor(st / Math.max(1, mst)), '#161c22');

@@ -22,8 +22,10 @@ export function defaultSlots(c: Company, readyIn = 0): DropSlot[] {
   const readyM = c.mechs.filter((m) => mechReady(c, m) || (readyIn > 0 && m.struct.CT > 0 && m.struct.HD > 0 && workQueueDays(c, m.uid) <= readyIn));
   const readyP = c.pilots.filter((p) => isAvailable(p) || (readyIn > 0 && !p.dead && p.healDays <= readyIn));
   const slots: DropSlot[] = [0, 1, 2, 3].map(() => ({ mech: null, pilot: null }));
-  const byTons = [...readyM].sort((a, b) => frameTons(b) - frameTons(a) || frameStats(b).alphaDmg - frameStats(a).alphaDmg);
-  const bySkill = [...readyP].sort((a, b) => skillTotal(b) - skillTotal(a));
+  // Strongest 'Mechs (firepower × armor, so a stripped hulk doesn't outrank an armed light) get the best gunners
+  const power = (m: Frame) => { const u = unitPower(m, 5); return Math.sqrt(u.fp * u.dur); };
+  const byTons = [...readyM].sort((a, b) => power(b) - power(a) || frameTons(b) - frameTons(a));
+  const bySkill = [...readyP].sort((a, b) => b.gun * 2 + b.pil + b.tac * 0.5 - (a.gun * 2 + a.pil + a.tac * 0.5) || skillTotal(b) - skillTotal(a));
   slots.forEach((s, i) => { if (byTons[i] && bySkill[i]) { s.mech = byTons[i].uid; s.pilot = bySkill[i].id; } });
   return slots;
 }
@@ -108,9 +110,45 @@ export function drawSurvey(d: Display, rt: MissionRuntime, x: number, y: number)
   if (rt.spec.type === 'escort') for (const u of rt.battle.units.filter((v) => v.tag === 'convoy')) mark(u.x, u.y, '■', '#6ad46a');
 }
 
+/** Fighting power of one unit: expected damage per volley (scaled by gunnery) and how much it can soak. */
+export function unitPower(f: Frame, gun: number): { fp: number; dur: number } {
+  const st = frameStats(f);
+  const acc = Math.max(0.25, Math.min(0.95, (45 + gun * 3) / 100));
+  return { fp: st.alphaDmg * acc, dur: st.armorTotal + st.structTotal };
+}
+
+/** Lanchester-style odds: (firepower × durability) of each side, square-rooted so 1.0 is an even fight. */
+export function fightOdds(c: Company, k: Contract, lance?: DropSlot[]): { ratio: number; you: number; them: number } {
+  const slots = (lance ?? defaultSlots(c, daysToContract(c, k))).filter((x) => x.mech && x.pilot);
+  let pf = 0, pd = 0;
+  for (const sl of slots) { const m = c.mechs.find((q) => q.uid === sl.mech)!; const p = c.pilots.find((q) => q.id === sl.pilot)!; const u = unitPower(m, p.gun); pf += u.fp; pd += u.dur; }
+  const rt = surveyOf(c, k);
+  let ef = 0, ed = 0;
+  for (const u of rt.battle.units) {
+    if (SIDE(u.team) !== 1 || u.tag === 'convoy') continue;
+    const w = unitPower(u.frame, u.pilot?.gun ?? 3); ef += w.fp; ed += w.dur;
+  }
+  const you = pf * pd, them = Math.max(1, ef * ed);
+  return { ratio: Math.sqrt(you / them), you, them };
+}
+
 /** Intel estimate of the opposition: unit count and tonnage, rounded so it stays an estimate. */
 export function oppositionEstimate(rt: MissionRuntime): { units: number; tons: number; mechs: number } {
   const foes = rt.battle.units.filter((u) => SIDE(u.team) === 1 && u.frame.kind !== 'turret' && u.tag !== 'convoy');
   const tons = foes.reduce((a, u) => a + frameTons(u.frame), 0);
   return { units: foes.length, tons: Math.round(tons / 25) * 25, mechs: foes.filter((u) => u.frame.kind === 'mech').length };
 }
+
+export function oddsText(ratio: number): [string, string] {
+  return ratio >= 1.35 ? ['strongly favoured', '#6ad46a'] : ratio >= 1.1 ? ['favourable odds', '#6ad46a'] : ratio >= 0.85 ? ['an even fight', '#f0c040'] : ratio >= 0.65 ? ['outgunned', '#e8803a'] : ['badly outgunned', '#e8503a'];
+}
+
+/** What makes each mission type dangerous beyond raw strength. */
+export const MISSION_RISK: Record<string, string> = {
+  battle: '', assassinate: 'The target bolts for the map edge if hurt or after round 9 — bring speed.',
+  destroybase: 'Defensive turrets add firepower the estimate counts; buildings soak shots.',
+  defendbase: 'Attackers arrive in waves; the base must survive.',
+  ambush: 'Haulers flee for the edge — fast \'Mechs and long range matter more than armor.',
+  escort: 'Haulers only move with your \'Mechs close; losing two fails the contract.',
+  capture: 'You must hold each beacon with nobody hostile nearby.',
+};

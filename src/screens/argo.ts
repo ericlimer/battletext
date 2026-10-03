@@ -144,7 +144,7 @@ export class ArgoScreen implements Screen {
     x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}{#6d7f8a}·${c.mrb}{/}`, C.dim) + 2;
     const s = sys(c);
     const loc = c.travel ? `→ ${sys(c, c.travel.dest).name} ${travelDaysLeft(c)}d` : `${s.name}`;
-    const room = Math.max(0, COLS - 39 - x);
+    const room = Math.max(0, COLS - 37 - x);
     d.text(x, 0, loc.length > room ? loc.slice(0, Math.max(0, room - 1)) + '…' : loc, c.travel ? C.cyan : C.text, undefined, room);
     if (loc.length > room && ui.hover(x, 0, room, 1)) ui.setTip([loc]);
     // time controls
@@ -206,6 +206,21 @@ export class ArgoScreen implements Screen {
     const pReady = c.pilots.filter((p) => !p.dead && p.injuries === 0).length;
     d.ctext(x + 3, yy++, `'Mechs ready: {#f2f6f8}${ready}{/}/${c.mechs.length} (bays ${c.mechs.length}/${bays(c)})   MechWarriors fit: {#f2f6f8}${pReady}{/}/${c.pilots.filter((p) => !p.dead).length}`, C.dim);
     d.ctext(x + 3, yy++, `Tech capacity {#f2f6f8}${techHours(c)}{/} hrs/day · Work orders {#f2f6f8}${c.work.length}{/}`, C.dim);
+    // Stored 'Mechs don't deploy, count toward odds or need upkeep: make free bays impossible to miss
+    const free = bays(c) - c.mechs.length;
+    if (c.storage.length && free > 0) {
+      const n = Math.min(free, c.storage.length);
+      d.ctext(x + 3, yy, `{#f0c040}⚠ ${c.storage.length} 'Mech${c.storage.length === 1 ? '' : 's'} in storage, ${free} bay${free === 1 ? '' : 's'} free{/}`, C.dim);
+      if (ui.button(x + 38, yy, `Activate ${n}`, { w: 14, tip: 'Move the heaviest stored \'Mechs into free bays (24 tech-hours each to ready).' })) {
+        const pick = [...c.storage].sort((a, b) => frameTons(b) - frameTons(a)).slice(0, n);
+        for (const m of pick) {
+          c.storage = c.storage.filter((q) => q !== m); c.mechs.push(m);
+          c.work.push({ id: 'w' + Math.random().toString(36).slice(2), mechUid: m.uid, kind: 'ready', hours: 24, total: 24, desc: `Ready ${frameName(m)}` });
+        }
+        saveGame(c); this.notify(`Readying ${n} 'Mech${n === 1 ? '' : 's'} from storage`, C.green);
+      }
+      yy++;
+    }
     yy++;
     for (const wo of c.work.slice(0, 6)) {
       const f = 1 - wo.hours / Math.max(1, wo.total);
@@ -434,7 +449,7 @@ export class ArgoScreen implements Screen {
 }
 
 import { chassis } from '../data/mechs';
-import { frameStats } from '../game/frame';
+import { frameStats, frameTons, frameName } from '../game/frame';
 import { workQueueDays } from '../game/company';
 import { salary } from '../game/pilot';
 import { Frame } from '../game/frame';

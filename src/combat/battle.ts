@@ -185,7 +185,7 @@ export class Battle {
   enemiesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) !== SIDE(u.team)); }
   alliesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) === SIDE(u.team) && o !== u); }
   isMech(u: Unit): boolean { return u.frame.kind === 'mech'; }
-  displayName(u: Unit): string { if (SIDE(u.team) === 1 && u.alive && u.deployed && !this.seen[0].has(u.id)) return 'Unknown contact'; return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : u.mapTag ? `${u.mapTag} ${frameShort(u.frame)}` : frameShort(u.frame); }
+  displayName(u: Unit): string { if (this.volleyName && this.volleyName[0] === u) return this.volleyName[1]; if (SIDE(u.team) === 1 && u.alive && u.deployed && !this.seen[0].has(u.id)) return 'Unknown contact'; return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : u.mapTag ? `${u.mapTag} ${frameShort(u.frame)}` : frameShort(u.frame); }
   fullName(u: Unit): string { return frameName(u.frame); }
 
   emit(e: BEvent): void { this.events.push(e); }
@@ -193,6 +193,8 @@ export class Battle {
   private volley: { name: string; color: string; hits: number; shots: number; dmg: number; locs: Map<string, number>; weapons: Map<string, number> }[] | null = null;
   private sayBuf: { text: string; color?: string }[] | null = null;
   private pendingKnock: Set<Unit> | null = null;
+  /** The attacker's name is fixed for a whole volley, so an unseen shooter stays unknown in every line it causes. */
+  private volleyName: [Unit, string] | null = null;
   private record(a: Unit, tname: string, w: ItemDef, hits: number, shots: number, locs: [string, number][]): boolean {
     if (!this.volley) return false;
     let v = this.volley.find((x) => x.name === tname);
@@ -203,6 +205,8 @@ export class Battle {
     return true;
   }
   say(text: string, color?: string): void {
+    // What an unseen enemy does on its own (bracing, standing up…) isn't something your lance can know
+    if (text.startsWith('Unknown contact ') && !text.includes('→')) return;
     if (this.sayBuf) { this.sayBuf.push({ text, color }); return; }
     this.log.push({ text, color, round: this.round });
     this.emit({ k: 'log', text, color });
@@ -675,6 +679,8 @@ export class Battle {
 
   attack(a: Unit, plan: Assignment[], called?: string): void {
     if (!this.canAttack(a)) return;
+    this.volleyName = null;
+    this.volleyName = [a, this.displayName(a)];
     this.volley = []; this.sayBuf = []; this.pendingKnock = new Set();
     // Bracket the volley so the screen can build up to it and dwell on the result
     const p0 = plan[0];
@@ -695,6 +701,7 @@ export class Battle {
       // As in HBS BattleTech, a knockdown lands once the whole volley has resolved
       for (const t of knock) if (t.alive && !t.prone && !t.shutdown) this.knockdown(t);
       this.emit({ k: 'volleyEnd', u: a.id });
+      this.volleyName = null;
     }
   }
 

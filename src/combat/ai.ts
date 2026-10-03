@@ -97,8 +97,10 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   }
 
   // ---- A lone surviving vehicle breaks off rather than be hunted down ---------------------
-  const dry = u.frame.kind === 'vehicle' && !b.weaponsOf(u).some((w) => b.hasAmmo(u, w));
-  if (side === 1 && u.frame.kind === 'vehicle' && (!u.tag || u.tag === 'escort') && !(u as any)._fleeing && (dry || (enemies.length >= 2 && b.alliesOf(u).length === 0
+  // Out of usable weapons: vehicles always run; 'Mechs run unless something is close enough to punch
+  const noGuns = u.frame.kind !== 'turret' && !b.weaponsOf(u).some((w) => b.hasAmmo(u, w));
+  const dry = noGuns && (u.frame.kind === 'vehicle' || !visible.some((e) => dist(e.x, e.y, u.x, u.y) <= u.stats.walk + 1.5));
+  if (side === 1 && (u.frame.kind === 'vehicle' || dry) && (!u.tag || u.tag === 'escort' || (dry && u.tag === 'raider')) && !(u as any)._fleeing && (dry || (enemies.length >= 2 && b.alliesOf(u).length === 0
     && !b.units.some((v) => v !== u && SIDE(v.team) === side && v.alive && !v.deployed)))) {
     (u as any)._fleeing = true;
     if (dry) u.tag = ''; // a dry escort is no longer screening anything
@@ -294,15 +296,50 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
   b.finishActivation(u);
 }
 
+/** Travel cost from every tile to (gx, gy) for this unit's movement rules, so units route around cliffs and basins. */
+const flowCache = new WeakMap<Battle, Map<string, Float32Array>>();
+function flowField(b: Battle, u: Unit, gx: number, gy: number): Float32Array {
+  const m = b.map;
+  let per = flowCache.get(b);
+  if (!per) { per = new Map(); flowCache.set(b, per); }
+  const key = `${u.frame.kind}:${gx},${gy}:${b.round}`;
+  const hit = per.get(key);
+  if (hit) return hit;
+  const f = new Float32Array(m.w * m.h).fill(Infinity);
+  const gi = gy * m.w + gx;
+  f[gi] = 0;
+  // Dijkstra outward from the goal; each step is costed as the unit moving toward the goal
+  const open: number[] = [gi];
+  while (open.length) {
+    let bi = 0;
+    for (let k = 1; k < open.length; k++) if (f[open[k]] < f[open[bi]]) bi = k;
+    const i = open.splice(bi, 1)[0];
+    const x = i % m.w, y = (i / m.w) | 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= m.w || ny >= m.h) continue;
+      const c = b.moveCost(u, nx, ny, x, y);
+      if (!isFinite(c)) continue;
+      const ni = ny * m.w + nx;
+      if (f[i] + c < f[ni]) { f[ni] = f[i] + c; open.push(ni); }
+    }
+  }
+  if (per.size > 24) per.clear();
+  per.set(key, f);
+  return f;
+}
+
 function moveToward(b: Battle, u: Unit, gx: number, gy: number, mode: MoveMode): void {
   if (u.cannotMove || u.frame.kind === 'turret') return;
   const m = b.map;
   const reach = b.reachable(u, mode);
-  let bi = -1, bd = dist(u.x, u.y, gx, gy);
-  for (const [i] of reach) {
-    const d = dist(i % m.w, (i / m.w) | 0, gx, gy) + TERRAIN[m.terr[i]].cost * 0.05;
-    if (d < bd) { bd = d; bi = i; }
-  }
+  const f = flowField(b, u, gx, gy);
+  const here = f[u.y * m.w + u.x];
+  // Follow the flow field when the goal is reachable on foot; otherwise fall back to straight-line progress
+  const score = (i: number) => (isFinite(here) ? f[i] : dist(i % m.w, (i / m.w) | 0, gx, gy) + TERRAIN[m.terr[i]].cost * 0.05);
+  let bi = -1, bd = isFinite(here) ? here : dist(u.x, u.y, gx, gy);
+  for (const [i] of reach) { const d = score(i); if (d < bd) { bd = d; bi = i; } }
   if (bi < 0) return;
   b.move(u, b.pathTo(u, reach, bi, mode), mode);
 }
