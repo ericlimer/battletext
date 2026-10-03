@@ -316,6 +316,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
     if (u.team === 0 || !u.pilot) continue;
     if (taken.has(u.pilot.callsign)) u.pilot.callsign = uniqueCallsign(r, taken);
     taken.add(u.pilot.callsign);
+    u.name = u.pilot.callsign;
   }
   // Text that names enemy pilots is written once callsigns are final
   if (t === 'assassinate') {
@@ -359,7 +360,7 @@ function installHooks(rt: MissionRuntime): void {
         const eo = obj(rt, 'escorts')!;
         if (eo.status === 'active' && esc.every((u) => !u.alive)) eo.status = 'done';
         if (tg && !tg.alive) { obj(rt, 'target')!.status = 'done'; return 'win'; }
-        if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `bolts at round 9 or when badly hurt (round ${b.round})`;
+        if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `round ${b.round} of 9 — bolts then, or sooner if badly hurt`;
         if (tg && tg.fled) { obj(rt, 'target')!.status = 'failed'; return 'loss'; }
         break;
       }
@@ -425,9 +426,11 @@ function installHooks(rt: MissionRuntime): void {
         obj(rt, 'escort')!.progress = `${safe} safe, ${dead} lost`;
         if (dead > 0) obj(rt, 'allsafe')!.status = 'failed';
         if (dead >= 2) { obj(rt, 'escort')!.status = 'failed'; return 'loss'; }
-        if (safe >= 2) {
+        // Done once every hauler is out or lost — or the road is clear, so the rest are sure to make it
+        const clear = rt.enemyUnits.every((u) => u.deployed && (!u.alive || u.fled)) && !b.units.some((u) => u.alive && u.deployed && !u.fled && SIDE(u.team) === 1);
+        if (safe >= 2 && (safe + dead === cv.length || clear)) {
           obj(rt, 'escort')!.status = 'done';
-          const a = obj(rt, 'allsafe')!; if (a.status === 'active') a.status = safe === cv.length ? 'done' : 'failed';
+          const a = obj(rt, 'allsafe')!; if (a.status === 'active') a.status = dead === 0 ? 'done' : 'failed';
           return 'win';
         }
         break;
@@ -453,7 +456,7 @@ function installHooks(rt: MissionRuntime): void {
     const tg = rt.enemyUnits.find((u) => u.tag === 'target');
     if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 9 || tg.dmgTaken > 300)) {
       (tg as any)._fleeing = true;
-      b.say(`${tg.pilot?.callsign ?? 'The target'} is attempting to escape!`, '#f0a830');
+      b.say(`${tg.pilot?.callsign ?? 'The target'} (${b.displayName(tg)}) is attempting to escape!`, '#f0a830');
     }
   };
   void SIDE; void dist;

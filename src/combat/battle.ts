@@ -16,6 +16,8 @@ export interface Unit {
   frame: Frame;
   pilot: Pilot | null;
   name: string;
+  /** Map tag shown on the battlefield (HB, sc, τ1, ■2); set by the combat screen. */
+  mapTag?: string;
   x: number;
   y: number;
   facing: number;
@@ -181,13 +183,14 @@ export class Battle {
   enemiesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) !== SIDE(u.team)); }
   alliesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) === SIDE(u.team) && o !== u); }
   isMech(u: Unit): boolean { return u.frame.kind === 'mech'; }
-  displayName(u: Unit): string { return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : frameShort(u.frame); }
+  displayName(u: Unit): string { return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : u.mapTag ? `${u.mapTag} ${frameShort(u.frame)}` : frameShort(u.frame); }
   fullName(u: Unit): string { return frameName(u.frame); }
 
   emit(e: BEvent): void { this.events.push(e); }
   /** While an attack resolves, per-weapon results collect here and print as one summary line. */
   private volley: { name: string; color: string; hits: number; shots: number; dmg: number; locs: Map<string, number>; weapons: Map<string, number> }[] | null = null;
   private sayBuf: { text: string; color?: string }[] | null = null;
+  private pendingKnock: Set<Unit> | null = null;
   private record(a: Unit, tname: string, w: ItemDef, hits: number, shots: number, locs: [string, number][]): boolean {
     if (!this.volley) return false;
     let v = this.volley.find((x) => x.name === tname);
@@ -213,10 +216,11 @@ export class Battle {
   startRound(): void {
     this.round++;
     this.phase = 5;
+    if (this.round > 1) this.say(`── Round ${this.round} ──`, '#4a5a66');
     for (const u of this.units) {
       if (!u.deployed && u.deployRound <= this.round && u.alive) {
         u.deployed = true;
-        this.say(`Contact: ${frameName(u.frame)} entering the area of operations.`, '#f0a830');
+        this.say(`Contact: ${u.mapTag ? u.mapTag + ' ' : ''}${frameName(u.frame)} entering the area of operations.`, '#f0a830');
       }
       u.acted = false;
       u.reserved = false;
@@ -669,16 +673,18 @@ export class Battle {
 
   attack(a: Unit, plan: Assignment[], called?: string): void {
     if (!this.canAttack(a)) return;
-    this.volley = []; this.sayBuf = [];
+    this.volley = []; this.sayBuf = []; this.pendingKnock = new Set();
     try { this.attackInner(a, plan, called); } finally {
-      const buf = this.sayBuf ?? [], vol = this.volley ?? [];
-      this.sayBuf = null; this.volley = null;
+      const buf = this.sayBuf ?? [], vol = this.volley ?? [], knock = this.pendingKnock ?? new Set<Unit>();
+      this.sayBuf = null; this.volley = null; this.pendingKnock = null;
       for (const v of vol) {
         const locs = [...v.locs.entries()].map(([l, d]) => (l ? `${l} ${d}` : `${d}`)).join(', ');
         const ws = [...v.weapons.entries()].map(([n, k]) => (k > 1 ? `${k}×${n}` : n)).join(' ');
         this.say(`${this.displayName(a)} → ${v.name}: ${v.hits}/${v.shots} hit, ${v.dmg} dmg${locs && v.locs.size > 0 && locs !== String(v.dmg) ? ` (${locs})` : ''} · ${ws}`, v.color);
       }
       for (const m of buf) this.say(m.text, m.color);
+      // As in HBS BattleTech, a knockdown lands once the whole volley has resolved
+      for (const t of knock) if (t.alive && !t.prone && !t.shutdown) this.knockdown(t);
     }
   }
 
@@ -705,7 +711,7 @@ export class Battle {
         if (!hc.ok) continue;
         if (!this.hasAmmo(a, wc)) continue;
         const shots = this.useAmmo(a, w);
-        a.heat += w.heat ?? 0;
+        if (this.isMech(a)) a.heat += w.heat ?? 0;
         if (t) this.fireAtUnit(a, t, w, shots, hc, pc, breaching);
         else if (p.struct) this.fireAtStructure(a, p.struct, w, shots, hc);
         if (t && !t.alive) break;
@@ -736,6 +742,7 @@ export class Battle {
       }
       dmg = Math.max(1, Math.round(dmg));
       const loc = this.rollLocation(t, arc, called, tac);
+      if (loc === 'HD' && t.frame.kind === 'mech' && !t.prone && !t.shutdown) dmg = Math.min(dmg, 45);
       res.push({ hit: true, loc, dmg });
       total += dmg;
     }
@@ -918,7 +925,7 @@ export class Battle {
     this.float(t.x, t.y, 'PILOT INJURED', '#f08a30');
     this.say(`${this.displayName(t)}'s pilot injured (${why}). Health ${Math.max(0, health(t.pilot) - t.pilot.injuries)}/${health(t.pilot)}.`, '#f08a30');
     if (t.pilot.injuries >= health(t.pilot)) {
-      this.say(`${t.pilot.callsign} is incapacitated!`, '#e8503a');
+      this.say(`${t.team === 0 ? t.pilot.callsign : `${this.displayName(t)}'s pilot`} is incapacitated!`, '#e8503a');
       this.kill(t, 'pilot', null);
     }
   }
@@ -941,7 +948,7 @@ export class Battle {
     amt *= Math.max(0.2, 1 - pil * 0.025 - t.stats.stabReduce / 100) * (t.entrenched ? 0.5 : 1);
     t.stab += amt;
     const mx = t.stats.stabMax;
-    if (t.stab >= mx) this.knockdown(t);
+    if (t.stab >= mx) { if (this.pendingKnock) this.pendingKnock.add(t); else this.knockdown(t); }
     else if (t.stab >= mx * 0.5 && !t.unsteady) {
       t.unsteady = true;
       t.pips = 0;
@@ -974,10 +981,10 @@ export class Battle {
     if (by) { by.kills++; this.resolve[SIDE(by.team)] = Math.min(this.resolveMax[SIDE(by.team)], this.resolve[SIDE(by.team)] + 20); }
     this.emit({ k: 'boom', x: t.x, y: t.y, size: how === 'eject' || how === 'pilot' ? 1 : 3 });
     this.emit({ k: 'destroyed', u: t.id, how });
-    this.map.wrecks.set(t.y * this.map.w + t.x, t.frame.kind === 'mech' ? '%' : '&');
+    this.map.wrecks.set(t.y * this.map.w + t.x, t.frame.kind === 'mech' ? '¤' : '&');
     this.map.scorch[t.y * this.map.w + t.x] = 1;
     const what = how === 'eject' ? 'abandoned' : how === 'pilot' ? 'disabled' : 'destroyed';
-    this.say(`${this.fullName(t)} (${this.displayName(t)}) ${what}${by ? ` by ${this.displayName(by)}` : ''}.`, SIDE(t.team) === 0 ? '#e8503a' : '#6ad46a');
+    this.say(`${t.team === 0 ? `${this.fullName(t)} (${this.displayName(t)})` : `${t.mapTag ? t.mapTag + ' ' : ''}${this.fullName(t)}`} ${what}${by ? ` by ${this.displayName(by)}` : ''}.`, SIDE(t.team) === 0 ? '#e8503a' : '#6ad46a');
     this.hooks.destroyed?.(this, t);
   }
 
@@ -1044,7 +1051,7 @@ export class Battle {
         const shc = this.hitChance(a, t, w);
         if (!shc.ok || !t.alive) continue;
         const shots = this.useAmmo(a, w);
-        a.heat += w.heat ?? 0;
+        if (this.isMech(a)) a.heat += w.heat ?? 0;
         this.fireAtUnit(a, t, w, shots, shc, undefined, false);
       }
     }

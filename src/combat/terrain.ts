@@ -74,7 +74,7 @@ export const BIOME_INFO: Record<Biome, BiomeInfo> = {
     forest: ['#7a8a9a', '#4a5a6a'], forestBg: '#101318', water: ['#6a7a9a', '#141820'], rock: '#9aa0aa', road: '#6a6e78',
     forestDensity: 0.0, waterLevel: 0.0, rockDensity: 0.08, roughDensity: 0.16, relief: 1.1, treeGlyphs: ['¤', '¤'] },
   martian: { name: 'Martian', heatMult: 0.9, desc: 'Thin, dusty atmosphere. -10% heat dissipation.',
-    ground: ['#2a120c', '#34170f', '#401c12', '#4e2316'], groundFg: '#a04a2a', groundGlyphs: ['.', '.', '.', '°'],
+    ground: ['#36180f', '#422013', '#4e2617', '#5e2e1b'], groundFg: '#a04a2a', groundGlyphs: ['.', '.', '.', '°'],
     forest: ['#b06a3a', '#804a2a'], forestBg: '#2a120c', water: ['#8a6a6a', '#2a1616'], rock: '#c0704a', road: '#a0684a',
     forestDensity: 0.0, waterLevel: 0.0, rockDensity: 0.1, roughDensity: 0.22, relief: 1.3, treeGlyphs: ['¤', '¤'] },
   polar: { name: 'Polar', heatMult: 1.3, desc: 'Frozen wastes. +30% heat dissipation.',

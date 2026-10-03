@@ -34,6 +34,8 @@ export class CombatScreen implements Screen {
   reachKey = '';
   pending: { tile: number; mode: MoveMode } | null = null;
   target: Unit | null = null;
+  /** The target was chosen automatically after a move; the first click on it only confirms it. */
+  autoPicked = false;
   tStruct: Structure | null = null;
   weaponsOff = new Set<Component>();
   multi = new Map<Component, Unit>();
@@ -87,14 +89,14 @@ export class CombatScreen implements Screen {
         if (u.frame.kind === 'turret' || u.tag === 'convoy') {
           const base = u.frame.kind === 'turret' ? 'τ' : '■';
           let n = 1; while (used.has(base + n)) n++;
-          const g = n < 10 ? base + n : base; used.add(g); this.glyphs.set(u.id, g); continue;
+          const g = n < 10 ? base + n : base; used.add(g); this.glyphs.set(u.id, g); u.mapTag = g; continue;
         }
         if (u.frame.kind === 'vehicle') {
           const code = u.frame.defId.toLowerCase().replace(/[^a-z]/g, '');
           let g = code.slice(0, 2);
           for (let k = 2; used.has(g) && k < code.length; k++) g = code[0] + code[k];
           for (let n = 2; used.has(g) && n < 10; n++) g = code[0] + String(n);
-          used.add(g); this.glyphs.set(u.id, g); continue;
+          used.add(g); this.glyphs.set(u.id, g); u.mapTag = g; continue;
         }
         // Two-letter designation from the BattleTech variant code (HBK-4G → HB, AS7-D → AS)
         const code = u.frame.defId.toUpperCase().replace(/[^A-Z]/g, '');
@@ -103,6 +105,7 @@ export class CombatScreen implements Screen {
         for (let n = 2; used.has(g) && n < 10; n++) g = code[0] + String(n);
         used.add(g);
         this.glyphs.set(u.id, g);
+        u.mapTag = g;
       }
     }
   }
@@ -470,6 +473,7 @@ export class CombatScreen implements Screen {
     // Keep current target if still valid; else pick the best visible enemy in range
     const cands = this.b.enemiesOf(u).filter((e) => this.b.seen[0].has(e.id));
     const valid = (t: Unit) => this.b.weaponsOf(u).some((w) => this.b.hitChance(u, t, item(w.id)).ok);
+    this.autoPicked = true;
     if (this.target && this.target.alive && valid(this.target)) return;
     this.target = null;
     let best: Unit | null = null, bv = 0;
@@ -705,7 +709,8 @@ export class CombatScreen implements Screen {
         for (const w of ws.slice(0, Math.max(1, Math.ceil(ws.length / 2)))) this.multi.set(w, hu);
         return;
       }
-      if (this.target === hu && !this.pending) { this.fire(u); return; }
+      if (this.target === hu && !this.pending && !this.autoPicked) { this.fire(u); return; }
+      this.autoPicked = false;
       this.target = hu; this.tStruct = null; this.multi.clear(); this.calledLoc = null; this.pending = null;
       return;
     }
@@ -849,7 +854,7 @@ export class CombatScreen implements Screen {
         break;
       }
       case 'rock': fg = lerp(scale(B.rock, 1.1), '#ffffff', s * 0.15); bg = scale(B.ground[Math.min(3, e + 1)], 1.05); break;
-      case 'road': fg = scale(B.road, 0.85); bg = lerp(bg, scale(B.road, 0.35), 0.7); ch = '·'; break;
+      case 'road': fg = scale(B.road, 1.15); bg = lerp(bg, scale(B.road, 0.45), 0.75); ch = '·'; break;
       case 'building': case 'wall': {
         const st = m.structures[m.struct[i]];
         const obj = st?.objective;
@@ -1006,7 +1011,7 @@ export class CombatScreen implements Screen {
       d.wide(sx, sy, glyph, fg, bg, facing, un.team === 0 ? '#bfe8ff' : '#ffc0b0');
       // The assassination target wears a gold halo so it can't be lost in a crowd
       if (un.tag === 'target') {
-        const a = 0.25 + 0.15 * Math.sin(this.time * 4);
+        const a = 0.36 + 0.12 * Math.sin(this.time * 4);
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
           const cx = sx + dx * 2, cy = sy + dy;
@@ -1192,7 +1197,7 @@ export class CombatScreen implements Screen {
     const ly = y0 + 4, lh = ROWS - ly;
     const lw = 62;
     const lines: { text: string; color?: string }[] = [];
-    for (const l of this.logLines) for (const w of wrap(l.text, lw - 2)) lines.push({ text: w, color: l.color });
+    for (const l of this.logLines) wrap(l.text, lw - 2).forEach((w, k) => { if (k) for (const v of wrap(w, lw - 4)) lines.push({ text: '  ' + v, color: l.color }); else lines.push({ text: w, color: l.color }); });
     const vis = lh;
     if (this.logScroll.scroll > lines.length - vis) this.logScroll.scroll = Math.max(0, lines.length - vis);
     const whl = ui.wheel(0, ly, lw, lh);
@@ -1256,7 +1261,8 @@ export class CombatScreen implements Screen {
       this.mode === 'called' ? 'PRECISION: click a location on the target doll, [F]ire.' :
       this.mode === 'melee' || this.mode === 'dfa' ? (this.meleeTarget ? 'Click a highlighted tile, or the target again.' : 'Click an adjacent-reachable enemy.') :
       this.mode === 'lock' ? 'Click a detected enemy to Sensor Lock.' :
-      this.pending ? `Click again/[Space] to move. Evasion: ${pipStr(this.b.pipsFor(u, this.pending.mode, this.pendingSteps(u)), this.b.maxPips(u))}` :
+      this.pending ? `Click again/[Space] to move. Evasion: ${pipStr(this.b.pipsFor(u, this.pending.mode, this.pendingSteps(u)), this.b.maxPips(u))}${this.pending.mode === 'jump' ? ` · {#ff8a4a}+${this.pendingSteps(u) * 3} heat → ${Math.round(u.heat + this.pendingSteps(u) * 3)}/${u.stats.heatCap}{/}` : ''}` :
+      this.target && b.canAttack(u) && !this.autoPicked ? `Click ${this.glyphOf(this.target)} again or [F] to FIRE ${this.selectedWeapons(u, this.target).length} weapon${this.selectedWeapons(u, this.target).length === 1 ? '' : 's'} (~${Math.round(this.b.expectedDamage(u, this.target, u, this.selectedWeapons(u, this.target)))} dmg).` :
       u.moved || u.attacked ? (b.canAttack(u) ? 'Click a target and [F]ire, or [E] to end.' : '[E] to choose facing and end.') :
       'Move, attack or brace. [Tab] next unit. [?] help.';
     if (this.flashMsg && this.time < this.flashMsg.until) ui.d.text(x, y + 2, this.flashMsg.text, C.red, undefined, 62);
@@ -1293,7 +1299,13 @@ export class CombatScreen implements Screen {
       ui.header(PX, y + 1, PW, `TARGET: ${s.name.toUpperCase()}`, C.bg, '#c06040');
       d.text(PX + 1, y + 3, `Structure ${Math.max(0, s.hp)}/${s.maxHp}`, C.text);
       simpleBar(d, PX + 1, y + 4, 30, s.hp / s.maxHp, '#c06040');
-      void s;
+      // Why (or how well) the selected unit can hit it
+      if (u && u.team === 0 && b.canAttack(u)) {
+        const res = b.weaponsOf(u).map((w) => b.hitChance(u, null, item(w.id), this.plan ?? u, undefined, false, s));
+        const ok = res.filter((h) => h.ok);
+        if (ok.length) d.ctext(PX + 1, y + 6, `{#6ad46a}${ok.length}{/} weapon${ok.length > 1 ? 's' : ''} in range · best {#f2f6f8}${Math.round(Math.max(...ok.map((h) => h.chance)))}%{/}. Click again or [F] to fire.`, C.dim, undefined, PW - 2);
+        else d.text(PX + 1, y + 6, `Cannot fire: ${res[0]?.reason ?? 'no weapons'}.`, C.red, undefined, PW - 2);
+      }
     }
   }
 
@@ -1364,11 +1376,11 @@ export class CombatScreen implements Screen {
       const bg = hov ? '#1e1414' : C.panel;
       d.fill(x, yy, PW, 1, ' ', C.text, bg);
       d.text(x + 1, yy, this.glyphOf(r.e), C.enemy, bg, 99, true);
-      d.text(x + 4, yy, b.chassisName(r.e).slice(0, 16), C.text, bg);
-      d.text(x + 21, yy, `${r.dd.toFixed(0).padStart(2)} tiles`, C.dim, bg);
+      d.text(x + 4, yy, b.chassisName(r.e), C.text, bg, 20);
+      d.text(x + 25, yy, `${r.dd.toFixed(0).padStart(2)}▸`, C.dim, bg);
       d.text(x + 31, yy, arc === 'rear' ? 'REAR' : arc === 'front' ? 'front' : 'side', arc === 'rear' ? C.red : arc === 'front' ? C.faint : C.warn, bg);
       d.text(x + 38, yy, r.dmg ? `~${r.dmg} dmg` : 'no shot', r.dmg >= 60 ? C.red : r.dmg ? C.orange : C.faint, bg);
-      if (hov) { ui.setTip([`${b.chassisName(r.e)} could deal ~${r.dmg} damage to ${u.name} from its current position.`, `It sees ${u.name}'s ${arc} arc.`]); if (ui.click(x, yy, PW, 1)) this.centerOn(r.e.x, r.e.y); }
+      if (hov) { ui.setTip([`${b.chassisName(r.e)} (${r.dd.toFixed(0)} tiles away) could deal ~${r.dmg} damage to ${u.name} from its current position.`, `It sees ${u.name}'s ${arc} arc.`]); if (ui.click(x, yy, PW, 1)) this.centerOn(r.e.x, r.e.y); }
       yy++;
     }
   }
@@ -1448,8 +1460,8 @@ export class CombatScreen implements Screen {
       const ammoOk = b.hasAmmo(u, wc);
       const from = mine && this.plan ? this.plan : u;
       const meleeMode = this.mode === 'melee' || this.mode === 'dfa';
-      const hc = (t || s) && mine && !meleeMode ? b.hitChance(u, t, w, from, undefined, !!this.calledLoc, s ?? undefined) : null;
       const multiT = this.multi.get(wc);
+      const hc = multiT && mine ? b.hitChance(u, multiT, w, from) : (t || s) && mine && !meleeMode ? b.hitChance(u, t, w, from, undefined, !!this.calledLoc, s ?? undefined) : null;
       const on = mine && !off && ammoOk && (!hc || hc.ok);
       const hov = mine && ui.hover(x, y, PW, 1);
       const bg = hov ? '#1a2630' : C.panel;
@@ -1471,7 +1483,7 @@ export class CombatScreen implements Screen {
         d.text(x + 41, y, txt.padStart(4), hc.ok ? healthColor(hc.chance / 100) : C.faint, bg);
         if (hc.indirect) d.text(x + 46, y, 'IND', C.purple, bg);
       }
-      if (multiT) d.text(x + 46, y, `→${multiT.name.slice(0, 3)}`, C.orange, bg);
+      if (multiT) d.text(x + 46, y, `→${this.glyphOf(multiT)}`, C.orange, bg);
       if (hov) {
         const tip = weaponTip(wc.id);
         if (hc && hc.ok) { tip.push(''); for (const [l, v] of hc.mods) tip.push(`${pad(l, 22)} ${v > 0 && l !== hc.mods[0][0] ? '+' : ''}${v}${l === hc.mods[0][0] ? '%' : ''}`); tip.push(`{#f2f6f8}${pad('Hit chance', 22)} ${Math.round(hc.chance)}%{/}`); }
