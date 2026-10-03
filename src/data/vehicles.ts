@@ -40,7 +40,7 @@ export const VEHICLES: VehicleDef[] = [
   { id: 'MANTICORE', name: 'Manticore Heavy Tank', short: 'MANTICORE', tons: 60, mp: 4, kind: 'vehicle', glyph: 'T', role: 'brawler',
     armor: { F: 170, L: 130, R: 130, B: 90, T: 150 }, items: ['PPC', 'LRM10', 'SRM6', 'ML'], rarity: 1, cost: 1100000, desc: 'A heavy tank that can fight on equal terms with medium \'Mechs.' },
   { id: 'LRMC', name: 'LRM Carrier', short: 'LRM CARR', tons: 60, mp: 3, kind: 'vehicle', glyph: 'C', role: 'support',
-    armor: { F: 90, L: 70, R: 70, B: 50, T: 0 }, items: ['LRM20', 'LRM20', 'LRM20'], rarity: 1, cost: 1000000, desc: 'Sixty long-range missiles per volley. Kill it before it finds your range.' },
+    armor: { F: 90, L: 70, R: 70, B: 50, T: 0 }, items: ['LRM20', 'LRM20'], rarity: 1, cost: 1000000, desc: 'Forty long-range missiles per volley. Kill it before it finds your range.' },
   { id: 'SRMC', name: 'SRM Carrier', short: 'SRM CARR', tons: 60, mp: 3, kind: 'vehicle', glyph: 'C', role: 'brawler',
     armor: { F: 100, L: 80, R: 80, B: 50, T: 0 }, items: ['SRM6', 'SRM6', 'SRM6', 'SRM6'], rarity: 1, cost: 900000, desc: 'A rolling SRM battery that can gut a \'Mech at close range.' },
   { id: 'SCHREK', name: 'Schrek PPC Carrier', short: 'SCHREK', tons: 80, mp: 3, kind: 'vehicle', glyph: 'C', role: 'sniper',
