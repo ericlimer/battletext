@@ -50,7 +50,7 @@ const PAGES: [string, string[]][] = [
     '{#f0a830}◎ Assassinate.{/} Kill a named commander and their escort. After round 9, or once badly hurt, the target runs for the map edge.',
     '{#f0a830}■ Destroy Base.{/} Level the base\'s primary structures. Turrets and a garrison lance defend it.',
     '{#f0a830}⌂ Defend Base.{/} Waves of raiders go for your employer\'s facility. Keep at least one primary structure standing; allied turrets help.',
-    '{#f0a830}» Ambush Convoy.{/} Destroy at least three of four haulers before they leave the map. Their escort screens ahead.',
+    '{#f0a830}» Ambush Convoy.{/} Destroy at least two of four haulers (three on 4+ skull contracts) before they leave the map. Their escort screens ahead.',
     '{#f0a830}« Escort Convoy.{/} The haulers wait for your lance and halt when hostiles close in. Get two of three to the east edge.',
     '{#f0a830}◎ Target Acquisition.{/} Move a unit onto each of three beacons with no enemy within two tiles to secure it.',
     '',

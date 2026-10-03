@@ -144,7 +144,7 @@ export class ArgoScreen implements Screen {
     x += d.ctext(x, 0, `MRB {#f2f6f8}${mrbLevel(c)}{/}{#6d7f8a}·${c.mrb}{/}`, C.dim) + 2;
     const s = sys(c);
     const loc = c.travel ? `→ ${sys(c, c.travel.dest).name} ${travelDaysLeft(c)}d` : `${s.name}`;
-    d.text(x, 0, loc, c.travel ? C.cyan : C.text, undefined, Math.max(0, COLS - 37 - x));
+    d.text(x, 0, loc, c.travel ? C.cyan : C.text, undefined, Math.max(0, COLS - 30 - x));
     // time controls
     const bx = COLS - 36;
     if (ui.button(bx, 0, this.advancing ? '❚❚ Pause' : '▸ Advance', { key: ' ', keyLabel: '␣', tip: 'Pass time continuously until something completes (repairs, healing, arrival) or an event happens.' , style: 'plain', fg: this.advancing ? C.accent : C.text })) {

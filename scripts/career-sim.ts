@@ -69,7 +69,7 @@ while (!c.gameOver && guard++ < 5000) {
       }
       if (hc) for (const l of lance) { l.pilot.gun -= 2; l.pilot.pil -= 1; }
       const r = resolveContract(c, k, neg, rt);
-      for (let dd = 0; dd < r.days; dd++) advanceDay(c);
+      while ((c.deployDays ?? 0) > 0) { c.deployDays!--; advanceDay(c); }
       income += r.pay + r.bonus; repairSpend += r.repairCost; wrecks += r.mechsLost.filter((x) => x.includes('hauled')).length; lostM += r.mechsLost.filter((x) => x.includes('could not')).length;
       if (r.pool.length) {
         const picks = r.pool.map((e, i) => ({ e, i, v: e.value * (e.kind === 'part' && ((c.parts[e.id] ?? 0) > 0 || c.mechs.some((m) => m.defId === e.id)) ? 2 : 1) })).sort((a, b) => b.v - a.v).map((x) => x.i).slice(0, r.priority);

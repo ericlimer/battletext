@@ -206,7 +206,7 @@ export class DropScreen implements Screen {
       const y = 4 + i * 9;
       const m = s.mech ? c.mechs.find((x) => x.uid === s.mech) ?? null : null;
       const p = s.pilot ? c.pilots.find((x) => x.id === s.pilot) ?? null : null;
-      if (m) tons += frameTons(m);
+      if (m && p) tons += frameTons(m);
       d.box(2, y, 86, 8, this.pick?.i === i ? C.accent : C.border, C.panel);
       d.text(4, y, ` SLOT ${i + 1} `, C.accent, C.panel, 99, true);
       // Mech
@@ -323,8 +323,8 @@ export class AftermathScreen implements Screen {
     d.ctext(4, y++, `Repairs queued      {#e8503a}${cb(-r.repairCost)}{/}`, C.dim);
     y++;
     for (const [f, v] of r.repChanges) { const fa = faction(f); d.ctext(4, y++, `{${fa.color}}${fa.name}{/} standing ${v >= 0 ? '{#6ad46a}+' : '{#e8503a}'}${v}{/}  → ${repLevel(c.rep[f]).name}`, C.dim); }
-    d.ctext(4, y++, `MRB rating {#f0a830}+${r.mrbGain}{/}`, C.dim);
-    for (const l of r.lines) d.text(4, y++, l, C.accent, undefined, 66);
+    d.ctext(4, y++, `MRB rating {#f0a830}+${r.mrbGain}{/}${r.outcome === 'loss' && r.mrbGain ? ' {#6d7f8a}(the review board credits any completed drop){/}' : ''}`, C.dim);
+    for (const l of r.lines) for (const w of wrap(l, 66)) if (y < 19) d.text(4, y++, w, C.accent);
     ui.panel(74, 4, COLS - 76, 16, 'MECHWARRIORS');
     y = 6;
     for (const [p, xp] of r.xp) {
@@ -337,7 +337,7 @@ export class AftermathScreen implements Screen {
     // Mech condition
     ui.panel(2, 21, COLS - 4, 18, '\'MECH CONDITION');
     y = 23;
-    for (const m of c.mechs.filter((mm) => c.lance.includes(mm.uid))) {
+    for (const m of c.mechs.filter((mm) => (r.deployed ?? c.lance).includes(mm.uid))) {
       const e = repairEstimate(m);
       const st = frameStats(m);
       d.text(4, y, frameName(m).padEnd(24), C.bright);

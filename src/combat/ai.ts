@@ -38,7 +38,7 @@ function targetValue(b: Battle, a: Unit, t: Unit): number {
   const hp = (s + a2) / Math.max(1, ms + ma);
   let v = 1 + (1 - hp) * 1.2;
   if (t.frame.kind === 'mech') v *= 1.15;
-  if (t.tag === 'convoy') v *= SIDE(t.team) === 0 ? 0.6 : 1.4 * (t.ai.goal && dist(t.x, t.y, t.ai.goal[0], t.ai.goal[1]) < 14 ? 1.6 : 1);
+  if (t.tag === 'convoy') v *= SIDE(t.team) === 0 ? 0.6 : 2.2 * (t.ai.goal && dist(t.x, t.y, t.ai.goal[0], t.ai.goal[1]) < 14 ? 1.6 : 1);
   if (t.prone || t.shutdown) v *= 1.3;
   if ((t as any)._hitRound === b.round) v *= 1.2; // focus fire on what the lance is already hitting
   const arc = attackArc(t, a.x, a.y);

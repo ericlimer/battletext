@@ -84,7 +84,7 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     if (s.diff > maxContractDiff(c) && (sel || hov)) d.text(sx - 1, sy + 1, '!', C.red);
   }
   const order = [...c.systems].sort((p, q) => rank(q) - rank(p));
-  function rank(s: StarSystem): number { return s.id === c.location ? 3 : s.id === st.sel ? 2 : s === hovered ? 1 : 0; }
+  function rank(s: StarSystem): number { return s.id === c.location ? 3 : s.id === st.sel ? 2 : s === hovered ? 1 : s.tags.includes('capital') ? 0.5 : 0; }
   for (const s of order) {
     const [sx, sy] = toS(s);
     const f = faction(s.owner);
@@ -143,7 +143,7 @@ export function drawStarmapTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
     const rt = route(c.systems, c.location, s.id, travelMult(c));
     if (rt) {
       d.ctext(px + 2, yy++, `Route: {#f2f6f8}${rt.path.length - 1}{/} jump${rt.path.length > 2 ? 's' : ''}, {#f2f6f8}${rt.days}{/} days`, C.dim);
-      d.text(px + 2, yy++, rt.path.slice(1).map((id) => sys(c, id).name).join(' → '), C.faint, undefined, pw - 4);
+      wrap(rt.path.map((id) => sys(c, id).name).join(' → '), pw - 4).forEach((l) => d.text(px + 2, yy++, l, C.faint));
       if (!hovered || hovered.id === st.sel) {
         if (c.travel) d.text(px + 2, yy + 1, 'Already in transit.', C.cyan);
         else if (ui.button(px + 2, yy + 1, 'SET COURSE', { key: 'Enter', style: 'block', w: 18, center: true, tip: 'Travel takes time; monthly expenses keep accruing.' })) {

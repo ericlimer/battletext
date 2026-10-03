@@ -260,13 +260,15 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (let i = 0; i < n; i++) convoy.push({ frame: newVehicleFrame('HAULER'), pilot: makePilot(r, 0) });
       const cu = place(b, convoy, 1, 2, rd.wy, 2, { tag: 'convoy' }, 1);
       for (const c of cu) c.ai.goal = [W - 1, rd.ey];
-      for (const cv of cu) for (const k in cv.frame.armor) { cv.frame.armor[k] = Math.round(cv.frame.armor[k] * 1.3); cv.frame.maxArmor[k] = cv.frame.armor[k]; }
       const esc = spec.enemies ?? generateForce(r, d, spec.target, d >= 5 ? 4 : 3);
       // The escort screens ahead of the haulers
       const eu = place(b, esc, 1, 12, rd.wy, 2, { tag: 'escort' });
       for (const e of eu) e.ai.goal = [W - 4, rd.ey];
       enemyUnits = [...cu, ...eu];
-      objectives.push({ id: 'convoy', text: `Destroy the convoy (at least ${n - 1} of ${n} haulers)`, primary: true, status: 'active', bonus: 0 });
+      // Small raids only need to break the convoy; bigger contracts want it gutted
+      const need = d <= 3 ? 2 : 3;
+      (b as any).convoyNeed = need;
+      objectives.push({ id: 'convoy', text: `Destroy the convoy (at least ${need} of ${n} haulers)`, primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'escorts', text: 'Destroy the convoy escort', primary: false, status: 'active', bonus });
       briefing.push(`${art(tgt.short)} ${tgt.short} supply convoy is moving along the highway. Intercept it before it leaves the area.`);
       break;
@@ -395,9 +397,10 @@ function installHooks(rt: MissionRuntime): void {
         obj(rt, 'convoy')!.progress = `${dead}/${cv.length} destroyed, ${fled} escaped`;
         const eo = obj(rt, 'escorts')!;
         if (eo.status === 'active' && combatEnemies().every((u) => !u.alive)) eo.status = 'done';
-        if (fled >= 2) { obj(rt, 'convoy')!.status = 'failed'; return 'loss'; }
-        if (dead >= cv.length - 1 && (dead + fled === cv.length)) { obj(rt, 'convoy')!.status = 'done'; return 'win'; }
-        if (dead >= cv.length - 1 && combatEnemies().every((u) => !u.alive)) { obj(rt, 'convoy')!.status = 'done'; return 'win'; }
+        const need: number = (b as any).convoyNeed ?? cv.length - 1;
+        if (fled > cv.length - need) { obj(rt, 'convoy')!.status = 'failed'; return 'loss'; }
+        if (dead >= need && (dead + fled === cv.length)) { obj(rt, 'convoy')!.status = 'done'; return 'win'; }
+        if (dead >= need && combatEnemies().every((u) => !u.alive)) { obj(rt, 'convoy')!.status = 'done'; return 'win'; }
         break;
       }
       case 'capture': {

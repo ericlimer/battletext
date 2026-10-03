@@ -807,6 +807,8 @@ export class CombatScreen implements Screen {
   mergeLog(text: string): boolean {
     const RE = /^(.+?): (?:(\d+)× )?(.+?) → (.+?) (\d+)\/(\d+) hit(?: \((.*)\))?$/;
     const prev = this.logLines[this.logLines.length - 1];
+    // A quiet round leaves no trace: its divider gives way to the next one
+    if (prev && prev.text.startsWith('── Round') && text.startsWith('── Round')) { prev.text = text; return true; }
     const a = prev && RE.exec(prev.text), b = RE.exec(text);
     if (!a || !b || a[1] !== b[1] || a[3] !== b[3] || a[4] !== b[4]) return false;
     const n = (+(a[2] ?? 1)) + 1;

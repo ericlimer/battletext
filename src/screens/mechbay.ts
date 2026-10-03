@@ -6,7 +6,7 @@ import { COLS } from '../engine/display';
 import type { ArgoScreen } from './argo';
 import { app } from './app';
 import { company, saveGame } from '../game/save';
-import { bays, mechBusy, queueRepair, assembleMech, PARTS_NEEDED, workQueueDays, techHours, addLog } from '../game/company';
+import { bays, mechBusy, queueRepair, assembleMech, assembleFee, partSellPrice, PARTS_NEEDED, workQueueDays, techHours, addLog } from '../game/company';
 import { Frame, frameName, frameStats, repairEstimate, frameValue, isFrameDamaged, weaponSummary, frameSellPrice } from '../game/frame';
 import { chassis, CLASS_NAMES } from '../data/mechs';
 import { item, MECH_LOCS, LOC_NAMES, HARD_COLORS } from '../data/items';
@@ -37,8 +37,9 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
       d.fill(lx, ly, lw, 1, ' ', C.text, bg);
       d.text(lx + 1, ly, `⚙ ${ch.name} ${ch.id}`, ready ? C.cyan : C.text, bg);
       d.text(lx + 30, ly, `${r.n}/${PARTS_NEEDED}`, ready ? C.green : C.dim, bg);
-      if (ready && ui.button(lx + 37, ly, 'Assemble', { style: 'plain', fg: C.green, tip: `Build a ${ch.name} from ${PARTS_NEEDED} parts. Some weapons will be missing.` })) {
-        assembleMech(c, r.id); saveGame(c); argo.notify(`Assembling ${ch.name}`, C.green);
+      const fee = assembleFee(r.id);
+      if (ready && ui.button(lx + 37, ly, 'Assemble', { style: 'plain', fg: c.funds >= fee ? C.green : C.faint, disabled: c.funds < fee, tip: [`Build a ${ch.name} from ${PARTS_NEEDED} parts for ${cb(fee)} in fittings. Some weapons will be missing.`, `Or sell the parts for ${cb(partSellPrice(r.id))} each in the Store.`] })) {
+        const err = assembleMech(c, r.id); saveGame(c); argo.notify(err ?? `Assembling ${ch.name} (${cb(fee)})`, err ? C.red : C.green);
       }
       return;
     }

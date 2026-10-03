@@ -9,6 +9,8 @@ import { Pilot, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, hea
 import { cb, cbk, wrap } from '../engine/util';
 import { skillLine, healthPips } from './widgets';
 
+let trainConfirm = '';
+
 export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: number, h: number): void {
   const d = ui.d, c = company!;
   const st = (argo.st.barracks ??= { mode: 'roster', sel: 0, list: { scroll: 0 }, confirm: false });
@@ -65,10 +67,15 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     d.text(dx + 34, yy, String(v).padStart(2), C.bright, undefined, 99, true);
     if (st.mode === 'roster' && !p.dead && v < 10) {
       const cost = xpCost(v);
-      if (ui.button(dx + 38, yy, `+ ${cost} XP`, { style: 'plain', w: 13, disabled: p.xp < cost, fg: p.xp >= cost ? C.green : C.faint, tip: [SKILL_DESC[s], `Raise to ${v + 1} for ${cost} XP.`] })) {
-        const msg = trainSkill(p, s);
-        saveGame(c);
-        argo.notify(msg ?? `${p.callsign}: ${SKILL_NAMES[s]} ${p[s]}`, C.green);
+      const key = `${p.id}:${s}`, arm = trainConfirm === key;
+      if (ui.button(dx + 38, yy, arm ? 'CONFIRM?' : `+ ${cost} XP`, { style: 'plain', w: 13, disabled: p.xp < cost, fg: arm ? C.accent : p.xp >= cost ? C.green : C.faint, tip: [SKILL_DESC[s], `Raise to ${v + 1} for ${cost} XP. Click twice; XP spent cannot be refunded.`] })) {
+        if (!arm) trainConfirm = key;
+        else {
+          trainConfirm = '';
+          const msg = trainSkill(p, s);
+          saveGame(c);
+          argo.notify(msg ?? `${p.callsign}: ${SKILL_NAMES[s]} ${p[s]}`, C.green);
+        }
       }
     }
     if (ui.hover(dx + 3, yy, 32, 1)) ui.setTip(SKILL_DESC[s]);

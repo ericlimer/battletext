@@ -138,10 +138,29 @@ const CALLSIGNS = ['Ghost', 'Hammer', 'Vixen', 'Deadeye', 'Tinman', 'Bishop', 'R
   'Outlaw', 'Patch', 'Reaper', 'Shrike', 'Thistle', 'Vandal', 'Warden', 'Boomer', 'Cricket', 'Dozer', 'Fang', 'Glitch', 'Hotshot', 'Mustang', 'Static'];
 const ORIGINS = ['Federated Suns', 'Capellan Confederation', 'Free Worlds League', 'Taurian Concordat', 'Magistracy of Canopus', 'Aurigan Reach',
   'Lyran Commonwealth', 'Draconis Combine', 'the Periphery', 'Outworlds Alliance', 'a pirate band', 'a Solaris VII stable'];
-const BIO_A = ['Washed out of the', 'Graduated near the top of the', 'Deserted from the', 'Was a decorated officer in the', 'Trained informally with the',
-  'Spent a decade in the', 'Was blacklisted by the', 'Bought out a contract from the'];
-const BIO_B = ['Robinson Battle Academy', 'Sian Military Academy', 'Allison MechWarrior Institute', 'Taurian Defense Force', 'Canopian Institute of War',
-  'planetary militia', 'Kell Hounds', 'Blackhearts', 'Eridani Light Horse', 'Northwind Highlanders', 'Solaris arena circuit', 'Aurigan Coalition'];
+// Backgrounds follow from origin: academies and home-guard units of their realm, or a mercenary outfit
+const ACADEMY_VERBS = ['Washed out of the', 'Graduated near the top of the', 'Was expelled from the', 'Finished a hard-won commission at the'];
+const UNIT_VERBS = ['Deserted from the', 'Was a decorated officer in the', 'Spent a decade in the', 'Was blacklisted by the', 'Bought out a contract from the', 'Washed out of the'];
+const SCHOOLS: Record<string, [string, 'academy' | 'unit'][]> = {
+  'Federated Suns': [['Robinson Battle Academy', 'academy'], ['Davion Light Guards', 'unit'], ['planetary militia', 'unit']],
+  'Capellan Confederation': [['Sian Military Academy', 'academy'], ['Capellan Hussars', 'unit'], ['planetary militia', 'unit']],
+  'Free Worlds League': [['Allison MechWarrior Institute', 'academy'], ['Fusiliers of Oriente', 'unit'], ['planetary militia', 'unit']],
+  'Taurian Concordat': [['Taurian Defense Force', 'unit'], ['Taurian Military Academy', 'academy']],
+  'Magistracy of Canopus': [['Canopian Institute of War', 'academy'], ['Magistracy Royal Guard', 'unit']],
+  'Aurigan Reach': [['Aurigan Coalition', 'unit'], ['Aurigan Royal Academy', 'academy'], ['planetary militia', 'unit']],
+  'Lyran Commonwealth': [['Nagelring', 'academy'], ['Lyran Guards', 'unit'], ['planetary militia', 'unit']],
+  'Draconis Combine': [['Sun Zhang Academy', 'academy'], ['Sword of Light', 'unit']],
+  'the Periphery': [['planetary militia', 'unit'], ['frontier caravan guard', 'unit']],
+  'Outworlds Alliance': [['Outworlds Alliance Militia', 'unit'], ['planetary militia', 'unit']],
+  'a pirate band': [['Tortuga raiders', 'unit'], ['Marian Hegemony slave-legions', 'unit']],
+  'a Solaris VII stable': [['Solaris arena circuit', 'unit'], ['Solaris VII training stables', 'academy']],
+};
+const MERCS: string[] = ['Kell Hounds', 'Blackhearts', 'Eridani Light Horse', 'Northwind Highlanders'];
+function bioFor(r: RNG, origin: string): string {
+  const own = SCHOOLS[origin] ?? [['planetary militia', 'unit']];
+  const [where, kind] = r.chance(0.7) || origin === 'a pirate band' ? r.pick(own) : [r.pick(MERCS), 'unit' as const];
+  return `${r.pick(kind === 'academy' ? ACADEMY_VERBS : UNIT_VERBS)} ${where}.`;
+}
 const BIO_C = ['Quiet, methodical, and deeply superstitious about their cockpit.', 'Talks constantly over comms. Nobody minds, because they never miss.',
   'Carries a battered holo of a family nobody has ever met.', 'Has a reputation for pushing reactors past redline.', 'Collects enemy callsigns in a notebook.',
   'Refuses to pilot anything without a proper hand actuator.', 'Owes money to at least three different crime syndicates.',
@@ -175,7 +194,7 @@ export function makePilot(r: RNG, tier: number, opts: Partial<Pilot> = {}): Pilo
     abilities: [],
     injuries: 0,
     healDays: 0,
-    bio: `${r.pick(BIO_A)} ${r.pick(BIO_B)}. ${r.pick(BIO_C)}`,
+    bio: `${bioFor(r, origin)} ${r.pick(BIO_C)}`,
     origin,
     kills: 0,
     missions: tier * r.int(2, 6),

@@ -6,7 +6,7 @@ const page = await browser.newPage({ viewport: { width: 1500, height: 960 } });
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
-await page.goto('file://' + path.resolve('dist/battletext.html') + '?auto&speed=4');
+await page.goto('file://' + path.resolve('dist/battletext.html') + '?auto&speed=16');
 await page.waitForTimeout(2000);
 const key = async (k, w = 400) => { await page.keyboard.press(k); await page.waitForTimeout(w); };
 const shot = async (n) => { await page.screenshot({ path: `shots/f_${n}.png` }); };
@@ -15,7 +15,7 @@ await key('2'); await shot('contracts');
 await key('Enter'); await shot('negotiate');
 await key('Enter'); await shot('drop');
 await key('Enter', 3000); await shot('combat0');
-for (let i = 0; i < 60; i++) {
+for (let i = 0; i < 200; i++) {
   await page.waitForTimeout(2000);
   const top = await page.evaluate(() => window.__app.top().constructor.name);
   if (top !== 'CombatScreen') break;

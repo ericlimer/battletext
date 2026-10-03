@@ -7,13 +7,15 @@ import { Contract, Company, mechReady } from '../game/company';
 import { setupMission, MissionRuntime } from '../combat/missions';
 import { BIOME_INFO } from '../combat/terrain';
 import { SIDE } from '../combat/battle';
+import { isAvailable } from '../game/pilot';
 import { Frame, cloneFrame, frameTons, newMechFrame } from '../game/frame';
 
 const cache = new Map<string, MissionRuntime>();
 
 /** The lance the drop screen would field: heaviest ready 'Mechs first. */
 export function likelyLance(c: Company): Frame[] {
-  return c.mechs.filter((m) => mechReady(c, m)).sort((a, b) => frameTons(b) - frameTons(a)).slice(0, 4);
+  const pilots = c.pilots.filter(isAvailable).length;
+  return c.mechs.filter((m) => mechReady(c, m)).sort((a, b) => frameTons(b) - frameTons(a)).slice(0, Math.min(4, pilots));
 }
 
 /** Builds (once) the mission a contract would launch, using placeholder 'Mechs for the player. */

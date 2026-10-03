@@ -25,6 +25,8 @@ export interface MissionResult {
   mechsLost: string[];
   /** 'Mechs written off this mission, with why the wreck was not recovered. */
   writtenOff?: [string, string][];
+  /** uids of the 'Mechs that dropped. */
+  deployed?: string[];
   pool: SalvageEntry[];
   salvageShares: number;
   priority: number;
@@ -57,6 +59,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   const lines: string[] = [];
   const res: MissionResult = { contract: k, neg, outcome: win ? 'win' : outcome === 'withdraw' ? 'withdraw' : 'loss', pay: 0, bonus: 0, repChanges: [], mrbGain: 0, xp: [], casualties: [], mechsLost: [], pool: [], salvageShares: 0, priority: 0, repairCost: 0, lines, days: 0 };
   c.stats.missions++;
+  res.deployed = rt.playerUnits.map((u) => u.frame.uid);
   // ---- Money
   if (win) {
     res.pay = neg.cash;
@@ -101,7 +104,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
       // HBS-style: a cored 'Mech wounds its pilot; death comes from a destroyed cockpit or
       // from wounds exceeding the pilot's health.
       if (u.destroyHow === 'head') died = true;
-      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') { p.injuries++; if (p.injuries > health(p) || r.chance(u.destroyHow === 'ammo' ? 0.3 : 0.12)) died = true; }
+      else if (u.destroyHow === 'ct' || u.destroyHow === 'ammo') { p.injuries++; if (p.injuries > health(p) || r.chance((u.destroyHow === 'ammo' ? 0.22 : 0.09) * Math.max(0.4, 1 - p.gut * 0.06))) died = true; }
       else if (u.destroyHow === 'pilot') died = r.chance(0.2);
     }
     if (died && !p.commander) {
@@ -124,7 +127,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     const m = u.frame;
     if (!u.alive && (u.destroyHow === 'ct' || u.destroyHow === 'ammo')) {
       // Recovery team: likely when the field is held, possible on a withdrawal, never when wiped out
-      const recovered = r.chance(wiped ? 0.3 : win ? 0.85 : 0.6);
+      const recovered = r.chance(wiped ? 0.3 : win ? 0.9 : 0.7);
       if (recovered) {
         (m as any).wreck = true;
         res.mechsLost.push(`${frameName(m)} was cored, but the recovery team hauled the wreck aboard. It needs a full rebuild.`);
@@ -135,7 +138,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
         const back = wiped ? 0 : 1;
         if (back) c.parts[m.defId] = (c.parts[m.defId] ?? 0) + back;
         res.mechsLost.push(`${frameName(m)} was destroyed and could not be recovered${back ? ' — your techs salvaged 1 part' : ''}.`);
-        (res.writtenOff ??= []).push([frameName(m), wiped ? 'lance wiped out — no recovery team reached the wreck' : win ? 'wreck too badly burned to haul out (15% chance)' : `field abandoned before the wreck could be hauled out${back ? '; 1 part salvaged' : ''}`]);
+        (res.writtenOff ??= []).push([frameName(m), wiped ? 'lance wiped out — no recovery team reached the wreck' : win ? 'wreck too badly burned to haul out (1 in 10)' : `field abandoned before the wreck could be hauled out${back ? '; 1 part salvaged' : ''}`]);
       }
     }
   }

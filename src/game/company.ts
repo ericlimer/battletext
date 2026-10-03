@@ -53,19 +53,19 @@ export interface LogEntry { day: number; text: string; color?: string; }
 
 export interface Upgrade { id: string; name: string; cost: number; upkeep: number; desc: string; requires?: string; }
 export const UPGRADES: Upgrade[] = [
-  { id: 'tech1', name: 'MechTech Crew II', cost: 700000, upkeep: 15000, desc: '+50% MechTech hours per day for repairs and refits.' },
+  { id: 'tech1', name: 'MechTech Crew II', cost: 550000, upkeep: 15000, desc: '+50% MechTech hours per day for repairs and refits.' },
   { id: 'tech2', name: 'MechTech Crew III', cost: 1600000, upkeep: 30000, desc: '+100% MechTech hours per day.', requires: 'tech1' },
   { id: 'bay2', name: '\'Mech Bay Pod', cost: 1200000, upkeep: 25000, desc: '+4 active \'Mech bays (from 6 to 10).' },
-  { id: 'med1', name: 'Medical Bay', cost: 650000, upkeep: 12000, desc: 'Injured MechWarriors heal 40% faster.' },
+  { id: 'med1', name: 'Medical Bay', cost: 500000, upkeep: 12000, desc: 'Injured MechWarriors heal 40% faster.' },
   { id: 'med2', name: 'Surgical Suite', cost: 1400000, upkeep: 25000, desc: 'Injured MechWarriors heal 70% faster.', requires: 'med1' },
-  { id: 'train1', name: 'Training Pods', cost: 900000, upkeep: 15000, desc: 'Every MechWarrior gains 25 XP per day.' },
+  { id: 'train1', name: 'Training Pods', cost: 700000, upkeep: 15000, desc: 'Every MechWarrior gains 25 XP per day.' },
   { id: 'train2', name: 'Advanced Simulators', cost: 1800000, upkeep: 30000, desc: 'Every MechWarrior gains 60 XP per day.', requires: 'train1' },
-  { id: 'hydro', name: 'Hydroponics & Galley', cost: 500000, upkeep: 10000, desc: '+4 Morale from real food.' },
+  { id: 'hydro', name: 'Hydroponics & Galley', cost: 400000, upkeep: 10000, desc: '+4 Morale from real food.' },
   { id: 'rec', name: 'Recreation Deck', cost: 1300000, upkeep: 22000, desc: '+6 Morale.', requires: 'hydro' },
-  { id: 'barracks', name: 'Barracks Expansion', cost: 450000, upkeep: 8000, desc: 'Room for 14 MechWarriors (from 8).' },
+  { id: 'barracks', name: 'Barracks Expansion', cost: 350000, upkeep: 8000, desc: 'Room for 14 MechWarriors (from 8).' },
   { id: 'drive', name: 'K-F Drive Tuning', cost: 1800000, upkeep: 20000, desc: 'Travel between systems takes 25% less time.' },
-  { id: 'comms', name: 'HPG Uplink', cost: 800000, upkeep: 14000, desc: '+1 contract offered in every system; contracts last longer.' },
-  { id: 'armory', name: 'Automated Armory', cost: 900000, upkeep: 15000, desc: 'Refits take 40% fewer tech-hours.' },
+  { id: 'comms', name: 'HPG Uplink', cost: 600000, upkeep: 14000, desc: '+1 contract offered in every system; contracts last longer.' },
+  { id: 'armory', name: 'Automated Armory', cost: 700000, upkeep: 15000, desc: 'Refits take 40% fewer tech-hours.' },
   { id: 'toc', name: 'Tactical Operations Center', cost: 1100000, upkeep: 18000, desc: 'Your lance starts every mission with +15 Resolve.', requires: 'comms' },
 ];
 
@@ -159,11 +159,14 @@ export function blackStore(c: Company, s: StarSystem): StoreItem[] {
   return out;
 }
 
+/** The company's one live RNG. Nested callers share it, so an inner save can never be rewound by an outer one. */
+const liveRng = new WeakMap<Company, RNG>();
 export function rngOf(c: Company): RNG {
-  const r = new RNG(c.rngState);
+  let r = liveRng.get(c);
+  if (!r) { r = new RNG(c.rngState); liveRng.set(c, r); }
   return r;
 }
-export function saveRng(c: Company, r: RNG): void { c.rngState = r.state; }
+export function saveRng(c: Company, r: RNG): void { c.rngState = r.state; if (liveRng.get(c) !== r) liveRng.set(c, r); }
 
 export function sys(c: Company, id: string = c.location): StarSystem {
   return c.systems.find((s) => s.id === id)!;
@@ -329,7 +332,8 @@ export function genContract(c: Company, r: RNG, s: StarSystem, opts: { minDiff?:
   const stakes = r.chance(0.2) && maxContractDiff(c) >= s.diff + 2 ? 2 : 0;
   const diff = Math.max(opts.minDiff ?? 1, Math.min(10, s.diff + r.int(-1, 1) + (type === 'assassinate' ? 1 : 0) + stakes));
   const repF = 1 + Math.max(-0.2, Math.min(0.25, (c.rep[employer] ?? 0) / 300));
-  const pay = Math.round((basePay(diff) * r.range(0.9, 1.15) * repF * (s.tags.includes('capital') ? 1.15 : 1)) / 5000) * 5000;
+  // Bonded companies command higher rates: +6% per MRB level
+  const pay = Math.round((basePay(diff) * r.range(0.9, 1.15) * repF * (1 + mrbLevel(c) * 0.06) * (s.tags.includes('capital') ? 1.15 : 1)) / 5000) * 5000;
   const salvageMax = Math.min(14, 5 + Math.floor(diff / 2) + (repLevel(c.rep[employer] ?? 0).idx >= 5 ? 2 : repLevel(c.rep[employer] ?? 0).idx >= 4 ? 1 : 0));
   const tgtF = faction(target), empF = faction(employer);
   const biome = r.pick(s.biomes);
@@ -391,7 +395,9 @@ export function priceMult(c: Company, s: StarSystem): number {
 }
 export function sellPrice(c: Company, id: string): number { return Math.round((item(id).cost * 0.35) / 100) * 100; }
 /** What a single salvaged chassis part fetches on the market. */
-export function partSellPrice(chId: string): number { return Math.round((chassis(chId).cost * 0.07) / 1000) * 1000; }
+export function partSellPrice(chId: string): number { return Math.round((chassis(chId).cost * 0.1) / 1000) * 1000; }
+/** Techs charge for gantry time and fittings to build a 'Mech from salvaged parts. */
+export function assembleFee(chId: string): number { return Math.round((chassis(chId).cost * 0.05) / 1000) * 1000; }
 
 function genStore(c: Company, r: RNG, s: StarSystem): StoreItem[] {
   const out: StoreItem[] = [];
@@ -472,7 +478,11 @@ export function refreshSystem(c: Company, force = false): void {
     c.travelOffers = offers;
     c.travelOffersDay = c.day;
   }
-  if (force || c.day - s.storeDay > 30 || !c.stores[s.id]) { c.stores[s.id] = genStore(c, r, s); s.storeDay = c.day; }
+  if (force || c.day - s.storeDay > 30 || !c.stores[s.id]) {
+    // An unsold lifeline 'Mech stays on the lot when the stock turns over
+    const kept = (c.stores[s.id] ?? []).filter((x) => x.kind === 'mech' && x.id.startsWith('USED:') && x.qty > 0);
+    c.stores[s.id] = [...kept, ...genStore(c, r, s)]; s.storeDay = c.day;
+  }
   if (force || c.day - s.hiresDay > 30 || !c.hires[s.id]) { c.hires[s.id] = genHires(c, r, s); s.hiresDay = c.day; }
   // Lifeline: a battered light 'Mech is always for sale when the company is short-handed
   const st = c.stores[s.id];
@@ -613,7 +623,7 @@ function liquidate(c: Company, say: (t: string, col?: string) => void): void {
   let raised = 0;
   for (const [id, n] of Object.entries(c.inventory)) { if (c.funds >= 0) break; const v = sellPrice(c, id) * n; c.funds += v; raised += v; c.inventory[id] = 0; }
   for (const [id, n] of Object.entries(c.parts)) { if (c.funds >= 0) break; const v = partSellPrice(id) * n; c.funds += v; raised += v; c.parts[id] = 0; }
-  const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const v = Math.min(Math.round(frameValue(m) * 0.35), frameSellPrice(m)); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); say(`Creditors seized ${frameName(m)}.`, '#e8503a'); } };
+  const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const worth = Math.min(Math.round(frameValue(m) * 0.35), frameSellPrice(m)); const v = Math.min(worth, -c.funds); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); say(`Creditors seized ${frameName(m)}${worth > v ? ` against ${cb(v)} of debt — no change given` : ''}.`, '#e8503a'); } };
   sellM(c.storage);
   if (c.funds < 0 && c.mechs.length > 1) { const keep = c.mechs.slice(0, 1); const rest = c.mechs.slice(1); sellM(rest); c.mechs = [...keep, ...rest]; }
   if (raised) say(`Forced liquidation raised ${cb(raised)} to cover debts.`, '#f0a830');
@@ -650,6 +660,9 @@ export function queueRepair(c: Company, m: Frame): { cost: number; hours: number
 
 export function assembleMech(c: Company, chassisId: string): string | null {
   if ((c.parts[chassisId] ?? 0) < PARTS_NEEDED) return 'Not enough parts';
+  const fee = assembleFee(chassisId);
+  if (c.funds < fee) return 'Not enough funds';
+  c.funds -= fee; c.stats.spent += fee;
   c.parts[chassisId] -= PARTS_NEEDED;
   const f = newMechFrame(chassisId);
   // Salvaged 'Mechs arrive stripped of some weapons, like in BATTLETECH

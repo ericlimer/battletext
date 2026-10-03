@@ -9,7 +9,7 @@ import { company, saveGame } from '../game/save';
 import { Frame, cloneFrame, canMount, validate, frameStats, maxArmorPer, slotsUsedIn, frameName } from '../game/frame';
 import { item, Loc, MECH_LOCS, SLOTS, HARD_COLORS, HardType, LOC_NAMES, ARMOR_PER_TON, ARMOR_COST_PER_PT, jumpJetFor } from '../data/items';
 import { chassis, CLASS_NAMES } from '../data/mechs';
-import { cb, pad } from '../engine/util';
+import { cb, pad, wrap } from '../engine/util';
 import { weaponTip, statsSummary, simpleBar, hardpointStr } from './widgets';
 import { addLog, techHours, has } from '../game/company';
 
@@ -74,7 +74,7 @@ export class MechLabScreen implements Screen {
     const ammoShots: Record<string, number> = {};
     for (const it of f.items) { const a = item(it.id); if (a.kind === 'ammo' && !it.dead) ammoShots[a.id] = (ammoShots[a.id] ?? 0) + (a.ammoShots ?? 0); }
     const users: Record<string, number> = {};
-    for (const [id, n] of groups) { const a = item(id).ammo; if (a) users[a] = (users[a] ?? 0) + n; }
+    for (const [id, n] of groups) { const a = item(id).ammo; if (a) users[a] = (users[a] ?? 0) + n * (item(id).shots ?? 1); }
     let alpha = 0, heat = 0, stab = 0;
     for (const [id, n] of [...groups].slice(0, 7)) {
       const w2 = item(id);
@@ -282,7 +282,7 @@ export class MechLabScreen implements Screen {
     if (ui.button(x + 14, yy + 1, 'Strip armor', { style: 'plain' })) for (const k in f.maxArmor) f.maxArmor[k] = 0;
     yy += 3;
     const probs = validate(f);
-    for (const p of probs.slice(0, 6)) { d.text(x + 2, yy, (p.severity === 'error' ? '✕ ' : '! ') + p.text, p.severity === 'error' ? C.red : C.warn, undefined, w - 3); yy++; }
+    for (const p of probs.slice(0, 6)) wrap((p.severity === 'error' ? '✕ ' : '! ') + p.text, w - 4).forEach((l, k) => { if (yy < ROWS - 14) d.text(x + 2 + (k ? 2 : 0), yy++, l, p.severity === 'error' ? C.red : C.warn); });
     if (!probs.length) d.text(x + 2, yy++, '✓ Configuration valid', C.green);
     // Changes
     const ch = this.changes();

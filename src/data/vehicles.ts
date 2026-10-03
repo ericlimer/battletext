@@ -47,7 +47,7 @@ export const VEHICLES: VehicleDef[] = [
     armor: { F: 140, L: 110, R: 110, B: 70, T: 0 }, items: ['PPC', 'PPC', 'PPC'], rarity: 2, cost: 1400000, desc: 'Three PPCs on a tracked chassis. A fearsome long-range threat.' },
   { id: 'DEMOLISHER', name: 'Demolisher Heavy Tank', short: 'DEMOLISHR', tons: 80, mp: 3, kind: 'vehicle', glyph: 'D', role: 'brawler',
     armor: { F: 220, L: 170, R: 170, B: 110, T: 180 }, items: ['AC20', 'AC20'], rarity: 2, cost: 1600000, desc: 'Twin AC/20s. The terror of city fighting.' },
-  { id: 'HAULER', name: 'Cargo Hauler', short: 'HAULER', tons: 40, mp: 4, kind: 'vehicle', glyph: 'c', role: 'convoy',
+  { id: 'HAULER', name: 'Cargo Hauler', short: 'HAULER', tons: 40, mp: 3, kind: 'vehicle', glyph: 'c', role: 'convoy',
     armor: { F: 90, L: 70, R: 70, B: 50, T: 0 }, items: [], rarity: 0, cost: 300000, desc: 'An unarmed armored supply truck.' },
   // ---- Emplacements
   { id: 'TUR-L', name: 'Light Turret', short: 'L.TURRET', tons: 20, mp: 0, kind: 'turret', glyph: 'τ', role: 'turret',
