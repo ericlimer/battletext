@@ -979,8 +979,10 @@ export class CombatScreen implements Screen {
         if (reach && act) {
           if (this.mode === 'jump') { if (reach.jump.has(i)) bg = lerp(bg, '#2a8a4a', 0.32); }
           else if (this.mode === 'move') {
-            if (reach.walk.has(i)) { bg = lerp(bg, '#3a8ae8', 0.34); fg = lerp(fg, '#b0d8ff', 0.35); }
-            else if (reach.sprint.has(i)) { bg = lerp(bg, '#c0a030', 0.24); fg = lerp(fg, '#f0e090', 0.25); }
+            // Water is already blue, so reach over it is drawn paler to stay visible
+            const wet = m.terr[i] === 'water' || m.terr[i] === 'deep';
+            if (reach.walk.has(i)) { bg = lerp(bg, wet ? '#a8d8ff' : '#3a8ae8', wet ? 0.42 : 0.34); fg = lerp(fg, '#b0d8ff', 0.35); }
+            else if (reach.sprint.has(i)) { bg = lerp(bg, '#c0a030', wet ? 0.36 : 0.24); fg = lerp(fg, '#f0e090', 0.25); }
           }
         }
         if (facingU && Math.max(Math.abs(x - facingU.x), Math.abs(y - facingU.y)) <= 6 && (x !== facingU.x || y !== facingU.y)) {
@@ -1225,6 +1227,12 @@ export class CombatScreen implements Screen {
     const bi = BIOME_INFO[m.biome];
     const env = ` ${bi.name}${m.night ? ' · Night' : ''} · heat x${bi.heatMult} `;
     d.text(PX - 2 - env.length, y0, env, C.faint, C.panel);
+    // Elevation tint legend while [Z] is on
+    if (this.showHeights) {
+      const lx = PX - 2 - env.length - 26;
+      d.text(lx, y0, ' ELEV', C.dim, C.panel);
+      ['#1a3a6a', '#2a7a4a', '#b0a030', '#c0502a'].forEach((col, k) => { d.text(lx + 6 + k * 5, y0, ` ${k} `, C.bright, col); });
+    }
     // Action bar
     this.drawActions(ui, 1, y0 + 1);
     // Log
