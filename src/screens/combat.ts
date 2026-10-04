@@ -14,7 +14,7 @@ import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
 import { portraitOf, drawPortrait, locTip } from './portrait';
 import { track, flush } from '../game/telemetry';
-import { UnderFire, startUnderFire, underFireShot, drawUnderFire } from './underfire';
+import { UnderFire, startUnderFire, underFireShot, underFireMelee, drawUnderFire } from './underfire';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
@@ -240,7 +240,7 @@ export class CombatScreen implements Screen {
         if (t) { for (const k in t.frame.maxArmor) hp0 += t.frame.armor[k]; for (const k in t.frame.maxStruct) hp0 += Math.max(0, t.frame.struct[k]); }
         this.vol = { a, t, tx: e.tx, ty: e.ty, n: e.n, fired: 0, dmg: 0, hits: 0, shots: 0, start: this.time, hp0, done: 0, weapons: [] };
         this.volTicks = [];
-        this.uf = seen && t && t.frame.kind === 'mech' && (SIDE(t.team) === 0 || this.visibleUnit(t)) ? startUnderFire(a, t, b.displayName(a), b.displayName(t), e.arm0 && e.str0 ? { arm: e.arm0, str: e.str0 } : undefined) : null;
+        this.uf = seen && t && (SIDE(t.team) === 0 || this.visibleUnit(t)) ? startUnderFire(a, t, b.displayName(a), b.displayName(t), e.arm0 && e.str0 ? { arm: e.arm0, str: e.str0 } : undefined) : null;
         if (seen) {
           // Aim: the camera frames the target and a targeting line draws in before the first shot
           if (t && this.visibleUnit(t)) this.ensureVisible(e.tx, e.ty, 8);
@@ -251,6 +251,7 @@ export class CombatScreen implements Screen {
         break;
       }
       case 'volleyEnd':
+        if (this.uf) this.uf.until = this.time + 1.6;
         if (this.vol) {
           this.vol.done = this.time;
           // Let the result sink in; heavier volleys hold longer
@@ -259,10 +260,11 @@ export class CombatScreen implements Screen {
         break;
       case 'fire': {
         const dur = this.animateFire(e);
+        // Support weapons after a melee blow land on the same sheet
+        if (this.uf) { underFireShot(this.uf, e, this.time + (dur * 0.8) / sp); if (this.uf.until !== Infinity) this.uf.until = Math.max(this.uf.until, this.time + dur / sp + 1.6); }
         if (this.vol) {
           this.vol.fired++;
           this.vol.weapons.push(item(e.w).short);
-          if (this.uf) underFireShot(this.uf, e, this.time + (dur * 0.8) / sp);
           this.volTicks.push({ at: this.time + (dur * 0.8) / sp, dmg: e.total, hits: e.shots.filter((x) => x.hit).length, shots: e.shots.length });
         }
         // Same weapon next: fire as a ripple. A new weapon group gets a beat of its own
@@ -273,6 +275,11 @@ export class CombatScreen implements Screen {
       }
       case 'melee': {
         const a = b.unit(e.u), t = b.unit(e.t);
+        if ((SIDE(a.team) === 0 || b.seen[0].has(a.id) || SIDE(t.team) === 0) && (SIDE(t.team) === 0 || this.visibleUnit(t))) {
+          this.uf = startUnderFire(a, t, b.displayName(a), b.displayName(t), e.arm0 && e.str0 ? { arm: e.arm0, str: e.str0 } : undefined);
+          underFireMelee(this.uf, e, this.time + 0.05);
+          this.uf.until = this.time + 0.45 / sp + 2;
+        }
         const [ax, ay] = this.posOf(a), [tx, ty] = this.posOf(t);
         this.fx.parts.push({ x: tx, y: ty, vx: 0, vy: 0, life: 0, max: 0.3, glyph: e.hit ? '✶' : '·', c0: '#ffffff', c1: '#f0a830', light: e.hit ? 3 : 0 });
         sfx('melee', 0, e.hit ? 1 : 0.4);
@@ -962,8 +969,8 @@ export class CombatScreen implements Screen {
     this.drawTopBar(ui);
     this.drawBottom(ui);
     // While a 'Mech is being shot, the panel shows its record sheet (click to hide)
-    if (this.uf && (!this.vol || this.uf.hidden)) { if (!this.vol) this.uf = null; }
-    if (this.uf && !this.uf.hidden) drawUnderFire(ui, this.uf, this.time, PX, MY, PW, ROWS - MY, !!this.vol?.done);
+    if (this.uf && this.time > this.uf.until) this.uf = null;
+    if (this.uf && !this.uf.hidden) drawUnderFire(ui, this.uf, this.time, PX, MY, PW, ROWS - MY);
     else this.drawPanel(ui);
     // Frame lines
     d.vline(PX - 1 + 0, MY, ROWS - MY, C.border);

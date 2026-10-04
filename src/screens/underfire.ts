@@ -4,10 +4,13 @@
 import { UI } from '../engine/ui';
 import { C, healthColor } from '../engine/color';
 import { Unit, BEvent, SIDE, attackArc } from '../combat/battle';
-import { item } from '../data/items';
+import { item, LOC_NAMES } from '../data/items';
 import { frameTitle } from './widgets';
 
 type Fire = Extract<BEvent, { k: 'fire' }>;
+type Melee = Extract<BEvent, { k: 'melee' }>;
+/** One attack landing on the sheet: a weapon's shots, or a melee blow. */
+type Blow = { name: string; hits: number; shots: number; total: number; arm0: Record<string, number>; str0: Record<string, number>; arm: Record<string, number>; str: Record<string, number>; crits: string[] };
 type Snap = { arm: Record<string, number>; str: Record<string, number> };
 type Row = { w: string; hits: number; shots: number; locs: string; crits: string[] };
 
@@ -15,8 +18,9 @@ export interface UnderFire {
   a: Unit; t: Unit; title: string; arc: string;
   start: Snap; prev: Snap; cur: Snap;
   blinkAt: number; struck: Map<string, number>; // part key (rear as CTR…) → damage from the latest weapon
-  rows: Row[]; pend: { at: number; e: Fire }[];
+  rows: Row[]; pend: { at: number; e: Blow }[];
   dmg: number; hits: number; shots: number; hidden: boolean;
+  until: number; // when the sheet gives the panel back (Infinity while the attack is still playing)
 }
 
 const BLINK = 0.6; // three flashes
@@ -53,13 +57,38 @@ const REAR: Span[][] = [
   [['l', 1, 3], ['c', 5, 10], ['r', 12, 14]],
   [['c', 6, 9]],
 ];
+// Vehicles, seen from above with the front at the top: tracks down the sides, turret amidships
+const VEHICLE: Span[][] = [
+  [['L', 1, 4], ['F', 8, 21], ['R', 25, 28]],
+  [['L', 0, 4], ['F', 7, 22], ['R', 25, 29]],
+  [['L', 0, 4], ['F', 6, 23], ['R', 25, 29]],
+  [['L', 0, 4], ['F', 6, 23], ['R', 25, 29]],
+  [['L', 0, 4], ['R', 25, 29]],
+  [['L', 0, 4], ['R', 25, 29]],
+  [['L', 0, 4], ['T', 10, 19], ['R', 25, 29]],
+  [['L', 0, 4], ['T', 9, 20], ['R', 25, 29]],
+  [['L', 0, 4], ['T', 9, 20], ['R', 25, 29]],
+  [['L', 0, 4], ['T', 9, 20], ['R', 25, 29]],
+  [['L', 0, 4], ['T', 10, 19], ['R', 25, 29]],
+  [['L', 0, 4], ['R', 25, 29]],
+  [['L', 0, 4], ['R', 25, 29]],
+  [['L', 0, 4], ['B', 6, 23], ['R', 25, 29]],
+  [['L', 0, 4], ['B', 6, 23], ['R', 25, 29]],
+  [['L', 0, 4], ['B', 7, 22], ['R', 25, 29]],
+  [['L', 1, 4], ['R', 25, 28]],
+];
+// A fixed gun emplacement: one armoured block
+const EMPLACEMENT: Span[][] = [
+  [['T', 9, 20]], [['T', 7, 22]], [['T', 6, 23]], [['T', 6, 23]], [['T', 6, 23]],
+  [['T', 6, 23]], [['T', 6, 23]], [['T', 6, 23]], [['T', 7, 22]], [['T', 9, 20]],
+];
 const CODE: Record<string, string> = { h: 'HD', c: 'CT', r: 'RT', l: 'LT', a: 'RA', b: 'LA', x: 'RL', y: 'LL' };
 const BOX = ['·', '│', '─', '└', '│', '│', '┌', '├', '─', '┘', '─', '┴', '┐', '┤', '┬', '┼'];
 
 /** Part cells (row-major) and the outline cells around them, offset by one so the outline fits. */
-function grid(spans: Span[][]) {
+function grid(spans: Span[][], has: (l: string) => boolean = () => true) {
   const parts = new Map<string, string>();
-  spans.forEach((row, y) => row.forEach(([k, a, b]) => { for (let x = a; x <= b; x++) parts.set(`${x + 1},${y + 1}`, CODE[k]); }));
+  spans.forEach((row, y) => row.forEach(([k, a, b]) => { const l = CODE[k] ?? k; if (has(l)) for (let x = a; x <= b; x++) parts.set(`${x + 1},${y + 1}`, l); }));
   const border = new Map<string, Set<string>>();
   const byPart: Record<string, [number, number][]> = {};
   for (const [key, l] of parts) {
@@ -82,7 +111,14 @@ function grid(spans: Span[][]) {
   }
   return { border, byPart, glyph };
 }
-const FRONT_G = grid(FRONT), REAR_G = grid(REAR);
+const FRONT_G = grid(FRONT), REAR_G = grid(REAR), EMPLACEMENT_G = grid(EMPLACEMENT);
+const vehicleGrids = new Map<string, ReturnType<typeof grid>>();
+/** A vehicle's outline, leaving out locations it doesn't have (no turret, say). */
+function vehicleGrid(f: Unit['frame']) {
+  const key = ['F', 'L', 'R', 'B', 'T'].filter((l) => (f.maxStruct[l] ?? 0) > 0).join('');
+  if (!vehicleGrids.has(key)) vehicleGrids.set(key, grid(VEHICLE, (l) => key.includes(l)));
+  return vehicleGrids.get(key)!;
+}
 
 
 /** `before` is the target's armour and structure as the volley began (the battle has already resolved it). */
@@ -90,36 +126,44 @@ export function startUnderFire(a: Unit, t: Unit, aName: string, tName: string, b
   const s = before ?? { arm: { ...t.frame.armor }, str: { ...t.frame.struct } };
   return {
     a, t, title: `${aName} ▸ ${tName}`, arc: attackArc(t, a.x, a.y),
-    start: s, prev: s, cur: s, blinkAt: -9, struck: new Map(), rows: [], pend: [], dmg: 0, hits: 0, shots: 0, hidden: false,
+    start: s, prev: s, cur: s, blinkAt: -9, struck: new Map(), rows: [], pend: [], dmg: 0, hits: 0, shots: 0, hidden: false, until: Infinity,
   };
 }
 
 /** Queue a weapon's result; it lands on the doll at the moment its shots hit on the map. */
 export function underFireShot(uf: UnderFire, e: Fire, at: number): void {
-  if (e.t !== uf.t.id || !e.arm || !e.arm0) return;
-  uf.pend.push({ at, e });
+  if (e.t !== uf.t.id || !e.arm || !e.arm0 || !e.str || !e.str0) return;
+  const hits = e.shots.filter((s) => s.hit).length;
+  uf.pend.push({ at, e: { name: item(e.w).name, hits, shots: e.shots.length, total: e.total, arm0: e.arm0, str0: e.str0, arm: e.arm, str: e.str, crits: e.crits ?? [] } });
 }
 
-function land(uf: UnderFire, e: Fire, now: number): void {
-  const prev: Snap = { arm: e.arm0!, str: e.str0! }, cur: Snap = { arm: e.arm!, str: e.str! };
+/** Queue a melee or death-from-above blow. */
+export function underFireMelee(uf: UnderFire, e: Melee, at: number): void {
+  if (e.t !== uf.t.id || !e.arm || !e.arm0 || !e.str || !e.str0) return;
+  uf.pend.push({ at, e: { name: e.dfa ? 'Death From Above' : 'Melee', hits: e.hit ? 1 : 0, shots: 1, total: e.dmg, arm0: e.arm0, str0: e.str0, arm: e.arm, str: e.str, crits: e.crits ?? [] } });
+}
+
+const locLabel = (k: string) => (/^[CLR]TR$/.test(k) ? `${k.slice(0, 2)}(R)` : k);
+
+function land(uf: UnderFire, e: Blow, now: number): void {
+  const prev: Snap = { arm: e.arm0, str: e.str0 }, cur: Snap = { arm: e.arm, str: e.str };
   uf.prev = prev; uf.cur = cur;
   const struck = new Map<string, number>();
-  for (const k of Object.keys(cur.arm)) {
+  for (const k of new Set([...Object.keys(cur.arm), ...Object.keys(cur.str)])) {
     const lostA = Math.max(0, (prev.arm[k] ?? 0) - (cur.arm[k] ?? 0));
     const lostS = k in cur.str ? Math.max(0, Math.max(0, prev.str[k] ?? 0) - Math.max(0, cur.str[k] ?? 0)) : 0;
     if (lostA + lostS > 0) struck.set(k, lostA + lostS);
   }
   uf.struck = struck;
   if (struck.size) uf.blinkAt = now;
-  const hits = e.shots.filter((s) => s.hit);
-  const byLoc = new Map<string, number>();
-  for (const h of hits) byLoc.set(h.loc, (byLoc.get(h.loc) ?? 0) + h.dmg);
-  uf.rows.push({ w: item(e.w).name, hits: hits.length, shots: e.shots.length, locs: [...byLoc].map(([l, d]) => `${l.replace(/R$/, '(R)')} -${d}`).join(' '), crits: e.crits ?? [] });
-  uf.dmg += e.total; uf.hits += hits.length; uf.shots += e.shots.length;
+  // Where the damage actually went, transfers included
+  uf.rows.push({ w: e.name, hits: e.hits, shots: e.shots, locs: [...struck].map(([l, d]) => `${locLabel(l)} -${d}`).join(' '), crits: e.crits });
+  uf.dmg += e.total; uf.hits += e.hits; uf.shots += e.shots;
 }
 
-/** Draws the sheet over the panel (x, y, w × h). `finished` once the volley has resolved. */
-export function drawUnderFire(ui: UI, uf: UnderFire, now: number, x0: number, y0: number, w: number, h: number, finished: boolean): void {
+/** Draws the sheet over the panel (x, y, w × h). */
+export function drawUnderFire(ui: UI, uf: UnderFire, now: number, x0: number, y0: number, w: number, h: number): void {
+  const finished = uf.until !== Infinity && !uf.pend.length;
   for (const p of uf.pend) if (now >= p.at) { land(uf, p.e, now); p.at = Infinity; }
   uf.pend = uf.pend.filter((p) => p.at !== Infinity);
   const d = ui.d, t = uf.t, f = t.frame;
@@ -168,23 +212,40 @@ export function drawUnderFire(ui: UI, uf: UnderFire, now: number, x0: number, y0
       }
     }
   };
-  const fx = x0 + 1, rx = x0 + 33;
-  draw(FRONT_G, fx, y, false);
-  d.text(fx, y, 'R', C.dim); d.text(fx + 29, y, 'L', C.dim);
-  d.text(fx + 9, y + 22, '── FRONT ──', C.faint);
-  draw(REAR_G, rx - 1, y + 1, true);
-  d.text(rx + 4, y + 8, '─ REAR ─', C.faint);
+  const fx = x0 + 1, mech = f.kind === 'mech';
+  let rx = x0 + 33, ly = y + 10, list = ['HD', 'CT', 'RT', 'LT', 'RA', 'LA', 'RL', 'LL'];
+  if (mech) {
+    draw(FRONT_G, fx, y, false);
+    d.text(fx, y, 'R', C.dim); d.text(fx + 29, y, 'L', C.dim);
+    d.text(fx + 9, y + 22, '── FRONT ──', C.faint);
+    draw(REAR_G, rx - 1, y + 1, true);
+    d.text(rx + 4, y + 8, '─ REAR ─', C.faint);
+  } else if (f.kind === 'turret') {
+    draw(EMPLACEMENT_G, fx, y + 5, false);
+    d.text(fx + 7, y + 18, '── EMPLACEMENT ──', C.faint);
+    list = ['T']; ly = y + 2;
+  } else {
+    // Seen from above, so its left is on your left
+    draw(vehicleGrid(f), fx, y + 1, false);
+    d.text(fx + 12, y, '▲ FRONT', C.dim);
+    d.text(fx + 2, y, 'L', C.dim); d.text(fx + 28, y, 'R', C.dim);
+    d.text(fx + 8, y + 21, '── TOP VIEW ──', C.faint);
+    list = ['F', 'L', 'R', 'B', 'T'].filter((l) => (f.maxStruct[l] ?? 0) > 0); ly = y + 2;
+  }
   // Exact values: armour now / max, or internal structure once the armour is gone
-  let ly = y + 10;
-  for (const l of ['HD', 'CT', 'RT', 'LT', 'RA', 'LA', 'RL', 'LL']) {
+  const name = (l: string) => (mech ? l : (LOC_NAMES[l] ?? l).replace(' Side', '').padEnd(6).slice(0, 6));
+  const vx = mech ? 3 : 7;
+  if (!mech) rx = x0 + 33;
+  for (const l of list) {
     const maxA = f.maxArmor[l] ?? 0, arm = Math.max(0, uf.cur.arm[l] ?? 0), str = Math.max(0, uf.cur.str[l] ?? 0);
     const lost = (Math.max(0, uf.start.arm[l] ?? 0) - arm) + (Math.max(0, uf.start.str[l] ?? 0) - str) + (l.endsWith('T') ? Math.max(0, uf.start.arm[l + 'R'] ?? 0) - Math.max(0, uf.cur.arm[l + 'R'] ?? 0) : 0);
     const fl = tagOn && (uf.struck.has(l) || uf.struck.has(l + 'R'));
-    d.text(rx, ly, l, fl ? C.bright : C.dim);
-    if (str <= 0) d.text(rx + 3, ly, ' GONE', '#c04a3a');
-    else if (arm > 0) d.text(rx + 3, ly, `${String(arm).padStart(3)}/${maxA}`, fl ? '#ffd080' : healthColor(arm / Math.max(1, maxA)));
-    else d.text(rx + 3, ly, ` IS ${str}`, '#e0603a');
-    if (lost > 0) d.text(rx + 11, ly, `-${lost}`, '#ff7a3a');
+    d.text(rx, ly, name(l), fl ? C.bright : C.dim);
+    if (str <= 0) d.text(rx + vx, ly, ' GONE', '#c04a3a');
+    else if (arm > 0) d.text(rx + vx, ly, `${String(arm).padStart(3)}/${maxA}`, fl ? '#ffd080' : healthColor(arm / Math.max(1, maxA)));
+    else d.text(rx + vx, ly, ` IS ${str}`, '#e0603a');
+    if (lost > 0) d.text(rx + vx + (mech ? 8 : 0), ly + (mech ? 0 : 1), mech ? `-${lost}` : `       -${lost}`, '#ff7a3a');
+    if (!mech) ly++;
     ly++;
   }
   // Shot ledger: one line per weapon, newest at the bottom

@@ -68,7 +68,7 @@ export type BEvent =
   | { k: 'fire'; u: number; t: number; tx: number; ty: number; w: string; shots: Shot[]; indirect: boolean; total: number; struct?: boolean;
       // Target's armour and structure before and after this weapon, and what it crit, for the attack view
       arm0?: Record<string, number>; str0?: Record<string, number>; arm?: Record<string, number>; str?: Record<string, number>; crits?: string[] }
-  | { k: 'melee'; u: number; t: number; hit: boolean; dmg: number; dfa: boolean; loc: string }
+  | { k: 'melee'; u: number; t: number; hit: boolean; dmg: number; dfa: boolean; loc: string; arm0?: Record<string, number>; str0?: Record<string, number>; arm?: Record<string, number>; str?: Record<string, number>; crits?: string[] }
   | { k: 'float'; x: number; y: number; text: string; color: string; big?: boolean }
   | { k: 'log'; text: string; color?: string }
   | { k: 'boom'; x: number; y: number; size: number }
@@ -1065,7 +1065,9 @@ export class Battle {
       else loc = this.rollLocation(t, arc);
       if (t.guarded && arc !== 'rear') dmg = Math.round(dmg * 0.6);
     }
-    this.emit({ k: 'melee', u: a.id, t: t.id, hit, dmg: hit ? dmg : 0, dfa, loc });
+    const ev: Extract<BEvent, { k: 'melee' }> = { k: 'melee', u: a.id, t: t.id, hit, dmg: hit ? dmg : 0, dfa, loc, arm0: { ...t.frame.armor }, str0: { ...t.frame.struct } };
+    this.emit(ev);
+    this.critBuf = [];
     if (hit) {
       // Split into two blows for the damage model
       const half = Math.ceil(dmg / 2);
@@ -1084,6 +1086,7 @@ export class Battle {
     } else {
       this.say(`${this.displayName(a)} ${dfa ? 'DFA' : 'melee'} misses ${this.displayName(t)}.`, '#889');
     }
+    ev.arm = { ...t.frame.armor }; ev.str = { ...t.frame.struct }; ev.crits = this.critBuf; this.critBuf = null;
     // Support weapons fire alongside a melee attack, as in BATTLETECH
     if (t.alive && a.alive) {
       const sup = this.weaponsOf(a).filter((w) => item(w.id).hard === 'S' && this.hasAmmo(a, w));
