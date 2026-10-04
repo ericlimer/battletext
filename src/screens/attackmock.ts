@@ -178,7 +178,7 @@ type Span = [string, number, number];
 const FRONT_SPANS: Span[][] = [
   [['h', 12, 17]],
   [['h', 12, 17]],
-  [['c', 14, 15]],
+  [],
   [['a', 2, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 27]],
   [['a', 1, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 28]],
   [['a', 1, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 28]],
@@ -292,8 +292,92 @@ function silhouette(ui: UI, a: Unit, t: Unit, frame: number, pips: boolean): voi
   d.text(PX + 1, 46, pips ? 'A3 · Pips knock out like a tabletop record sheet.' : 'A2 · Solid parts, HBS style; colour shows armour.', C.faint);
 }
 
+// ---- A4: outlined record sheet; the struck part blinks as a whole (?bl=1 shows the lit phase) -----
+const BOX: Record<number, string> = { 0: '·', 1: '│', 2: '─', 3: '└', 4: '│', 5: '│', 6: '┌', 7: '├', 8: '─', 9: '┘', 10: '─', 11: '┴', 12: '┐', 13: '┤', 14: '┬', 15: '┼' };
+
+/** Part cells plus the outline cells around them; offset by one cell so the outline fits. */
+function sheetGrid(spans: Span[][]) {
+  const parts = new Map<string, string>();
+  spans.forEach((row, y) => row.forEach(([k, a, b]) => { for (let x = a; x <= b; x++) parts.set(`${x + 1},${y + 1}`, CODE[k]); }));
+  const border = new Map<string, Set<string>>(); // outline cell → parts it touches
+  for (const [key, l] of parts) {
+    const [x, y] = key.split(',').map(Number);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const k = `${x + dx},${y + dy}`;
+      if (!parts.has(k)) { if (!border.has(k)) border.set(k, new Set()); border.get(k)!.add(l); }
+    }
+  }
+  return { parts, border };
+}
+
+function variantSheet(ui: UI, a: Unit, t: Unit, frame: number): void {
+  const d = ui.d;
+  const lit = new URLSearchParams(location.search).get('bl') === '1';
+  let y = header(ui, a, t, 'RECORD SHEET');
+  const n = shown(frame), gone = lost(n), last = frame < 3 ? VOLLEY[n - 1] : null;
+  const prevGone = lost(frame < 3 ? n - 1 : n);
+  const f = t.frame;
+  const hitNow = (l: string) => (last ? last.hits.filter(([hl]) => hl === l).reduce((s, [, v]) => s + v, 0) : 0);
+  const draw = (spans: Span[][], ox: number, oy: number, rear: boolean) => {
+    const { parts, border } = sheetGrid(spans);
+    const byPart: Record<string, [number, number][]> = {};
+    for (const [k, l] of parts) { const [x, y2] = k.split(',').map(Number); (byPart[l] ??= []).push([x, y2]); }
+    for (const cs of Object.values(byPart)) cs.sort((p, q) => p[1] - q[1] || p[0] - q[0]);
+    const blinking = (l: string) => !rear && lit && hitNow(l) > 0;
+    // Outline: each outline cell joins its outline neighbours; it lights up with a blinking part
+    for (const [k, touch] of border) {
+      const [x, y2] = k.split(',').map(Number);
+      // Link two outline cells only if the line between them runs along a part's edge (no ladders in narrow gaps)
+      const P = (cx: number, cy: number) => parts.has(`${cx},${cy}`), B = (cx: number, cy: number) => border.has(`${cx},${cy}`);
+      const h = (ax: number) => B(ax, y2) && (P(x, y2 - 1) || P(x, y2 + 1) || P(ax, y2 - 1) || P(ax, y2 + 1));
+      const v = (ay: number) => B(x, ay) && (P(x - 1, y2) || P(x + 1, y2) || P(x - 1, ay) || P(x + 1, ay));
+      const m = (v(y2 - 1) ? 1 : 0) | (h(x + 1) ? 2 : 0) | (v(y2 + 1) ? 4 : 0) | (h(x - 1) ? 8 : 0);
+      const hot = [...touch].some(blinking), struck = !rear && [...touch].some((l) => hitNow(l) > 0);
+      d.set(ox + x, oy + y2, BOX[m], hot ? '#ffd27a' : struck ? '#c8742e' : '#5a6c78', C.panel);
+    }
+    for (const [l, cs] of Object.entries(byPart)) {
+      const maxA = f.maxArmor[rear ? l + 'R' : l] ?? 0;
+      const all = rear ? 0 : gone[l] ?? 0, before = rear ? 0 : prevGone[l] ?? 0;
+      const frac = Math.max(0, maxA - all) / Math.max(1, maxA);
+      const keep = Math.round(frac * cs.length), keepBefore = Math.round((Math.max(0, maxA - before) / Math.max(1, maxA)) * cs.length);
+      const on = blinking(l);
+      const bg = on ? '#e8782a' : '#0e161c';
+      cs.forEach(([cx, cy], i) => {
+        const isLost = i < cs.length - keep, newly = isLost && i >= cs.length - keepBefore;
+        const ch = newly ? '✕' : isLost ? '·' : '●';
+        const fg = on ? (isLost ? '#7a2c08' : '#2a0e02') : newly ? '#ff9a40' : isLost ? '#33414b' : healthColor(frac);
+        d.set(ox + cx, oy + cy, ch, fg, bg);
+      });
+      if (!rear && hitNow(l) > 0) {
+        const xs = cs.map((c) => c[0]), top = Math.min(...cs.map((c) => c[1]));
+        const txt = ` -${hitNow(l)} `, mx = Math.round((Math.min(...xs) + Math.max(...xs)) / 2);
+        d.text(ox + mx - (txt.length >> 1), oy + top - 1, txt, on ? '#2a0e02' : '#ffffff', on ? '#ffd27a' : '#c04010', 99, true);
+      }
+    }
+  };
+  const fx = PX + 1, rx = PX + 33;
+  draw(FRONT_SPANS, fx, y, false);
+  d.text(fx, y, 'R', C.dim); d.text(fx + 29, y, 'L', C.dim);
+  d.text(fx + 9, y + 22, '── FRONT ──', C.faint);
+  draw(REAR_SPANS, rx - 1, y + 1, true);
+  d.text(rx + 4, y + 8, '─ REAR ─', C.faint);
+  let ly = y + 10;
+  for (const l of ['HD', 'CT', 'RT', 'LT', 'RA', 'LA', 'RL', 'LL']) {
+    const maxA = f.maxArmor[l] ?? 0, arm = Math.max(0, maxA - (gone[l] ?? 0)), fl = hitNow(l) > 0;
+    d.text(rx, ly, l, fl ? C.bright : C.dim);
+    d.text(rx + 3, ly, `${String(arm).padStart(3)}/${maxA}`, fl ? '#ffd080' : healthColor(arm / Math.max(1, maxA)));
+    if (gone[l]) d.text(rx + 11, ly, `-${gone[l]}`, '#ff7a3a');
+    ly++;
+  }
+  y += 24;
+  y = ledger(ui, PX + 1, y, frame);
+  total(ui, PX + 1, y + 1, frame);
+  d.text(PX + 1, 46, 'A4 · Outlined sheet; the struck part blinks.', C.faint);
+}
+
 export function drawAttackMock(ui: UI, variant: string, frame: number, a: Unit, t: Unit): void {
-  if (variant === 'A2' || variant === 'A3') silhouette(ui, a, t, frame, variant === 'A3');
+  if (variant === 'A4') variantSheet(ui, a, t, frame);
+  else if (variant === 'A2' || variant === 'A3') silhouette(ui, a, t, frame, variant === 'A3');
   else if (variant === 'A') variantA(ui, a, t, frame);
   else if (variant === 'B') variantB(ui, a, t, frame);
   else variantC(ui, a, t, frame);
