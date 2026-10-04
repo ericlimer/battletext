@@ -10,6 +10,7 @@ import { hasSave, loadGame, importSave } from '../game/save';
 import { NewCareerScreen } from './newcareer';
 import { ArgoScreen } from './argo';
 import { HelpScreen } from './help';
+import { TITLE_ART } from '../data/titleart';
 
 const LOGO = [
   '██████╗  █████╗ ████████╗████████╗██╗     ███████╗████████╗███████╗██╗  ██╗████████╗',
@@ -65,7 +66,10 @@ export class TitleScreen implements Screen {
       const h = 2 + Math.sin(x * 0.03) * 0.8;
       for (let k = 0; k < h; k++) d.set(x, ROWS - 1 - k, k === Math.floor(h) - 1 ? '▄' : '█', lerp('#1a1008', '#3a200c', k / h), '#030508');
     }
-    // Mech
+    // Mech (preview candidates with ?titlemech=1..4)
+    const pick = TITLE_ART[+(new URLSearchParams(location.search).get('titlemech') ?? 0) - 1];
+    if (pick) this.drawArt(d, pick.px);
+    else {
     const mx = 100, my = 14;
     MECH.forEach((row, j) => {
       [...row].forEach((c, i) => {
@@ -75,6 +79,7 @@ export class TitleScreen implements Screen {
         d.set(mx + i, my + j, c, col, '#030508');
       });
     });
+    }
     // Logo
     const lx = 6, ly = 6;
     LOGO.forEach((row, j) => {
@@ -106,6 +111,26 @@ export class TitleScreen implements Screen {
     d.text(lx + 2, ROWS - 6, 'Inspired by BATTLETECH (2018) by Harebrained Schemes. BattleTech is a trademark of its owners; this is a fan tribute.', C.faint, undefined, 140);
     d.text(lx + 2, ROWS - 5, 'Mouse + keyboard. Highlighted letters are hotkeys. Best at 1280×768 or larger.', C.faint);
     d.ctext(lx + 2, ROWS - 4, `{#f0a830}\`{/} bookmarks whatever is under the mouse, on any screen.  {#6d7f8a}Telemetry ${telemetry.status()} · build ${build()}{/}`, C.dim, undefined, 140);
+  }
+
+  /** Pixel art, two pixels per cell, standing on the horizon to the right of the menu. */
+  drawArt(d: UI['d'], px: string[]): void {
+    const BG = '#030508', w = px[0].length, rows = Math.ceil(px.length / 2);
+    const x0 = 124 - (w >> 1), y0 = ROWS - 7 - rows;
+    const colour = (c: string, y: number): string | null => {
+      if (c === '.' || c === undefined) return null;
+      const lift = 0.85 + 0.25 * (1 - y / px.length);
+      if (c === 'o') return lerp('#ff3a1a', '#ffb040', 0.5 + 0.5 * Math.sin(this.t * 3));
+      const base = c === '=' ? '#c4d0da' : c === '#' ? '#7e8e9c' : c === '%' ? '#46545f' : '#20282f';
+      return scale(base, lift);
+    };
+    for (let r = 0; r < rows; r++) for (let i = 0; i < w; i++) {
+      const top = colour(px[r * 2]?.[i], r * 2), bot = colour(px[r * 2 + 1]?.[i], r * 2 + 1);
+      if (!top && !bot) continue;
+      if (top && bot && top === bot) d.set(x0 + i, y0 + r, '█', top, BG);
+      else if (top) d.set(x0 + i, y0 + r, '▀', top, bot ?? BG);
+      else d.set(x0 + i, y0 + r, '▄', bot!, BG);
+    }
   }
 
   importFile(): void {
