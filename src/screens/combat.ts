@@ -14,7 +14,7 @@ import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
 import { portraitOf, drawPortrait, locTip } from './portrait';
 import { track, flush } from '../game/telemetry';
-import { drawAttackMock } from './attackmock';
+import { UnderFire, startUnderFire, underFireShot, drawUnderFire } from './underfire';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
@@ -56,6 +56,7 @@ export class CombatScreen implements Screen {
   /** The volley being played out: who is shooting whom, and the damage landed so far. */
   vol: { a: Unit; t: Unit | null; tx: number; ty: number; n: number; fired: number; dmg: number; hits: number; shots: number; start: number; hp0: number; done: number; weapons: string[] } | null = null;
   /** Damage tallies that land on the HUD when their projectiles arrive. */
+  uf: UnderFire | null = null; // the attack view's record sheet for the volley playing now
   volTicks: { at: number; dmg: number; hits: number; shots: number }[] = [];
   aim: { ax: number; ay: number; tx: number; ty: number; until: number; t0: number } | null = null;
   aiTimer = 0;
@@ -239,6 +240,7 @@ export class CombatScreen implements Screen {
         if (t) { for (const k in t.frame.maxArmor) hp0 += t.frame.armor[k]; for (const k in t.frame.maxStruct) hp0 += Math.max(0, t.frame.struct[k]); }
         this.vol = { a, t, tx: e.tx, ty: e.ty, n: e.n, fired: 0, dmg: 0, hits: 0, shots: 0, start: this.time, hp0, done: 0, weapons: [] };
         this.volTicks = [];
+        this.uf = seen && t && t.frame.kind === 'mech' && (SIDE(t.team) === 0 || this.visibleUnit(t)) ? startUnderFire(a, t, b.displayName(a), b.displayName(t), e.arm0 && e.str0 ? { arm: e.arm0, str: e.str0 } : undefined) : null;
         if (seen) {
           // Aim: the camera frames the target and a targeting line draws in before the first shot
           if (t && this.visibleUnit(t)) this.ensureVisible(e.tx, e.ty, 8);
@@ -260,6 +262,7 @@ export class CombatScreen implements Screen {
         if (this.vol) {
           this.vol.fired++;
           this.vol.weapons.push(item(e.w).short);
+          if (this.uf) underFireShot(this.uf, e, this.time + (dur * 0.8) / sp);
           this.volTicks.push({ at: this.time + (dur * 0.8) / sp, dmg: e.total, hits: e.shots.filter((x) => x.hit).length, shots: e.shots.length });
         }
         // Same weapon next: fire as a ripple. A new weapon group gets a beat of its own
@@ -736,6 +739,7 @@ export class CombatScreen implements Screen {
     if (this.briefingOpen || this.showHelp || this.inspect || this.confirmWithdraw || (this.b.result && !this.queue.length)) return;
     const b = this.b;
     const m = b.map;
+    if (this.uf && !this.uf.hidden && ui.click(PX, MY, PW, ROWS - MY)) this.uf.hidden = true;
     // Camera
     const panSpeed = 1;
     if (ui.key('ArrowLeft')) { this.camX -= 3 * panSpeed; this.clampCam(); }
@@ -957,13 +961,10 @@ export class CombatScreen implements Screen {
     this.drawMap(ui);
     this.drawTopBar(ui);
     this.drawBottom(ui);
-    this.drawPanel(ui);
-    // Design mockups of an attack view (?mock=A|B|C&mf=1..3)
-    const mq = new URLSearchParams(location.search);
-    if (mq.has('mock')) {
-      const a = this.rt.playerUnits.find((u) => u.alive), t = this.b.units.find((u) => SIDE(u.team) === 1 && u.frame.kind === 'mech');
-      if (a && t) drawAttackMock(ui, mq.get('mock') ?? 'A', +(mq.get('mf') ?? 2), a, t);
-    }
+    // While a 'Mech is being shot, the panel shows its record sheet (click to hide)
+    if (this.uf && (!this.vol || this.uf.hidden)) { if (!this.vol) this.uf = null; }
+    if (this.uf && !this.uf.hidden) drawUnderFire(ui, this.uf, this.time, PX, MY, PW, ROWS - MY, !!this.vol?.done);
+    else this.drawPanel(ui);
     // Frame lines
     d.vline(PX - 1 + 0, MY, ROWS - MY, C.border);
     void COLS;
@@ -1565,7 +1566,7 @@ export class CombatScreen implements Screen {
     const age = v.done ? this.time - v.done : 0;
     if (v.done && age > 1.6) { this.vol = null; return; }
     const seen = SIDE(v.a.team) === 0 || this.b.seen[0].has(v.a.id) || (v.t && SIDE(v.t.team) === 0);
-    if (!seen) return;
+    if (!seen || (this.uf && !this.uf.hidden)) return; // the record sheet carries the tally
     const d = ui.d;
     const fade = v.done ? Math.max(0, 1 - Math.max(0, age - 1.1) / 0.5) : 1;
     const col = (c: string) => lerp('#000000', c, fade);

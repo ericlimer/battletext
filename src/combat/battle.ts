@@ -65,7 +65,9 @@ export type BEvent =
   | { k: 'activate'; u: number }
   | { k: 'move'; u: number; path: [number, number][]; mode: MoveMode; facing: number }
   | { k: 'face'; u: number; dir: number }
-  | { k: 'fire'; u: number; t: number; tx: number; ty: number; w: string; shots: Shot[]; indirect: boolean; total: number; struct?: boolean }
+  | { k: 'fire'; u: number; t: number; tx: number; ty: number; w: string; shots: Shot[]; indirect: boolean; total: number; struct?: boolean;
+      // Target's armour and structure before and after this weapon, and what it crit, for the attack view
+      arm0?: Record<string, number>; str0?: Record<string, number>; arm?: Record<string, number>; str?: Record<string, number>; crits?: string[] }
   | { k: 'melee'; u: number; t: number; hit: boolean; dmg: number; dfa: boolean; loc: string }
   | { k: 'float'; x: number; y: number; text: string; color: string; big?: boolean }
   | { k: 'log'; text: string; color?: string }
@@ -73,7 +75,7 @@ export type BEvent =
   | { k: 'destroyed'; u: number; how: string }
   | { k: 'structure'; s: number; x: number; y: number }
   | { k: 'status'; u: number; text: string; color: string }
-  | { k: 'volley'; u: number; t: number; tx: number; ty: number; n: number }
+  | { k: 'volley'; u: number; t: number; tx: number; ty: number; n: number; arm0?: Record<string, number>; str0?: Record<string, number> }
   | { k: 'volleyEnd'; u: number }
   | { k: 'end'; result: string };
 
@@ -193,6 +195,7 @@ export class Battle {
   emit(e: BEvent): void { this.events.push(e); }
   /** While an attack resolves, per-weapon results collect here and print as one summary line. */
   private volley: { name: string; color: string; hits: number; shots: number; dmg: number; locs: Map<string, number>; weapons: Map<string, number> }[] | null = null;
+  private critBuf: string[] | null = null;
   private sayBuf: { text: string; color?: string }[] | null = null;
   private pendingKnock: Set<Unit> | null = null;
   /** The attacker's name is fixed for a whole volley, so an unseen shooter stays unknown in every line it causes. */
@@ -698,7 +701,7 @@ export class Battle {
     if (p0) {
       const tx = p0.target ? p0.target.x : p0.struct ? p0.struct.tiles[0] % this.map.w : a.x;
       const ty = p0.target ? p0.target.y : p0.struct ? (p0.struct.tiles[0] / this.map.w) | 0 : a.y;
-      this.emit({ k: 'volley', u: a.id, t: p0.target ? p0.target.id : -1, tx, ty, n: plan.reduce((x, p) => x + p.weapons.length, 0) });
+      this.emit({ k: 'volley', u: a.id, t: p0.target ? p0.target.id : -1, tx, ty, n: plan.reduce((x, p) => x + p.weapons.length, 0), arm0: p0.target ? { ...p0.target.frame.armor } : undefined, str0: p0.target ? { ...p0.target.frame.struct } : undefined });
     }
     try { this.attackInner(a, plan, called); } finally {
       const buf = this.sayBuf ?? [], vol = this.volley ?? [], knock = this.pendingKnock ?? new Set<Unit>();
@@ -776,7 +779,14 @@ export class Battle {
       res.push({ hit: true, loc, dmg });
       total += dmg;
     }
-    this.emit({ k: 'fire', u: a.id, t: t.id, tx: t.x, ty: t.y, w: w.id, shots: res, indirect: hc.indirect, total });
+    const ev: Extract<BEvent, { k: 'fire' }> = { k: 'fire', u: a.id, t: t.id, tx: t.x, ty: t.y, w: w.id, shots: res, indirect: hc.indirect, total, arm0: { ...t.frame.armor }, str0: { ...t.frame.struct } };
+    this.emit(ev);
+    try { this.critBuf = []; this.fireLands(a, t, w, res, total); } finally {
+      ev.arm = { ...t.frame.armor }; ev.str = { ...t.frame.struct }; ev.crits = this.critBuf ?? []; this.critBuf = null;
+    }
+  }
+
+  private fireLands(a: Unit, t: Unit, w: ItemDef, res: Shot[], total: number): void {
     (t as any)._hitRound = this.round;
     const hits = res.filter((r) => r.hit);
     const locs = new Map<string, number>();
@@ -893,6 +903,7 @@ export class Battle {
     const d = item(c.id);
     this.say(`CRIT! ${this.displayName(t)}'s ${d.name} (${sl}) destroyed.`, '#f0d050');
     this.float(t.x, t.y, `CRIT: ${d.short}`, '#f0d050');
+    this.critBuf?.push(`${d.name} (${sl})`);
     t.stats = frameStats(f);
     if (d.kind === 'ammo' && (c.ammo ?? 0) > 0 && (d.explode ?? 0) > 0) {
       const boom = Math.min(180, Math.round((c.ammo ?? 0) * (d.explode ?? 0) * 0.35));
