@@ -172,8 +172,129 @@ function variantC(ui: UI, a: Unit, t: Unit, frame: number): void {
   void LOC_NAMES;
 }
 
+// ---- A2/A3: proportional silhouette doll (front + rear), solid (HBS) or pips (record sheet) -------
+// Viewer's left is the 'Mech's right. Codes: h HD, c CT, r RT, l LT, a RA, b LA, x RL, y LL.
+type Span = [string, number, number];
+const FRONT_SPANS: Span[][] = [
+  [['h', 12, 17]],
+  [['h', 12, 17]],
+  [['c', 14, 15]],
+  [['a', 2, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 27]],
+  [['a', 1, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 28]],
+  [['a', 1, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 28]],
+  [['a', 1, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 28]],
+  [['a', 1, 5], ['r', 7, 10], ['c', 12, 17], ['l', 19, 22], ['b', 24, 28]],
+  [['a', 1, 5], ['r', 8, 10], ['c', 12, 17], ['l', 19, 21], ['b', 24, 28]],
+  [['a', 2, 4], ['r', 9, 10], ['c', 12, 17], ['l', 19, 20], ['b', 25, 27]],
+  [['a', 2, 4], ['c', 11, 18], ['b', 25, 27]],
+  [['a', 2, 4], ['b', 25, 27]],
+  [['a', 2, 4], ['x', 9, 13], ['y', 16, 20], ['b', 25, 27]],
+  [['a', 2, 4], ['x', 9, 13], ['y', 16, 20], ['b', 25, 27]],
+  [['a', 1, 5], ['x', 9, 13], ['y', 16, 20], ['b', 24, 28]],
+  [['x', 9, 13], ['y', 16, 20]],
+  [['x', 10, 13], ['y', 16, 19]],
+  [['x', 10, 13], ['y', 16, 19]],
+  [['x', 9, 13], ['y', 16, 20]],
+  [['x', 8, 13], ['y', 16, 21]],
+];
+// Rear: torsos only, mirrored (the 'Mech's left is now on the viewer's left)
+const REAR_SPANS: Span[][] = [
+  [['l', 0, 3], ['c', 5, 10], ['r', 12, 15]],
+  [['l', 0, 3], ['c', 5, 10], ['r', 12, 15]],
+  [['l', 0, 3], ['c', 5, 10], ['r', 12, 15]],
+  [['l', 1, 3], ['c', 5, 10], ['r', 12, 14]],
+  [['c', 6, 9]],
+];
+const CODE: Record<string, string> = { h: 'HD', c: 'CT', r: 'RT', l: 'LT', a: 'RA', b: 'LA', x: 'RL', y: 'LL' };
+
+/** Cells of each location in a span mask, row-major. */
+function cellsOf(spans: Span[][]): Record<string, [number, number][]> {
+  const out: Record<string, [number, number][]> = {};
+  spans.forEach((row, y) => row.forEach(([k, a, b]) => { for (let x = a; x <= b; x++) (out[CODE[k]] ??= []).push([x, y]); }));
+  return out;
+}
+
+/** Scripted rear damage so the rear view has something to show: one SRM to CT(R) in the last group. */
+function silhouette(ui: UI, a: Unit, t: Unit, frame: number, pips: boolean): void {
+  const d = ui.d;
+  let y = header(ui, a, t, pips ? 'RECORD SHEET' : 'SILHOUETTE');
+  const n = shown(frame), gone = lost(n), last = frame < 3 ? VOLLEY[n - 1] : null;
+  const prevGone = lost(frame < 3 ? n - 1 : n);
+  const f = t.frame;
+  const flashOf = (l: string) => (last ? last.hits.filter(([hl]) => hl === l).reduce((s, [, v]) => s + v, 0) : 0);
+  const draw = (spans: Span[][], ox: number, oy: number, rear: boolean) => {
+    const cells = cellsOf(spans);
+    for (const [l, cs] of Object.entries(cells)) {
+      const key = rear ? l + 'R' : l;
+      const maxA = f.maxArmor[key] ?? 0;
+      const hitNow = rear ? 0 : flashOf(l), hitAll = rear ? 0 : gone[l] ?? 0, hitBefore = rear ? 0 : prevGone[l] ?? 0;
+      const arm = Math.max(0, maxA - hitAll), frac = arm / Math.max(1, maxA);
+      const flash = hitNow > 0;
+      if (pips) {
+        // One pip per cell; lost armour knocks out pips from the top, the newest ones marked ✕
+        const keep = Math.round(frac * cs.length), keepBefore = Math.round((Math.max(0, maxA - hitBefore) / Math.max(1, maxA)) * cs.length);
+        cs.forEach(([cx, cy], i) => {
+          const lostIdx = cs.length - 1 - i; // count lost from the top
+          void lostIdx;
+          const isLost = i < cs.length - keep, newly = isLost && i >= cs.length - keepBefore;
+          const ch = newly ? '✕' : isLost ? '·' : '●';
+          const fg = newly ? '#ff9a40' : isLost ? '#3a4650' : flash ? '#ffd080' : healthColor(frac);
+          d.set(ox + cx, oy + cy, ch, fg, flash ? '#4a200c' : '#18222a');
+        });
+      } else {
+        const bg = flash ? '#e07020' : lerp('#0c1216', healthColor(frac), 0.55);
+        cs.forEach(([cx, cy]) => d.set(ox + cx, oy + cy, ' ', C.text, bg));
+        // Label and armour value centred in the part (front only for big parts)
+        const xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
+        const mx = Math.round((Math.min(...xs) + Math.max(...xs)) / 2), my = Math.round((Math.min(...ys) + Math.max(...ys)) / 2);
+        const fg = flash ? '#ffffff' : '#0a0e10';
+        if (rear || l === 'HD') d.text(ox + mx - (String(arm).length >> 1), oy + my, String(arm), fg, bg, 99, true);
+        else {
+          d.text(ox + mx - 1 + (l === 'RT' || l === 'LT' ? 0 : 0), oy + my - 1, l, fg, bg);
+          d.text(ox + mx - (String(arm).length >> 1), oy + my, String(arm), fg, bg, 99, true);
+        }
+      }
+      // Damage callout
+      if (flash) {
+        const xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
+        const mx = Math.round((Math.min(...xs) + Math.max(...xs)) / 2), my = Math.max(...ys);
+        const txt = ` -${hitNow} `;
+        const cy = pips || l === 'HD' ? Math.min(...ys) - 1 : my + (l === 'CT' ? 0 : 1);
+        d.text(ox + mx - (txt.length >> 1), oy + Math.max(0, cy), txt, '#ffffff', '#c04010', 99, true);
+      }
+    }
+  };
+  const fx = PX + 1, rx = PX + 33;
+  d.text(fx + 1, y, 'R', C.dim); d.text(fx + 27, y, 'L', C.dim);
+  draw(FRONT_SPANS, fx, y, false);
+  d.text(fx + 9, y + 21, '── FRONT ──', C.faint);
+  d.text(rx + 3, y, 'REAR', C.faint);
+  draw(REAR_SPANS, rx, y + 1, true);
+  if (pips) {
+    // Location readout beside the doll (armour now / max)
+    let ly = y + 8;
+    for (const l of ['HD', 'CT', 'RT', 'LT', 'RA', 'LA', 'RL', 'LL']) {
+      const maxA = f.maxArmor[l] ?? 0, arm = Math.max(0, maxA - (gone[l] ?? 0)), fl = flashOf(l) > 0;
+      d.text(rx, ly, l, fl ? C.bright : C.dim);
+      d.text(rx + 3, ly, `${String(arm).padStart(3)}/${maxA}`, fl ? '#ffd080' : healthColor(arm / Math.max(1, maxA)));
+      if (gone[l]) d.text(rx + 11, ly, `-${gone[l]}`, '#ff7a3a');
+      ly++;
+    }
+  } else {
+    d.text(rx, y + 8, 'Colour = armour', C.faint);
+    d.text(rx, y + 9, 'left. Struck', C.faint);
+    d.text(rx, y + 10, 'parts flash.', C.faint);
+  }
+  if (frame === 1) d.text(PX + 2, y + 22, '═══►  incoming: Medium Laser', '#ff6a4a');
+  y += 23;
+  y = ledger(ui, PX + 1, y + 1, frame);
+  total(ui, PX + 1, y + 1, frame);
+  d.text(PX + 1, 46, pips ? 'A3 · Pips knock out like a tabletop record sheet.' : 'A2 · Solid parts, HBS style; colour shows armour.', C.faint);
+}
+
 export function drawAttackMock(ui: UI, variant: string, frame: number, a: Unit, t: Unit): void {
-  if (variant === 'A') variantA(ui, a, t, frame);
+  if (variant === 'A2' || variant === 'A3') silhouette(ui, a, t, frame, variant === 'A3');
+  else if (variant === 'A') variantA(ui, a, t, frame);
   else if (variant === 'B') variantB(ui, a, t, frame);
   else variantC(ui, a, t, frame);
 }
