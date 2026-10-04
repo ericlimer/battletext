@@ -187,7 +187,7 @@ export class ArgoScreen implements Screen {
     btn('Resume', () => { this.menuOpen = false; }, 'Escape');
     btn(isMuted() ? 'Sound: off' : 'Sound: on', () => setMuted(!isMuted()), 'm');
     btn('Save game', () => { saveGame(this.c); this.notify('Game saved'); this.menuOpen = false; }, 's');
-    btn('Export save file', () => { exportSave(this.c); this.menuOpen = false; }, 'x');
+    btn('Export save file', () => { void exportSave(this.c).then((m) => this.notify(m)); this.menuOpen = false; }, 'x');
     btn('Save & quit to title', () => { saveGame(this.c); app.reset(new TitleScreen()); }, 'q');
     void d;
   }

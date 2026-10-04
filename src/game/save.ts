@@ -61,14 +61,28 @@ export function restoreBackup(): Company | null {
   } catch { return null; }
 }
 
-export function exportSave(c: Company | null = company): void {
-  if (!c) return;
-  const blob = new Blob([JSON.stringify(c)], { type: 'application/json' });
+/** Offers the save as a file. Inside the claude.ai artifact viewer this goes through its downloads capability
+ *  (the viewer confirms the save); a plain page falls back to a download link. Resolves with a status line. */
+export async function exportSave(c: Company | null = company): Promise<string> {
+  if (!c) return 'No company to export.';
+  const filename = `${c.name.replace(/[^\w]+/g, '_')}_day${c.day}.battletext.json`;
+  const data = JSON.stringify(c);
+  const cl = (window as any).claude;
+  if (cl?.use) {
+    const dl = await cl.use('downloads').catch(() => null);
+    if (dl) {
+      try { await dl.save({ filename, data }); return `Saved ${filename}.`; } catch (e) {
+        const code = (e as { code?: string })?.code;
+        return code === 'declined' ? 'Export cancelled.' : code === 'rate_limited' ? 'A save prompt is already open.' : `Export unavailable here (${code ?? 'error'}).`;
+      }
+    }
+  }
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${c.name.replace(/[^\w]+/g, '_')}_day${c.day}.battletext.json`;
+  a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+  a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return `Exported ${filename}.`;
 }
 
 export function importSave(text: string): boolean {
