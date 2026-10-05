@@ -1,6 +1,6 @@
 // Regression checks: node scripts/run.mjs scripts/regress.ts
 import { RNG } from '../src/engine/rng';
-import { setupMission, generateForce } from '../src/combat/missions';
+import { setupMission, generateForce, objectivesSummary } from '../src/combat/missions';
 import { aiTakeTurn } from '../src/combat/ai';
 let fails = 0;
 const check = (ok: boolean, msg: string) => { if (!ok) { fails++; console.log('FAIL', msg); } else console.log('ok  ', msg); };
@@ -52,5 +52,15 @@ for (let o = 0; o < 8; o++) {
   const rt = setupMission({ type: 'capture', difficulty: 3, biome: 'lowlands', seed: 62, orientation: o, night: false, employer: 'davion', target: 'liao', player: generateForce(new RNG(3), 3, 'davion', 4, { noVehicles: true }) } as any);
   const off = rt.playerUnits.filter((u) => u.x !== u.startX || u.y !== u.startY).length;
   check(off === 0, `orientation ${o}: drop points follow the turned map (${off} off)`);
+}
+// A lance wiped out during extraction still gets paid: the objective was met
+{
+  const rt = setupMission({ type: 'assassinate', difficulty: 3, biome: 'lowlands', seed: 31, night: false, employer: 'davion', target: 'liao', player: generateForce(new RNG(11), 3, 'davion', 4, { noVehicles: true }) });
+  const b = rt.battle; b.start();
+  rt.enemyUnits.find((u) => u.tag === 'target')!.alive = false;
+  b.check();
+  for (const u of rt.playerUnits) u.alive = false;
+  b.check();
+  check(b.result === 'win' && objectivesSummary(rt).primaryOk, `assassinate: wiped during extraction still pays (${b.result})`);
 }
 process.exit(fails ? 1 : 0);

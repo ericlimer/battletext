@@ -332,7 +332,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       break;
     }
   }
-  if (t !== 'battle' && t !== 'defendbase') briefing.push('Once the objective is met, finish off the remaining hostiles or fall back to the extraction zone at your drop point.');
+  if (t !== 'battle' && t !== 'defendbase') briefing.push('Once the objective is met you are paid, but the job is not over: finish off the remaining hostiles or fall back to the extraction zone at your drop point.');
   if (spec.night) briefing.push('Night operation: visual range reduced to 360m. Sensors unaffected.');
 
   // Unique callsigns within each side keep the combat log readable
@@ -549,6 +549,13 @@ function installHooks(rt: MissionRuntime): void {
     const inZone = mine.filter((u) => dist(u.x, u.y, ex.x, ex.y) <= ex.r).length;
     obj(rt, 'extract')!.progress = mine.length ? `${inZone}/${mine.length} in zone · ${foes.length} hostile${foes.length === 1 ? '' : 's'} left` : 'lance lost before extraction';
     if (mine.length && inZone === mine.length) return done();
+    // The objective was met, so the employer pays even if the lance never makes it out
+    if (!mine.length) {
+      const o = obj(rt, 'extract')!;
+      if (o.status !== 'failed') b.say('The lance is down, but the objective was met. The employer pays in full.', '#f0a830');
+      o.status = 'failed';
+      return 'win';
+    }
     return '';
   };
   // A withdrawal after the objective is met is the extraction
@@ -587,7 +594,8 @@ function installHooks(rt: MissionRuntime): void {
 }
 
 export function objectivesSummary(rt: MissionRuntime): { primaryOk: boolean; bonus: number } {
-  const primaryOk = rt.objectives.filter((o) => o.primary).every((o) => o.status === 'done');
+  // Getting out isn't part of the job: once the objective is met the employer pays, extracted or not
+  const primaryOk = rt.objectives.filter((o) => o.primary && o.id !== 'extract').every((o) => o.status === 'done');
   const bonus = rt.objectives.filter((o) => !o.primary && o.status === 'done').reduce((a, o) => a + o.bonus, 0);
   return { primaryOk, bonus };
 }

@@ -168,7 +168,8 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     } else if (m) refillAmmo(m);
   }
   // ---- Salvage
-  if (win && neg.salvage > 0) {
+  if (win && wiped && neg.salvage > 0) lines.push('The lance was lost after the objective was met: paid in full, but the field was lost and there is no salvage.');
+  if (win && !wiped && neg.salvage > 0) {
     res.salvageShares = neg.salvage;
     res.priority = Math.min(neg.priority, neg.salvage);
     const pool: SalvageEntry[] = [];
