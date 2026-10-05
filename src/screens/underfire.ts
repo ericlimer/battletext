@@ -149,7 +149,7 @@ function land(uf: UnderFire, e: Blow, now: number): void {
   const prev: Snap = { arm: e.arm0, str: e.str0 }, cur: Snap = { arm: e.arm, str: e.str };
   uf.prev = prev; uf.cur = cur;
   const struck = new Map<string, number>();
-  for (const k of new Set([...Object.keys(cur.arm), ...Object.keys(cur.str)])) {
+  for (const k of new Set([...Object.keys(prev.arm), ...Object.keys(cur.arm), ...Object.keys(prev.str), ...Object.keys(cur.str)])) {
     const lostA = Math.max(0, (prev.arm[k] ?? 0) - (cur.arm[k] ?? 0));
     const lostS = k in cur.str ? Math.max(0, Math.max(0, prev.str[k] ?? 0) - Math.max(0, cur.str[k] ?? 0)) : 0;
     if (lostA + lostS > 0) struck.set(k, lostA + lostS);

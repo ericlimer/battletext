@@ -236,7 +236,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     if (u.tag === 'capper' && u.ai.goal) pos -= Math.max(0, dist(x, y, u.ai.goal[0], u.ai.goal[1]) - 1) * 2.5;
     // Once the objective is met, the player's lance (on autopilot) drifts back toward extraction
     const ex = b.map.extract;
-    if (ex && u.team === 0) pos -= Math.max(0, dist(x, y, ex.x, ex.y) - ex.r + 0.5) * 1.4;
+    if (ex && u.team === 0) pos -= Math.max(0, dist(x, y, ex.x, ex.y) - ex.r + 0.5) * 3;
     c.score = off * aggr * 1.0 - threat * (1 - aggr) * (AI_OPTS.caution ? 0.6 : 0.35) + pos + b.rng.next() * 0.5;
     if (!best || c.score > best.score) best = c;
   }

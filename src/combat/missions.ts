@@ -398,6 +398,7 @@ function orientMission(rt: MissionRuntime, k: number): void {
   const turn = (dir: number) => { let d = (dir + rot * 2) % 8; if (flip) d = (8 - d) % 8; return d; };
   for (const u of b.units) {
     [u.x, u.y] = pt(u.x, u.y);
+    [u.startX, u.startY] = pt(u.startX, u.startY);
     u.facing = turn(u.facing);
     if (u.ai.goal) u.ai.goal = pt(u.ai.goal[0], u.ai.goal[1]);
   }
@@ -433,7 +434,7 @@ function installHooks(rt: MissionRuntime): void {
         if (eo.status === 'active' && esc.every((u) => !u.alive)) eo.status = 'done';
         if (tg && !tg.alive) { const o = obj(rt, 'target')!; o.status = 'done'; o.progress = undefined; return 'win'; }
         if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `round ${b.round} of 9 — bolts then, or sooner if badly hurt`;
-        if (tg && tg.fled) { const o = obj(rt, 'target')!; o.status = 'failed'; o.progress = 'escaped'; return 'loss'; }
+        if (tg && tg.fled) { const o = obj(rt, 'target')!; if (o.status !== 'failed') b.say(`${tg.pilot?.callsign ?? 'The target'} escaped the area. The contract is void.`, '#e8503a'); o.status = 'failed'; o.progress = 'escaped'; return 'loss'; }
         break;
       }
       case 'destroybase': {
@@ -536,7 +537,11 @@ function installHooks(rt: MissionRuntime): void {
     const r = update();
     if (r !== 'win' || t === 'battle' || t === 'defendbase') return r;
     const foes = b.units.filter((u) => SIDE(u.team) === 1 && u.alive && !u.fled && u.deployed && u.tag !== 'convoy');
-    const done = (): 'win' => { const o = obj(rt, 'extract'); if (o) { o.status = 'done'; o.progress = undefined; } return 'win'; };
+    const done = (): 'win' => {
+      const o = obj(rt, 'extract');
+      if (o && o.status !== 'done') { o.status = 'done'; o.progress = undefined; b.say(foes.length ? 'The lance reached the extraction zone. Dust-off.' : 'Area clear. Mission complete.', '#4ad48a'); }
+      return 'win';
+    };
     if (!foes.length) return done();
     if (!extracting()) startExtraction();
     const ex = b.map.extract!;

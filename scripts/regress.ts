@@ -47,4 +47,10 @@ const check = (ok: boolean, msg: string) => { if (!ok) { fails++; console.log('F
   b.check();
   check(b.result === 'win' && rt.objectives.find((o) => o.id === 'extract')!.status === 'done', 'assassinate: whole lance in the zone wins');
 }
+// Turned maps keep each unit's recorded drop point in step with where it actually stands
+for (let o = 0; o < 8; o++) {
+  const rt = setupMission({ type: 'capture', difficulty: 3, biome: 'lowlands', seed: 62, orientation: o, night: false, employer: 'davion', target: 'liao', player: generateForce(new RNG(3), 3, 'davion', 4, { noVehicles: true }) } as any);
+  const off = rt.playerUnits.filter((u) => u.x !== u.startX || u.y !== u.startY).length;
+  check(off === 0, `orientation ${o}: drop points follow the turned map (${off} off)`);
+}
 process.exit(fails ? 1 : 0);

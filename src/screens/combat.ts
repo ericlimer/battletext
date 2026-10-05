@@ -14,14 +14,14 @@ import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
 import { portraitOf, drawPortrait, locTip } from './portrait';
 import { track, flush } from '../game/telemetry';
-import { TUNE, TUNE_DEFS, saveTune, resetTune, tuneDiff } from '../game/tuning';
+import { TUNE, TUNE_DEFS, saveTune, resetTune, tuneDiff, applyPreset, REVIEWER_PRESET } from '../game/tuning';
 import { UnderFire, startUnderFire, underFireShot, underFireMelee, drawUnderFire } from './underfire';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
 
 const MX = 0, MY = 1, VW = 50, VH = 36;
-const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 27; // attack-timing panel, over the map
+const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 29; // attack-timing panel, over the map
 const PX = 100, PW = 50;
 
 type Mode = 'move' | 'look' | 'jump' | 'melee' | 'dfa' | 'facing' | 'called' | 'lock';
@@ -290,7 +290,9 @@ export class CombatScreen implements Screen {
         // Same weapon next: fire as a ripple. A new weapon group gets a beat of its own
         const nx = this.queue.find((q) => q.k === 'fire' || q.k === 'volleyEnd');
         const sameGroup = nx && nx.k === 'fire' && nx.w === e.w && nx.u === e.u;
-        this.wait = (sameGroup ? Math.max(0.16, dur * TUNE.ripple) : dur + TUNE.groupGap) / sp;
+        // A weapon that misses with every shot doesn't earn the full beat
+        const ms = e.shots.every((x) => !x.hit) ? TUNE.missScale : 1;
+        this.wait = (sameGroup ? Math.max(0.16, dur * TUNE.ripple * ms) : (dur + TUNE.groupGap) * ms) / sp;
         break;
       }
       case 'melee': {
@@ -1033,7 +1035,8 @@ export class CombatScreen implements Screen {
     d.text(x + 2, y, 'Click a label to reset it. Game speed [+]/[−] scales all.', C.faint, '#0a1016', w - 4);
     y += 2;
     if (ui.button(x + 2, y, 'Replay last volley', { key: 'y', disabled: !this.lastVolley.length || this.queue.length > 0 })) this.replayVolley();
-    if (ui.button(x + 28, y, 'Reset all', { key: '0' })) resetTune();
+    if (ui.button(x + 26, y, 'Reset all', { key: '0' })) resetTune();
+    if (ui.button(x + 40, y, "Reviewer's preset", { key: '9' })) applyPreset(REVIEWER_PRESET);
   }
 
   /** Folds repeated volleys of the same weapon at the same target into one log line. */
@@ -1630,7 +1633,7 @@ export class CombatScreen implements Screen {
     if (!v) return;
     for (const tk of this.volTicks) if (this.time >= tk.at) { v.dmg += tk.dmg; v.hits += tk.hits; v.shots += tk.shots; tk.at = Infinity; this.onVolleyTick(v, tk.dmg); }
     const age = v.done ? this.time - v.done : 0;
-    if (v.done && age > 1.6) { this.vol = null; return; }
+    if (v.done && age > Math.max(1.6, TUNE.sheetHold)) { this.vol = null; return; }
     const seen = SIDE(v.a.team) === 0 || this.b.seen[0].has(v.a.id) || (v.t && SIDE(v.t.team) === 0);
     if (!seen || (this.uf && !this.uf.hidden)) return; // the record sheet carries the tally
     const d = ui.d;
@@ -1646,7 +1649,7 @@ export class CombatScreen implements Screen {
     d.text(x + 2, y + 2, wl.length > w - 18 ? '…' + wl.slice(-(w - 19)) : wl, col(C.dim), bg);
     // Damage readout, coloured by how much of the target's remaining armour + structure it took
     const sev = v.hp0 ? v.dmg / v.hp0 : 0;
-    const dc = v.dmg === 0 ? '#6d7f8a' : sev >= 0.35 ? '#ff5a3a' : sev >= 0.15 ? '#f0a830' : '#f2f6f8';
+    const dc = v.dmg === 0 ? '#6d7f8a' : v.done && v.t && !v.t.alive ? '#ff5a3a' : sev >= 0.35 ? '#ff5a3a' : sev >= 0.15 ? '#f0a830' : '#f2f6f8';
     const num = `${v.dmg}`;
     d.text(x + w - 14, y + 1, 'DAMAGE', col(C.faint), bg);
     d.text(x + w - 2 - num.length, y + 1, num, col(dc), bg, 99, true);
@@ -2133,16 +2136,18 @@ export class CombatScreen implements Screen {
     const obs = this.rt.objectives;
     // On a loss or withdrawal anything still open has failed: keep the side panel in step with this screen
     if (!win) for (const o of obs) if (o.status === 'active') o.status = 'failed';
-    const h = 12 + obs.length;
+    // Objectives wrap rather than run past the modal's edge
+    const rows = obs.flatMap((o) => wrap(o.text, w - 8).map((l, j) => ({ o, l, first: j === 0 })));
+    const h = 12 + rows.length;
     const x = MX + VW - w / 2, y = MY + 8;
     ui.panel(x, y, w, h, '', { fg: win ? C.green : C.red, bg: '#080c10', style: 'double' });
     const title = win ? 'MISSION SUCCESS' : b.result === 'withdraw' ? 'WITHDRAWN' : 'MISSION FAILED';
     d.text(x + Math.floor((w - title.length) / 2), y + 2, title, win ? C.green : C.red, undefined, 99, true);
-    obs.forEach((o, i) => {
+    rows.forEach(({ o, l, first }, i) => {
       const mark = o.status === 'done' ? '{#6ad46a}■{/}' : o.status === 'failed' || !win ? '{#e8503a}✕{/}' : '{#6d7f8a}□{/}';
-      d.ctext(x + 3, y + 4 + i, `${mark} ${o.text}`, o.primary ? C.text : C.dim, undefined, w - 6);
+      d.ctext(x + 3, y + 4 + i, `${first ? mark : ' '} ${l}`, o.primary ? C.text : C.dim, undefined, w - 6);
     });
-    const yy = y + 5 + obs.length;
+    const yy = y + 5 + rows.length;
     const kills = this.rt.enemyUnits.filter((u) => !u.alive && !u.fled).length;
     const lost = this.rt.playerUnits.filter((u) => !u.alive).length;
     d.ctext(x + 3, yy, `Rounds: {#f2f6f8}${b.round}{/}   Enemy destroyed: {#6ad46a}${kills}{/}   Units lost: {#e8503a}${lost}{/}`, C.dim);
