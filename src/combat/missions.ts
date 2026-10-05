@@ -355,7 +355,19 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
   }
   const rt: MissionRuntime = { spec, battle: b, objectives, enemyUnits, playerUnits, briefing };
   // Turn or mirror the whole battlefield, so drops come from any edge
-  orientMission(rt, spec.orientation ?? r.int(0, 7));
+  // Drawn from the contract seed alone, so the battlefield matches the survey whatever lance deploys
+  orientMission(rt, spec.orientation ?? new RNG(spec.seed * 7919 + 13).int(0, 7));
+  // Text that names a map edge follows the turned map
+  if (t === 'escort') {
+    const g = b.units.find((u) => u.tag === 'convoy' && u.ai.goal)?.ai.goal;
+    if (g) {
+      const m = b.map;
+      const edge = g[0] <= 1 ? 'west' : g[0] >= m.w - 2 ? 'east' : g[1] <= 1 ? 'north' : 'south';
+      const o = objectives.find((x) => x.id === 'escort');
+      if (o) o.text = `At least 2 convoy vehicles reach the ${edge} edge`;
+      for (let i = 0; i < briefing.length; i++) briefing[i] = briefing[i].replace('exits east', `exits ${edge}`);
+    }
+  }
   installHooks(rt);
   return rt;
 }
@@ -530,7 +542,7 @@ function installHooks(rt: MissionRuntime): void {
     const ex = b.map.extract!;
     const mine = rt.playerUnits.filter((u) => u.team === 0 && u.alive && !u.fled);
     const inZone = mine.filter((u) => dist(u.x, u.y, ex.x, ex.y) <= ex.r).length;
-    obj(rt, 'extract')!.progress = `${inZone}/${mine.length} in zone · ${foes.length} hostile${foes.length === 1 ? '' : 's'} left`;
+    obj(rt, 'extract')!.progress = mine.length ? `${inZone}/${mine.length} in zone · ${foes.length} hostile${foes.length === 1 ? '' : 's'} left` : 'lance lost before extraction';
     if (mine.length && inZone === mine.length) return done();
     return '';
   };

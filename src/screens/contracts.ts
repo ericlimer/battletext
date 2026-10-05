@@ -314,7 +314,7 @@ export class AftermathScreen implements Screen {
     const d = ui.d;
     const win = r.outcome === 'win';
     d.text(3, 2, win ? 'CONTRACT COMPLETE' : r.outcome === 'withdraw' ? 'WITHDRAWN FROM CONTRACT' : 'CONTRACT FAILED', win ? C.green : C.red, undefined, 99, true);
-    if (r.failed?.length) d.text(30, 2, r.failed.join(' '), C.orange, undefined, COLS - 32);
+    if (r.failed?.length) wrap(r.failed.join(' '), COLS - 32).slice(0, 2).forEach((l, i) => d.text(30, 2 + i, l, C.orange, undefined, COLS - 32));
     // Lay out the text first so the panels grow to fit it
     const left: [string, string][] = [];
     left.push([`Contract payment    {#f0c850}${cb(r.pay)}{/}`, C.dim], [`Objective bonuses   {#f0c850}${cb(r.bonus)}{/}`, C.dim], [`Repairs queued      {#e8503a}${cb(-r.repairCost)}{/}`, C.dim], ['', C.dim]);

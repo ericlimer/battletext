@@ -694,7 +694,9 @@ export function assembleMech(c: Company, chassisId: string): string | null {
   const rr = rngOf(c);
   const stockWeapons = f.items.filter((it) => item(it.id).kind === 'weapon');
   const biggest = stockWeapons.reduce<typeof stockWeapons[0] | null>((a, it) => (!a || (item(it.id).dmg ?? 0) * (item(it.id).shots ?? 1) > (item(a.id).dmg ?? 0) * (item(a.id).shots ?? 1) ? it : a), null);
+  const before = f.items.slice();
   f.items = f.items.filter((it) => item(it.id).kind !== 'weapon' || it === biggest || rr.chance(0.5));
+  const stripped = before.filter((it) => !f.items.includes(it) && item(it.id).kind === 'weapon').map((it) => `${item(it.id).name} (${it.loc})`);
   // Ammo for weapons that didn't survive is useless; drop it too
   const ammoKept = new Set(f.items.filter((it) => item(it.id).kind === 'weapon').map((it) => item(it.id).ammo).filter(Boolean));
   f.items = f.items.filter((it) => item(it.id).kind !== 'ammo' || ammoKept.has(it.id));
@@ -703,6 +705,7 @@ export function assembleMech(c: Company, chassisId: string): string | null {
   if (c.mechs.length < bays(c)) c.mechs.push(f); else c.storage.push(f);
   c.work.push({ id: 'w' + Math.random().toString(36).slice(2), mechUid: f.uid, kind: 'assemble', hours: hrs, total: hrs, desc: `Assemble ${frameName(f)}` });
   addLog(c, `Assembling ${frameName(f)} from salvaged parts (${hrs} tech-hours).`, '#6ad46a');
+  if (stripped.length) addLog(c, `${frameName(f)} arrives stripped of: ${stripped.join(', ')}. Refit it in the Mech Lab.`, '#f0a830');
   return null;
 }
 
