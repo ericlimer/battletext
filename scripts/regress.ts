@@ -32,4 +32,19 @@ const check = (ok: boolean, msg: string) => { if (!ok) { fails++; console.log('F
   }
   check(hitSeen, 'melee: at least one blow landed in 8 tries');
 }
+// Meeting the objective with hostiles left opens an extraction zone; the lance wins by reaching it
+{
+  const r = new RNG(11);
+  const rt = setupMission({ type: 'assassinate', difficulty: 3, biome: 'lowlands', seed: 31, night: false, employer: 'davion', target: 'liao', player: generateForce(r, 3, 'davion', 4, { noVehicles: true }) });
+  const b = rt.battle; b.start();
+  const tg = rt.enemyUnits.find((u) => u.tag === 'target')!;
+  tg.alive = false;
+  b.check();
+  check(!b.result && !!b.map.extract, 'assassinate: target down with escorts alive opens extraction, mission continues');
+  check(rt.objectives.some((o) => o.id === 'extract' && o.primary && o.status === 'active'), 'assassinate: extraction is a primary objective');
+  const ex = b.map.extract!;
+  for (const u of rt.playerUnits) { u.x = ex.x; u.y = ex.y; }
+  b.check();
+  check(b.result === 'win' && rt.objectives.find((o) => o.id === 'extract')!.status === 'done', 'assassinate: whole lance in the zone wins');
+}
 process.exit(fails ? 1 : 0);

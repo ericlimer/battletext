@@ -113,6 +113,7 @@ export interface BattleMap {
   scorch: Float32Array;
   hill: Float32Array; // hillshade -1..1 (light from the north-west)
   beacons?: { x: number; y: number; owner: number }[]; // Target Acquisition objectives
+  extract?: { x: number; y: number; r: number }; // extraction zone once a mission's objective is met
 }
 
 export function idx(m: BattleMap, x: number, y: number): number { return y * m.w + x; }

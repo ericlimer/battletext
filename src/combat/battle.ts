@@ -142,7 +142,7 @@ export class Battle {
   lastDamageRound = 0;
   active: Unit | null = null;
   heatMult: number;
-  hooks: { roundStart?: (b: Battle) => void; check?: (b: Battle) => '' | 'win' | 'loss'; destroyed?: (b: Battle, u: Unit) => void; structDestroyed?: (b: Battle, s: Structure) => void } = {};
+  hooks: { roundStart?: (b: Battle) => void; check?: (b: Battle) => '' | 'win' | 'loss'; withdrawn?: () => 'win' | 'withdraw'; destroyed?: (b: Battle, u: Unit) => void; structDestroyed?: (b: Battle, s: Structure) => void } = {};
   log: { text: string; color?: string; round: number }[] = [];
   nextId = 1;
   visualRange: number;
@@ -251,7 +251,7 @@ export class Battle {
     this.hooks.roundStart?.(this);
     if (this.withdrawIn > 0) {
       this.withdrawIn--;
-      if (this.withdrawIn === 0) { this.finish('withdraw'); return; }
+      if (this.withdrawIn === 0) { this.finish(this.hooks.withdrawn?.() ?? 'withdraw'); return; }
       this.say(`Dropship inbound. Extraction in ${this.withdrawIn} round${this.withdrawIn > 1 ? 's' : ''}.`, '#5fd0e8');
     }
     this.updateVisibility();

@@ -14,12 +14,14 @@ import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
 import { portraitOf, drawPortrait, locTip } from './portrait';
 import { track, flush } from '../game/telemetry';
+import { TUNE, TUNE_DEFS, saveTune, resetTune, tuneDiff } from '../game/tuning';
 import { UnderFire, startUnderFire, underFireShot, underFireMelee, drawUnderFire } from './underfire';
 import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
 
 const MX = 0, MY = 1, VW = 50, VH = 36;
+const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 27; // attack-timing panel, over the map
 const PX = 100, PW = 50;
 
 type Mode = 'move' | 'look' | 'jump' | 'melee' | 'dfa' | 'facing' | 'called' | 'lock';
@@ -56,6 +58,9 @@ export class CombatScreen implements Screen {
   /** The volley being played out: who is shooting whom, and the damage landed so far. */
   vol: { a: Unit; t: Unit | null; tx: number; ty: number; n: number; fired: number; dmg: number; hits: number; shots: number; start: number; hp0: number; done: number; weapons: string[] } | null = null;
   /** Damage tallies that land on the HUD when their projectiles arrive. */
+  tuneOpen = false; // attack-timing tuning panel ([T])
+  lastVolley: BEvent[] = []; // the last volley's playback events, for replaying while tuning
+  private recVolley: BEvent[] | null = null;
   uf: UnderFire | null = null; // the attack view's record sheet for the volley playing now
   volTicks: { at: number; dmg: number; hits: number; shots: number }[] = [];
   aim: { ax: number; ay: number; tx: number; ty: number; until: number; t0: number } | null = null;
@@ -140,6 +145,14 @@ export class CombatScreen implements Screen {
         out.set(y * m.w + x, dx || dy ? { color: col, glyph: '·' } : { color: col, glyph: '◎', force: true });
       }
     }
+    if (m.extract) {
+      const ex = m.extract, r = Math.ceil(ex.r);
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        const x = ex.x + dx, y = ex.y + dy;
+        if (x < 0 || y < 0 || x >= m.w || y >= m.h || Math.hypot(dx, dy) > ex.r) continue;
+        out.set(y * m.w + x, dx || dy ? { color: '#4ad48a', glyph: Math.hypot(dx, dy) > ex.r - 1 ? '»' : '·' } : { color: '#7af0b0', glyph: '◇', force: true });
+      }
+    }
     for (const u of this.b.units) {
       if (!u.alive || u.fled || !u.ai.goal) continue;
       const fleeing = u.tag === 'convoy' || (u as any)._fleeing || (u.tag === 'target' && this.b.seen[0].has(u.id));
@@ -181,7 +194,14 @@ export class CombatScreen implements Screen {
   private playNext(): void {
     const e = this.queue.shift()!;
     const b = this.b;
-    this.trackEvent(e);
+    const replay = !!(e as any).replay;
+    if (!replay) this.trackEvent(e);
+    // Keep the last volley's playback so the tuning panel can replay it
+    if (!replay) {
+      if (e.k === 'volley') this.recVolley = [];
+      if (this.recVolley && ['volley', 'fire', 'float', 'boom', 'status', 'volleyEnd'].includes(e.k)) this.recVolley.push(e);
+      if (e.k === 'volleyEnd' && this.recVolley) { this.lastVolley = this.recVolley; this.recVolley = null; }
+    }
     if ('u' in e && typeof (e as any).u === 'number' && e.k !== 'destroyed') { const pu = b.units.find((q) => q.id === (e as any).u); if (pu) this.playingTeam = SIDE(pu.team); }
     const sp = this.speed;
     switch (e.k) {
@@ -245,32 +265,32 @@ export class CombatScreen implements Screen {
           // Aim: the camera frames the target and a targeting line draws in before the first shot
           if (t && this.visibleUnit(t)) this.ensureVisible(e.tx, e.ty, 8);
           const [ax, ay] = this.posOf(a);
-          this.aim = { ax, ay, tx: e.tx, ty: e.ty, until: this.time + 0.55 / sp, t0: this.time };
-          this.wait = 0.55 / sp;
+          this.aim = { ax, ay, tx: e.tx, ty: e.ty, until: this.time + TUNE.aim / sp, t0: this.time };
+          this.wait = TUNE.aim / sp;
         } else this.wait = 0.1 / sp;
         break;
       }
       case 'volleyEnd':
-        if (this.uf) this.uf.until = this.time + 1.6;
+        if (this.uf) this.uf.until = this.time + TUNE.sheetHold;
         if (this.vol) {
           this.vol.done = this.time;
           // Let the result sink in; heavier volleys hold longer
-          this.wait = (this.vol.fired ? 0.5 + Math.min(0.5, this.vol.dmg / 200) : 0.2) / sp;
+          this.wait = (this.vol.fired ? TUNE.endHold + Math.min(0.5, this.vol.dmg / 200) : 0.2) / sp;
         }
         break;
       case 'fire': {
         const dur = this.animateFire(e);
         // Support weapons after a melee blow land on the same sheet
-        if (this.uf) { underFireShot(this.uf, e, this.time + (dur * 0.8) / sp); if (this.uf.until !== Infinity) this.uf.until = Math.max(this.uf.until, this.time + dur / sp + 1.6); }
+        if (this.uf) { underFireShot(this.uf, e, this.time + (dur * TUNE.impactAt) / sp); if (this.uf.until !== Infinity) this.uf.until = Math.max(this.uf.until, this.time + dur / sp + TUNE.sheetHold); }
         if (this.vol) {
           this.vol.fired++;
           this.vol.weapons.push(item(e.w).short);
-          this.volTicks.push({ at: this.time + (dur * 0.8) / sp, dmg: e.total, hits: e.shots.filter((x) => x.hit).length, shots: e.shots.length });
+          this.volTicks.push({ at: this.time + (dur * TUNE.impactAt) / sp, dmg: e.total, hits: e.shots.filter((x) => x.hit).length, shots: e.shots.length });
         }
         // Same weapon next: fire as a ripple. A new weapon group gets a beat of its own
         const nx = this.queue.find((q) => q.k === 'fire' || q.k === 'volleyEnd');
         const sameGroup = nx && nx.k === 'fire' && nx.w === e.w && nx.u === e.u;
-        this.wait = (sameGroup ? Math.max(0.16, dur * 0.35) : dur + 0.3) / sp;
+        this.wait = (sameGroup ? Math.max(0.16, dur * TUNE.ripple) : dur + TUNE.groupGap) / sp;
         break;
       }
       case 'melee': {
@@ -416,14 +436,14 @@ export class CombatScreen implements Screen {
       const [ex, ey] = s.hit ? [tx, ty] : missPt();
       this.fx.beam(ax, ay, ex, ey, col, '#ffd0d0', base === 'LL' ? 0.45 : 0.3, 0);
       impact(ex, ey, s.hit, base === 'LL' ? 2 : 1);
-      dur = 0.45;
+      dur = 0.45 / TUNE.shotSpeed;
     } else if (base === 'PPC') {
       const s = shots[0];
       const [ex, ey] = s.hit ? [tx, ty] : missPt();
       this.fx.beam(ax, ay, ex, ey, '#60a8ff', '#ffffff', 0.5, 0, true);
       this.fx.sparks(ex, ey, s.hit ? 10 : 3, ['#e0f0ff', '#2050c0'], 3);
       if (s.hit) this.fx.flash = Math.max(this.fx.flash, 0.12);
-      dur = 0.6;
+      dur = 0.6 / TUNE.shotSpeed;
     } else if (base === 'FL') {
       for (let i = 0; i < 14; i++) {
         const f = Math.random();
@@ -460,7 +480,7 @@ export class CombatScreen implements Screen {
       shots.forEach((s, i) => {
         const [ex, ey] = s.hit ? [tx + (Math.random() - 0.5) * 0.8, ty + (Math.random() - 0.5) * 0.8] : missPt();
         const arc = lrm ? (e.indirect ? 5 : 2.5) * (Math.random() < 0.5 ? 1 : -1) * (0.6 + Math.random() * 0.6) : (Math.random() - 0.5) * 1.2;
-        const d = i * (lrm ? 0.06 : 0.08);
+        const d = (i * (lrm ? 0.06 : 0.08)) / TUNE.shotSpeed;
         const t = this.fx.projectile(ax, ay, ex, ey, lrm ? '•' : '*', '#ffe0a0', '#f07030', lrm ? 15 : 19, d, () => {
           if (s.hit) { this.fx.parts.push({ x: ex, y: ey, vx: 0, vy: 0, life: 0, max: 0.25, glyph: '*', c0: '#fff0c0', c1: '#c04010', light: 2 }); }
           else impact(ex, ey, false, 0);
@@ -760,6 +780,13 @@ export class CombatScreen implements Screen {
       try { localStorage.setItem('bt.elevMode', String(this.elevMode)); } catch { /* private mode */ }
       this.flashMsg = { text: `Elevation: ${ELEV_MODES[this.elevMode]} — ${ELEV_HELP[ELEV_MODES[this.elevMode]]}`, until: this.time + 4, color: C.cyan };
     }
+    if (ui.key('t')) {
+      this.tuneOpen = !this.tuneOpen;
+      if (!this.tuneOpen) { saveTune(); track('tune', tuneDiff()); }
+    }
+    if (this.tuneOpen && ui.key('y')) this.replayVolley();
+    // The tuning panel takes the mouse while it's open
+    if (this.tuneOpen && ui.hover(TUNE_X, TUNE_Y, TUNE_W, TUNE_H)) return;
     if (ui.key('?') || ui.key('F1') || ui.key('h')) this.showHelp = true;
     if (ui.key('i')) {
       // Inspect what's under the mouse, else the target, else the selected unit
@@ -972,9 +999,41 @@ export class CombatScreen implements Screen {
     if (this.uf && this.time > this.uf.until) this.uf = null;
     if (this.uf && !this.uf.hidden) drawUnderFire(ui, this.uf, this.time, PX, MY, PW, ROWS - MY);
     else this.drawPanel(ui);
+    if (this.tuneOpen) this.drawTune(ui);
     // Frame lines
     d.vline(PX - 1 + 0, MY, ROWS - MY, C.border);
     void COLS;
+  }
+
+  /** Plays the last volley's animation again (the battle itself is unchanged). */
+  replayVolley(): void {
+    if (!this.lastVolley.length || this.queue.length) return;
+    this.queue.push(...this.lastVolley.map((e) => Object.assign({ ...e }, { replay: true }) as BEvent));
+  }
+
+  /** Debug sliders for attack playback timing. */
+  drawTune(ui: UI): void {
+    const d = ui.d, x = TUNE_X, w = TUNE_W;
+    let y = TUNE_Y;
+    d.fill(x, y, w, TUNE_H, ' ', C.text, '#0a1016');
+    d.box(x, y, w, TUNE_H, '#3a6a8a', '#0a1016');
+    ui.header(x, y, w, '⚙ ATTACK TIMING · [T] closes · saved per browser', C.bg, '#2a6a8a');
+    y += 2;
+    for (const t of TUNE_DEFS) {
+      const n = Math.round((t.max - t.min) / t.step), idx = Math.round((TUNE[t.key] - t.min) / t.step);
+      const changed = Math.abs(TUNE[t.key] - t.def) > 1e-9;
+      d.text(x + 2, y, t.label, changed ? C.bright : C.text, '#0a1016', 33);
+      const v = ui.slider(x + 36, y, 16, idx, 0, n, changed ? '#f0a830' : '#3a9ac0');
+      if (v !== idx) TUNE[t.key] = +(t.min + v * t.step).toFixed(3);
+      const val = t.unit === 's' ? `${TUNE[t.key].toFixed(2)}s` : `${TUNE[t.key].toFixed(2)}×`;
+      d.text(x + 53, y, val.padStart(6), changed ? '#f0a830' : C.dim, '#0a1016');
+      if (ui.click(x + 2, y, 33, 1)) TUNE[t.key] = t.def; // click a label to reset that one
+      y += 2;
+    }
+    d.text(x + 2, y, 'Click a label to reset it. Game speed [+]/[−] scales all.', C.faint, '#0a1016', w - 4);
+    y += 2;
+    if (ui.button(x + 2, y, 'Replay last volley', { key: 'y', disabled: !this.lastVolley.length || this.queue.length > 0 })) this.replayVolley();
+    if (ui.button(x + 28, y, 'Reset all', { key: '0' })) resetTune();
   }
 
   /** Folds repeated volleys of the same weapon at the same target into one log line. */
@@ -1528,7 +1587,7 @@ export class CombatScreen implements Screen {
     this.fx.glitch = Math.max(this.fx.glitch, k);
     this.fx.shake = Math.max(this.fx.shake, 0.3 + k * 0.5);
     if (v.t && SIDE(v.t.team) === 0) this.fx.hurt = Math.max(this.fx.hurt, k);
-    this.wait += 0.12 * k; // hit-stop
+    this.wait += TUNE.hitStop * k; // hit-stop
   }
 
   /** Post-process the map: displaced scanline bands with a colour split, plus a red vignette when you're hurt. */

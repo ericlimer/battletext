@@ -21,25 +21,6 @@ const LOGO = [
   '╚═════╝ ╚═╝  ╚═╝   ╚═╝      ╚═╝   ╚══════╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝   ╚═╝   ',
 ];
 
-const MECH = [
-  '              ▄▄▄████▄▄▄              ',
-  '            ▄██▀▀▀██▀▀▀██▄            ',
-  '            ██ ▓▓ ██ ▓▓ ██            ',
-  '            ▀██▄▄▄██▄▄▄██▀            ',
-  '      ▄▄▄▄▄▄▄▄▀▀██████▀▀▄▄▄▄▄▄▄▄      ',
-  '   ▄████████▀▀  ██████  ▀▀████████▄   ',
-  '  ███▀  ████▌  ▐██████▌  ▐████  ▀███  ',
-  ' ▐██▌   ████▌  ▐██▀▀██▌  ▐████   ▐██▌ ',
-  ' ▐██▌   ▀███▄▄▄███▄▄███▄▄▄███▀   ▐██▌ ',
-  ' ▐██▌     ▀▀████████████▀▀       ▐██▌ ',
-  '  ▀▀▀         ███▀▀███           ▀▀▀  ',
-  '            ▄████  ████▄              ',
-  '           ▐████▌  ▐████▌             ',
-  '           ▐████▌  ▐████▌             ',
-  '           ▐███▀    ▀███▌             ',
-  '         ▄▄████▄    ▄████▄▄           ',
-  '        ▀▀▀▀▀▀▀▀    ▀▀▀▀▀▀▀▀          ',
-];
 
 interface Star { x: number; y: number; z: number; }
 
@@ -47,7 +28,10 @@ export class TitleScreen implements Screen {
   stars: Star[] = [];
   t = 0;
   msg = '';
+  art: string[];
   constructor() {
+    const forced = +(new URLSearchParams(location.search).get('titlemech') ?? 0);
+    this.art = (TITLE_ART[forced - 1] ?? TITLE_ART[Math.floor(Math.random() * TITLE_ART.length)]).px;
     for (let i = 0; i < 160; i++) this.stars.push({ x: Math.random() * COLS, y: Math.random() * ROWS, z: Math.random() });
   }
 
@@ -66,20 +50,8 @@ export class TitleScreen implements Screen {
       const h = 2 + Math.sin(x * 0.03) * 0.8;
       for (let k = 0; k < h; k++) d.set(x, ROWS - 1 - k, k === Math.floor(h) - 1 ? '▄' : '█', lerp('#1a1008', '#3a200c', k / h), '#030508');
     }
-    // Mech (preview candidates with ?titlemech=1..4)
-    const pick = TITLE_ART[+(new URLSearchParams(location.search).get('titlemech') ?? 0) - 1];
-    if (pick) this.drawArt(d, pick.px);
-    else {
-    const mx = 100, my = 14;
-    MECH.forEach((row, j) => {
-      [...row].forEach((c, i) => {
-        if (c === ' ') return;
-        const shade = 0.45 + 0.35 * (1 - j / MECH.length) + 0.1 * Math.sin(this.t * 0.8 + i * 0.1);
-        const col = c === '▓' ? lerp('#ff3a1a', '#ffb040', 0.5 + 0.5 * Math.sin(this.t * 3)) : scale('#8a9aa8', shade);
-        d.set(mx + i, my + j, c, col, '#030508');
-      });
-    });
-    }
+    // A 'Mech from the game's roster, picked afresh each time the menu comes up
+    this.drawArt(d, this.art);
     // Logo
     const lx = 6, ly = 6;
     LOGO.forEach((row, j) => {
@@ -108,15 +80,18 @@ export class TitleScreen implements Screen {
     item('Import Save', 'I', 'Load a career from an exported save file.', () => this.importFile());
     item('Field Manual', 'H', 'How to play.', () => app.push(new HelpScreen()));
     if (this.msg) d.text(lx + 2, y + 1, this.msg, C.warn, '#030508');
-    d.text(lx + 2, ROWS - 6, 'Inspired by BATTLETECH (2018) by Harebrained Schemes. BattleTech is a trademark of its owners; this is a fan tribute.', C.faint, undefined, 140);
-    d.text(lx + 2, ROWS - 5, 'Mouse + keyboard. Highlighted letters are hotkeys. Best at 1280×768 or larger.', C.faint);
-    d.ctext(lx + 2, ROWS - 4, `{#f0a830}\`{/} bookmarks whatever is under the mouse, on any screen.  {#6d7f8a}Telemetry ${telemetry.status()} · build ${build()}{/}`, C.dim, undefined, 140);
+    // Footer stays left of the 'Mech
+    d.text(lx + 2, ROWS - 8, 'Inspired by BATTLETECH (2018) by Harebrained Schemes.', C.faint);
+    d.text(lx + 2, ROWS - 7, 'BattleTech is a trademark of its owners; this is a fan tribute.', C.faint);
+    d.text(lx + 2, ROWS - 6, 'Mouse + keyboard. Highlighted letters are hotkeys. Best at 1280×768 or larger.', C.faint);
+    d.ctext(lx + 2, ROWS - 5, `{#f0a830}\`{/} bookmarks whatever is under the mouse, on any screen.`, C.dim, undefined, 90);
+    d.ctext(lx + 2, ROWS - 4, `{#6d7f8a}Telemetry ${telemetry.status()} · build ${build()}{/}`, C.dim, undefined, 90);
   }
 
   /** Pixel art, two pixels per cell, standing on the horizon to the right of the menu. */
   drawArt(d: UI['d'], px: string[]): void {
     const BG = '#030508', w = px[0].length, rows = Math.ceil(px.length / 2);
-    const x0 = 124 - (w >> 1), y0 = ROWS - 7 - rows;
+    const x0 = 124 - (w >> 1), y0 = ROWS - 3 - rows;
     const colour = (c: string, y: number): string | null => {
       if (c === '.' || c === undefined) return null;
       const lift = 0.85 + 0.25 * (1 - y / px.length);

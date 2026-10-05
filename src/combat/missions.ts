@@ -332,6 +332,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       break;
     }
   }
+  if (t !== 'battle' && t !== 'defendbase') briefing.push('Once the objective is met, finish off the remaining hostiles or fall back to the extraction zone at your drop point.');
   if (spec.night) briefing.push('Night operation: visual range reduced to 360m. Sensors unaffected.');
 
   // Unique callsigns within each side keep the combat log readable
@@ -418,7 +419,7 @@ function installHooks(rt: MissionRuntime): void {
         const esc = rt.enemyUnits.filter((u) => u.tag !== 'target');
         const eo = obj(rt, 'escorts')!;
         if (eo.status === 'active' && esc.every((u) => !u.alive)) eo.status = 'done';
-        if (tg && !tg.alive) { obj(rt, 'target')!.status = 'done'; return 'win'; }
+        if (tg && !tg.alive) { const o = obj(rt, 'target')!; o.status = 'done'; o.progress = undefined; return 'win'; }
         if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `round ${b.round} of 9 — bolts then, or sooner if badly hurt`;
         if (tg && tg.fled) { const o = obj(rt, 'target')!; o.status = 'failed'; o.progress = 'escaped'; return 'loss'; }
         break;
@@ -498,7 +499,47 @@ function installHooks(rt: MissionRuntime): void {
     }
     return '';
   };
-  b.hooks.check = () => update();
+  // Meeting the objective doesn't end the mission while hostiles are still on the field: the lance must
+  // finish them or get back to the extraction zone (or call the DropShip in with a withdrawal).
+  const extracting = () => !!b.map.extract;
+  const startExtraction = () => {
+    const ps = rt.playerUnits.filter((u) => u.deployed !== false);
+    let cx = Math.round(ps.reduce((a, u) => a + u.startX, 0) / Math.max(1, ps.length)), cy = Math.round(ps.reduce((a, u) => a + u.startY, 0) / Math.max(1, ps.length));
+    // Nearest open ground to the drop point
+    const m = b.map;
+    let best: [number, number] = [cx, cy], bd = Infinity;
+    for (let y = 1; y < m.h - 1; y++) for (let x = 1; x < m.w - 1; x++) {
+      const tr = TERRAIN[m.terr[y * m.w + x]];
+      if (!isFinite(tr.cost) || tr.blocks || m.struct[y * m.w + x] >= 0) continue;
+      const dd = dist(x, y, cx, cy);
+      if (dd < bd) { bd = dd; best = [x, y]; }
+    }
+    [cx, cy] = best;
+    m.extract = { x: cx, y: cy, r: 2.5 };
+    rt.objectives.unshift({ id: 'extract', text: 'Destroy the remaining hostiles or reach the extraction zone (»)', primary: true, status: 'active', bonus: 0 });
+    b.say('Objective complete. Hostiles remain: destroy them, or get the whole lance back to the extraction zone.', '#4ad48a');
+    b.float(cx, cy, 'EXTRACTION ZONE', '#4ad48a', true);
+  };
+  b.hooks.check = () => {
+    const r = update();
+    if (r !== 'win' || t === 'battle' || t === 'defendbase') return r;
+    const foes = b.units.filter((u) => SIDE(u.team) === 1 && u.alive && !u.fled && u.deployed && u.tag !== 'convoy');
+    const done = (): 'win' => { const o = obj(rt, 'extract'); if (o) { o.status = 'done'; o.progress = undefined; } return 'win'; };
+    if (!foes.length) return done();
+    if (!extracting()) startExtraction();
+    const ex = b.map.extract!;
+    const mine = rt.playerUnits.filter((u) => u.team === 0 && u.alive && !u.fled);
+    const inZone = mine.filter((u) => dist(u.x, u.y, ex.x, ex.y) <= ex.r).length;
+    obj(rt, 'extract')!.progress = `${inZone}/${mine.length} in zone · ${foes.length} hostile${foes.length === 1 ? '' : 's'} left`;
+    if (mine.length && inZone === mine.length) return done();
+    return '';
+  };
+  // A withdrawal after the objective is met is the extraction
+  b.hooks.withdrawn = () => {
+    if (!extracting()) return 'withdraw';
+    const o = obj(rt, 'extract'); if (o) o.status = 'done';
+    return 'win';
+  };
   b.hooks.roundStart = () => {
     // Escorts shadow the lead vehicle of the convoy
     if (t === 'escort') {

@@ -1,5 +1,6 @@
 // Visual effects in map space: projectiles, beams, particles, lights, floating text.
 
+import { TUNE } from '../game/tuning';
 import { rgb } from '../engine/color';
 
 export interface Particle {
@@ -127,7 +128,7 @@ export class FX {
   /** Bolt/shell travelling from a to b. Returns travel time. */
   projectile(x0: number, y0: number, x1: number, y1: number, glyph: string, c0: string, c1: string, speed: number, delay: number, onHit?: () => void, arc = 0, trail?: string): number {
     const d = Math.hypot(x1 - x0, y1 - y0);
-    const t = Math.max(0.08, d / speed);
+    const t = Math.max(0.08, d / (speed * TUNE.shotSpeed));
     if (arc) {
       // Missiles: simulate an arc by splitting into a few segments
       const nx = -(y1 - y0) / (d || 1), ny = (x1 - x0) / (d || 1);
@@ -149,7 +150,7 @@ export class FX {
   }
 
   beam(x0: number, y0: number, x1: number, y1: number, color: string, core: string, dur: number, delay: number, crackle = false): void {
-    this.beams.push({ x0, y0, x1, y1, life: 0, max: dur, color, core, delay, crackle });
+    this.beams.push({ x0, y0, x1, y1, life: 0, max: dur / TUNE.shotSpeed, color, core, delay, crackle });
   }
 }
 

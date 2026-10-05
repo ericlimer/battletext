@@ -6,6 +6,7 @@ import { C, healthColor } from '../engine/color';
 import { Unit, BEvent, SIDE, attackArc } from '../combat/battle';
 import { item, LOC_NAMES } from '../data/items';
 import { frameTitle } from './widgets';
+import { TUNE } from '../game/tuning';
 
 type Fire = Extract<BEvent, { k: 'fire' }>;
 type Melee = Extract<BEvent, { k: 'melee' }>;
@@ -23,7 +24,6 @@ export interface UnderFire {
   until: number; // when the sheet gives the panel back (Infinity while the attack is still playing)
 }
 
-const BLINK = 0.6; // three flashes
 
 // Viewer's left is the 'Mech's right. Codes: h HD, c CT, r RT, l LT, a RA, b LA, x RL, y LL.
 type Span = [string, number, number];
@@ -167,8 +167,8 @@ export function drawUnderFire(ui: UI, uf: UnderFire, now: number, x0: number, y0
   for (const p of uf.pend) if (now >= p.at) { land(uf, p.e, now); p.at = Infinity; }
   uf.pend = uf.pend.filter((p) => p.at !== Infinity);
   const d = ui.d, t = uf.t, f = t.frame;
-  const since = now - uf.blinkAt, lit = since < BLINK && Math.floor(since / 0.1) % 2 === 0;
-  const tagOn = since < BLINK + 0.9;
+  const since = now - uf.blinkAt, lit = since < TUNE.blink && Math.floor(since / TUNE.blinkRate) % 2 === 0;
+  const tagOn = since < TUNE.blink + 0.9;
   d.fill(x0, y0, w, h, ' ', C.text, C.panel);
   const mine = SIDE(t.team) === 0;
   ui.header(x0, y0, w, mine ? `◆ UNDER FIRE · ${frameTitle(f)}` : `◆ ON TARGET · ${frameTitle(f)}`, C.bg, mine ? '#b03a2a' : '#2a6a8a');
