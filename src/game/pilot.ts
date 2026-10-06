@@ -23,6 +23,28 @@ export const ABILITIES: AbilityDef[] = [
   { id: 'sensorlock', name: 'Sensor Lock', skill: 'tac', tier: 5, active: true, desc: 'Instead of attacking, lock onto a target within sensor range: it loses 2 evasion and is revealed to all allies.' },
   { id: 'mastertactician', name: 'Master Tactician', skill: 'tac', tier: 8, desc: '+1 initiative. This pilot\'s unit always acts one phase earlier.' },
 ];
+/** Roles are assigned by the player to mark which two skills a MechWarrior is being trained in. */
+export type RoleId = 'skirmisher' | 'gunslinger' | 'artillerist' | 'bruiser' | 'scout' | 'anchor';
+export interface RoleDef { id: RoleId; name: string; skills: [Skill, Skill]; desc: string }
+export const ROLES: RoleDef[] = [
+  { id: 'skirmisher', name: 'Skirmisher', skills: ['gun', 'pil'], desc: 'Accurate on the move: hit-and-run in fast \'Mechs.' },
+  { id: 'gunslinger', name: 'Gunslinger', skills: ['gun', 'gut'], desc: 'Stands in the open trading alphas and runs hot.' },
+  { id: 'artillerist', name: 'Artillerist', skills: ['gun', 'tac'], desc: 'Long-range and indirect fire from the back line.' },
+  { id: 'bruiser', name: 'Bruiser', skills: ['pil', 'gut'], desc: 'Closes in for melee, DFA and stability damage.' },
+  { id: 'scout', name: 'Scout', skills: ['pil', 'tac'], desc: 'Evasive spotter: sensor locks and initiative.' },
+  { id: 'anchor', name: 'Anchor', skills: ['gut', 'tac'], desc: 'Holds a position and soaks fire.' },
+];
+export function roleOf(p: Pilot | null | undefined): RoleDef | null { return p?.role ? ROLES.find((r) => r.id === p.role) ?? null : null; }
+export function isRoleSkill(p: Pilot | null | undefined, s: Skill): boolean { return !!roleOf(p)?.skills.includes(s); }
+/** Name of the ability the next point in a skill would unlock, if any. */
+export function nextUnlock(p: Pilot, s: Skill): string | null {
+  if (p[s] >= 10) return null;
+  const q: Pilot = { ...p, abilities: [...p.abilities] };
+  q[s]++;
+  const g = grantAbilities(q);
+  return g ? g.replace('New ability: ', '') : null;
+}
+
 export function ability(id: string): AbilityDef {
   return ABILITIES.find((a) => a.id === id)!;
 }
@@ -53,6 +75,8 @@ export interface Pilot {
   hireCost?: number;
   timeline: string[];
   quirks?: string[];
+  /** Player-assigned role: which two skills this MechWarrior is being trained in. */
+  role?: RoleId;
 }
 
 export interface QuirkDef { id: string; name: string; desc: string; good: boolean; }

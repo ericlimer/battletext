@@ -5,9 +5,9 @@ import { C } from '../engine/color';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
 import { pilotCap, pilotStatus, addLog, sys } from '../game/company';
-import { Pilot, Skill, AbilityDef, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
+import { Pilot, Skill, AbilityDef, ROLES, roleOf, isRoleSkill, nextUnlock, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
 import { cb, cbk, wrap } from '../engine/util';
-import { skillLine, healthPips } from './widgets';
+import { skillLine, healthPips, roleTag, ROLE_COLOR } from './widgets';
 
 let trainConfirm = '';
 
@@ -58,7 +58,11 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     d.ctext(lx + 30, ly + 1, skillLine(p), C.text, bg);
     const ab = p.abilities.map((a) => ability(a).name).join(', ');
     const qs = (p.quirks ?? []).map((q) => quirk(q).name).join(', ');
-    d.text(lx + 4, ly + 2, [ab, qs].filter(Boolean).join(' · ') || (p.xp >= 1000 ? `${p.xp} XP unspent` : '—'), ab || qs ? C.faint : p.xp >= 1000 ? C.accent : C.faint, bg, lw - 6);
+    const rn = roleOf(p)?.name;
+    if (rn) d.text(lx + 4, ly + 2, rn, ROLE_COLOR, bg);
+    const rx = lx + 4 + (rn ? rn.length + 3 : 0);
+    if (rn) d.text(rx - 2, ly + 2, '·', C.faint, bg);
+    d.text(rx, ly + 2, [ab, qs].filter(Boolean).join(' · ') || (p.xp >= 1000 ? `${p.xp} XP unspent` : '—'), ab || qs ? C.faint : p.xp >= 1000 ? C.accent : C.faint, bg, lx + lw - 2 - rx);
   }, 3);
   if (cl >= 0) { st.sel = cl; st.confirm = false; }
   const p = list[Math.min(st.sel, list.length - 1)];
@@ -77,12 +81,24 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
   d.ctext(dx + 72, yy, `Missions {#f2f6f8}${p.missions}{/} · Kills {#f2f6f8}${p.kills}{/}`, C.dim);
   yy += 2;
   d.ctext(dx + 3, yy++, `Experience: {#f0a830}${p.xp}{/} unspent  {#6d7f8a}(${p.xpTotal} total){/}`, C.dim);
-  yy++;
+  // Role: the player's plan for this MechWarrior; its two skills are highlighted everywhere
+  if (st.mode === 'roster' && !p.dead) {
+    d.text(dx + 3, yy, 'Role', C.dim);
+    let rx = dx + 9;
+    for (const r of ROLES) {
+      const on = p.role === r.id;
+      if (ui.button(rx, yy, r.name, { style: 'plain', w: r.name.length + 2, active: on, fg: on ? C.bg : ROLE_COLOR, tip: [`{${ROLE_COLOR}}${r.name}{/}: ${SKILL_NAMES[r.skills[0]]} + ${SKILL_NAMES[r.skills[1]]}`, r.desc, on ? 'Click again to clear the role.' : 'Assign this role. It only marks which skills to train.'] })) { p.role = on ? undefined : r.id; saveGame(c); }
+      rx += r.name.length + 3;
+    }
+  } else if (roleOf(p)) d.ctext(dx + 3, yy, `Role ${roleTag(p)}`, C.dim);
+  yy += 2;
   // Skills with training buttons
   let pipTip: string[] | null = null;
   for (const s of SKILLS) {
     const v = p[s];
-    d.text(dx + 3, yy, SKILL_NAMES[s].padEnd(10), C.text);
+    const inRole = isRoleSkill(p, s);
+    if (inRole) d.text(dx + 1, yy, '▸', ROLE_COLOR);
+    d.text(dx + 3, yy, SKILL_NAMES[s].padEnd(10), inRole ? ROLE_COLOR : C.text, undefined, 99, inRole);
     // Milestone pips: ◆ an ability unlocks at that level, ♥ Guts adds pilot health
     for (let k = 0; k < 10; k++) {
       const lv = k + 1, ms = milestone(s, lv), have = k < v;
@@ -104,7 +120,9 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
         }
       }
     }
-    if (pipTip) ui.setTip(pipTip); else if (ui.hover(dx + 3, yy, 32, 1)) ui.setTip(SKILL_DESC[s]);
+    const unlock = !p.dead ? nextUnlock(p, s) : null;
+    if (unlock) d.text(dx + 52, yy, `→ ${unlock}`, inRole ? ROLE_COLOR : C.dim);
+    if (pipTip) ui.setTip(pipTip); else if (ui.hover(dx + 3, yy, 32, 1)) ui.setTip([SKILL_DESC[s], ...(inRole ? [`One of ${p.callsign}'s ${roleOf(p)!.name} skills.`] : [])]);
     pipTip = null;
     yy++;
   }

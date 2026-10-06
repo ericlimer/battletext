@@ -5,7 +5,7 @@ import { C, healthColor, scale, lerp } from '../engine/color';
 import { Frame, frameStats, frameName } from '../game/frame';
 import { item, HARD_COLORS, LOC_NAMES } from '../data/items';
 import { chassis, CLASS_NAMES, classOf } from '../data/mechs';
-import { Pilot, health, SKILLS, SKILL_NAMES } from '../game/pilot';
+import { Pilot, health, SKILLS, SKILL_NAMES, roleOf } from '../game/pilot';
 import { UI } from '../engine/ui';
 
 export const DOLL_W = 29;
@@ -112,9 +112,15 @@ export function pipStr(n: number, max: number): string {
   return '◆'.repeat(n) + '◇'.repeat(Math.max(0, max - n));
 }
 
+/** G P U T skill summary; the two skills of the pilot's assigned role stand out. */
 export function skillLine(p: Pilot): string {
-  return `{#6d7f8a}G{/}${p.gun} {#6d7f8a}P{/}${p.pil} {#6d7f8a}U{/}${p.gut} {#6d7f8a}T{/}${p.tac}`;
+  const r = roleOf(p);
+  const one = (s: 'gun' | 'pil' | 'gut' | 'tac', l: string) => (r?.skills.includes(s) ? `{${ROLE_COLOR}}${l}${p[s]}{/}` : `{#6d7f8a}${l}{/}${p[s]}`);
+  return `${one('gun', 'G')} ${one('pil', 'P')} ${one('gut', 'U')} ${one('tac', 'T')}`;
 }
+export const ROLE_COLOR = '#e8b84a';
+/** A pilot's role as a coloured tag, or '' when none is assigned. */
+export function roleTag(p: Pilot): string { const r = roleOf(p); return r ? `{${ROLE_COLOR}}${r.name}{/}` : ''; }
 
 export function healthPips(p: Pilot, injuriesOverride?: number): string {
   const h = health(p);

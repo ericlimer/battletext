@@ -14,12 +14,12 @@ import { BIOME_INFO } from '../combat/terrain';
 import { faction, repLevel } from '../data/factions';
 import { cb, cbk, wrap } from '../engine/util';
 import { Frame, frameName, frameTons, weaponSummary, frameStats, repairEstimate } from '../game/frame';
-import { Pilot, isAvailable, health, skillTotal } from '../game/pilot';
+import { Pilot, isAvailable, health, skillTotal, roleOf } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
 import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots, daysToContract, fightOdds, oddsText, MISSION_RISK, surveySize } from './survey';
-import { skillLine, simpleBar, healthPips, weaponTip } from './widgets';
+import { skillLine, simpleBar, healthPips, weaponTip, roleTag } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
 
@@ -254,7 +254,7 @@ export class DropScreen implements Screen {
       if (p) {
         d.text(SX + 41, y + 1, p.sigil, p.color, undefined, 99, true);
         d.text(SX + 43, y + 1, p.callsign, C.bright, undefined, 22, true);
-        d.text(SX + 41, y + 2, p.name, C.dim, undefined, 25);
+        d.ctext(SX + 41, y + 2, roleOf(p) ? `${roleTag(p)} {#6d7f8a}· ${p.name}{/}` : p.name, C.dim, undefined, 26);
         d.ctext(SX + 41, y + 3, skillLine(p), C.text);
         d.ctext(SX + 41, y + 4, healthPips(p), C.text);
       } else d.text(SX + 41, y + 3, '— drop a pilot —', C.faint);
@@ -290,7 +290,7 @@ export class DropScreen implements Screen {
       d.text(lx + 3, ly, p.callsign, ok && at < 0 ? C.bright : C.faint, bg, 12);
       d.ctext(lx + 16, ly, skillLine(p), C.text, bg);
       if (at >= 0) d.text(lx + lw - 3, ly, `#${at + 1}`, C.accent, bg);
-      d.ctext(lx + 1, ly + 1, !ok ? `{#e8a03a}Injured (${p.healDays} day${p.healDays === 1 ? '' : 's'}){/}` : `${healthPips(p)} {#6d7f8a}${p.name}{/}`, C.dim, bg, lw - 2);
+      d.ctext(lx + 1, ly + 1, !ok ? `{#e8a03a}Injured (${p.healDays} day${p.healDays === 1 ? '' : 's'}){/}` : `${healthPips(p)} ${roleOf(p) ? roleTag(p) : `{#6d7f8a}${p.name}{/}`}`, C.dim, bg, lw - 2);
       if (hov && pressed && ok && !this.drag) this.drag = { kind: 'pilot', id: p.id, from: at >= 0 ? at : null, x0: mx, y0: my, moved: false };
     }, 2);
     // ---- Drag and drop (a press and release without moving counts as a click)
