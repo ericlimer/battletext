@@ -180,99 +180,152 @@ export class NegotiateScreen implements Screen {
 // ---- Lance deployment ---------------------------------------------------------------------
 export class DropScreen implements Screen {
   slots: { mech: string | null; pilot: string | null }[];
-  pick: { i: number; what: 'mech' | 'pilot' } | null = null;
-  listState = { scroll: 0 };
+  /** Slot chosen for click-to-assign (a bank click fills it). */
+  sel: number | null = null;
+  drag: { kind: 'mech' | 'pilot'; id: string; from: number | null; x0: number; y0: number; moved: boolean } | null = null;
+  wasDown = false;
+  mechList = { scroll: 0 };
+  pilotList = { scroll: 0 };
   constructor(public k: Contract, public n: Negotiation, public argo: ArgoScreen) {
     this.slots = defaultSlots(company!);
   }
+
+  /** Last deployment's lance, leaving a hole wherever a 'Mech or MechWarrior can't go now. */
+  previousLance(): void {
+    const c = company!;
+    this.slots = [0, 1, 2, 3].map((i) => {
+      const mu = c.lance[i] ?? null, pi = c.lancePilots[i] ?? null;
+      const m = mu ? c.mechs.find((x) => x.uid === mu) : undefined, p = pi ? c.pilots.find((x) => x.id === pi) : undefined;
+      return { mech: m && mechReady(c, m) ? mu : null, pilot: p && !p.dead && isAvailable(p) ? pi : null };
+    });
+    this.sel = null;
+  }
+
+  place(kind: 'mech' | 'pilot', id: string, slot: number | null, from: number | null): void {
+    const c = company!;
+    if (kind === 'mech') { const m = c.mechs.find((x) => x.uid === id); if (!m || !mechReady(c, m)) return; }
+    else { const p = c.pilots.find((x) => x.id === id); if (!p || p.dead || !isAvailable(p)) return; }
+    if (slot === null) { if (from !== null) this.slots[from][kind] = null; return; } // dropped back on a bank
+    const prev = this.slots[slot][kind];
+    for (const s of this.slots) if (s[kind] === id) s[kind] = null;
+    this.slots[slot][kind] = id;
+    if (from !== null && from !== slot) this.slots[from][kind] = prev; // swap
+  }
+
   render(ui: UI): void {
-    const d = ui.d, c = company!, k = this.k;
+    const d = ui.d, c = company!, k = this.k, inp = ui.inp;
     d.fill(0, 0, COLS, ROWS, ' ', C.text, C.bg);
     ui.header(0, 0, COLS, `LANCE CONFIGURATION · ${k.name.toUpperCase()} · ${MISSION_INFO[k.type].name.toUpperCase()} ${skulls(k.diff)}`, C.bg, C.accent);
-    d.text(2, 2, 'Assign up to four \'Mechs and MechWarriors. Damaged \'Mechs under repair and injured pilots cannot deploy.', C.dim);
+    d.text(2, 2, 'Drag \'Mechs and MechWarriors into the slots (or click a slot, then a name). Drag out to clear.', C.dim);
+    const rt = surveyOf(c, k);
+    const split = rt.layout === 'split';
+    const mx = Math.floor(inp.mx), my = Math.floor(inp.my);
+    const pressed = inp.down && !this.wasDown;
+    this.wasDown = inp.down;
+    const SX = 2, SW = 68, SH = 9, MBX = 72, MBW = 38, PBX = 111, PBW = COLS - 111 - 1, TOP = 4, BH = 36;
+    const slotAt = (x: number, y: number): number | null => { for (let i = 0; i < 4; i++) { const yy = TOP + i * SH + (split && i >= 2 ? 0 : 0); if (x >= SX && x < SX + SW && y >= yy && y < yy + SH - 1) return i; } return null; };
+    const overBank = (x: number, y: number) => y >= TOP && y < TOP + BH && x >= MBX;
     let tons = 0;
+    // ---- Slots
     this.slots.forEach((s, i) => {
-      const y = 4 + i * 9;
+      const y = TOP + i * SH;
       const m = s.mech ? c.mechs.find((x) => x.uid === s.mech) ?? null : null;
       const p = s.pilot ? c.pilots.find((x) => x.id === s.pilot) ?? null : null;
       if (m && p) tons += frameTons(m);
-      d.box(2, y, 86, 8, this.pick?.i === i ? C.accent : C.border, C.panel);
-      d.text(4, y, ` SLOT ${i + 1} `, C.accent, C.panel, 99, true);
-      // Mech
-      if (ui.click(3, y + 1, 50, 6)) this.pick = { i, what: 'mech' };
+      const dropHere = this.drag?.moved && slotAt(mx, my) === i;
+      const border = dropHere ? '#6ae090' : this.sel === i ? C.accent : C.border;
+      d.box(SX, y, SW, SH - 1, border, C.panel);
+      const pair = split ? (i < 2 ? ' · PAIR A' : ' · PAIR B') : '';
+      d.text(SX + 2, y, ` SLOT ${i + 1}${pair} `, C.accent, C.panel, 99, true);
+      // 'Mech half
       if (m) {
         const st = frameStats(m);
-        d.text(4, y + 1, frameName(m), C.bright, undefined, 40, true);
-        d.text(4, y + 2, `${frameTons(m)}t · mv ${st.walk}/${st.sprint}${st.jump ? ' j' + st.jump : ''} · armor ${st.armorTotal}`, C.dim);
-        d.text(4, y + 3, weaponSummary(m).slice(0, 48), C.text);
+        d.text(SX + 2, y + 1, frameName(m), C.bright, undefined, 34, true);
+        d.text(SX + 2, y + 2, `${frameTons(m)}t · mv ${st.walk}/${st.sprint}${st.jump ? ' j' + st.jump : ''} · armor ${st.armorTotal}`, C.dim, undefined, 36);
+        d.text(SX + 2, y + 3, weaponSummary(m), C.text, undefined, 36);
         const e = repairEstimate(m);
-        if (e.armorPts || e.structPts) d.text(4, y + 5, `Damaged: ${e.armorPts} armor, ${e.structPts} structure missing`, C.warn);
+        if (e.armorPts || e.structPts) d.text(SX + 2, y + 5, `Damaged: ${e.armorPts} armor, ${e.structPts} structure`, C.warn, undefined, 36);
         const hp = Object.values(chassis(m.defId).hardpoints).flat().filter((h) => h !== 'S').length;
-        if (!st.weapons.length) d.text(4, y + 6, '⚠ NO WEAPONS MOUNTED — refit in the Mech Lab', C.red);
-        else if (hp - st.weapons.length >= 2) d.text(4, y + 6, `⚠ ${hp - st.weapons.length} empty hardpoints — under-armed`, C.warn);
-      } else d.text(4, y + 2, '— click to assign a \'Mech —', C.faint);
-      // Pilot
-      if (ui.click(55, y + 1, 32, 6)) this.pick = { i, what: 'pilot' };
-      d.vline(54, y + 1, 6, C.border);
+        if (!st.weapons.length) d.text(SX + 2, y + 6, '⚠ NO WEAPONS MOUNTED', C.red);
+        else if (hp - st.weapons.length >= 2) d.text(SX + 2, y + 6, `⚠ ${hp - st.weapons.length} empty hardpoints`, C.warn);
+      } else d.text(SX + 2, y + 3, '— drop a \'Mech here —', C.faint);
+      d.vline(SX + 39, y + 1, SH - 3, C.border);
+      // Pilot half
       if (p) {
-        d.text(56, y + 1, p.sigil, p.color, undefined, 99, true);
-        d.text(58, y + 1, `${p.callsign}`, C.bright, undefined, 28, true);
-        d.text(56, y + 2, p.name, C.dim, undefined, 30);
-        d.ctext(56, y + 3, skillLine(p), C.text);
-        d.ctext(56, y + 4, healthPips(p), C.text);
-      } else d.text(56, y + 2, '— click to assign —', C.faint);
-      if ((m || p) && ui.button(80, y + 6, 'Clear', { style: 'plain', fg: C.dim })) { s.mech = null; s.pilot = null; }
-    });
-    // Picker
-    const px = 90, pw = COLS - px - 1;
-    if (this.pick) {
-      const i = this.pick.i;
-      if (this.pick.what === 'mech') {
-        ui.panel(px, 4, pw, 36, `SELECT 'MECH · SLOT ${i + 1}`);
-        const cands = c.mechs;
-        const cl = ui.list(px + 1, 5, pw - 2, 34, cands, this.listState, (m, _j, lx, ly, lw, hov) => {
-          const ready = mechReady(c, m);
-          const used = this.slots.some((s, si) => si !== i && s.mech === m.uid);
-          const bg = hov ? '#16222c' : C.panel;
-          d.fill(lx, ly, lw, 2, ' ', C.text, bg);
-          d.text(lx + 1, ly, frameName(m), ready && !used ? C.bright : C.faint, bg);
-          d.text(lx + lw - 6, ly, `${frameTons(m)}t`, C.dim, bg);
-          d.text(lx + 1, ly + 1, !ready ? 'In the \'Mech bay (work order)' : used ? 'Assigned to another slot' : weaponSummary(m).slice(0, lw - 3), !ready ? C.warn : C.dim, bg);
-        }, 2);
-        if (cl >= 0) { const m = cands[cl]; if (mechReady(c, m)) { for (const s of this.slots) if (s.mech === m.uid) s.mech = null; this.slots[i].mech = m.uid; this.pick = { i, what: 'pilot' }; } }
-      } else {
-        ui.panel(px, 4, pw, 36, `SELECT MECHWARRIOR · SLOT ${i + 1}`);
-        const cands = c.pilots.filter((p) => !p.dead);
-        const cl = ui.list(px + 1, 5, pw - 2, 34, cands, this.listState, (p, _j, lx, ly, lw, hov) => {
-          const ok = isAvailable(p);
-          const used = this.slots.some((s, si) => si !== i && s.pilot === p.id);
-          const bg = hov ? '#16222c' : C.panel;
-          d.fill(lx, ly, lw, 2, ' ', C.text, bg);
-          d.text(lx + 1, ly, p.sigil, ok && !used ? p.color : C.faint, bg);
-          d.text(lx + 3, ly, `${p.callsign}`, ok && !used ? C.bright : C.faint, bg);
-          d.ctext(lx + 16, ly, skillLine(p), C.text, bg);
-          d.text(lx + 1, ly + 1, !ok ? `Injured (${p.healDays} day${p.healDays === 1 ? '' : 's'})` : used ? 'Assigned' : p.name, !ok ? C.warn : C.dim, bg);
-        }, 2);
-        if (cl >= 0) { const p = cands[cl]; if (isAvailable(p)) { for (const s of this.slots) if (s.pilot === p.id) s.pilot = null; this.slots[i].pilot = p.id; this.pick = null; } }
+        d.text(SX + 41, y + 1, p.sigil, p.color, undefined, 99, true);
+        d.text(SX + 43, y + 1, p.callsign, C.bright, undefined, 22, true);
+        d.text(SX + 41, y + 2, p.name, C.dim, undefined, 25);
+        d.ctext(SX + 41, y + 3, skillLine(p), C.text);
+        d.ctext(SX + 41, y + 4, healthPips(p), C.text);
+      } else d.text(SX + 41, y + 3, '— drop a pilot —', C.faint);
+      if ((m || p) && ui.button(SX + SW - 9, y + SH - 3, 'Clear', { style: 'plain', fg: C.dim })) { s.mech = null; s.pilot = null; }
+      // Start dragging out of a slot
+      if (pressed && !this.drag && mx >= SX + 1 && mx < SX + SW - 1 && my > y && my < y + SH - 3) {
+        if (mx < SX + 39 && m) this.drag = { kind: 'mech', id: m.uid, from: i, x0: mx, y0: my, moved: false };
+        else if (mx > SX + 39 && p) this.drag = { kind: 'pilot', id: p.id, from: i, x0: mx, y0: my, moved: false };
+        else this.sel = this.sel === i ? null : i;
       }
-    } else {
-      ui.panel(px, 4, pw, 36, 'INTEL');
-      // Same intel and verdict as the contract board, for the lance as currently assigned
-      const est = oppositionEstimate(surveyOf(c, k));
-      const odds = fightOdds(c, k, this.slots), [ot, oc] = oddsText(odds.ratio);
-      d.text(px + 2, 6, 'Contract difficulty', C.dim);
-      d.text(px + 24, 6, skulls(k.diff), '#e8503a');
-      d.text(px + 2, 7, 'Enemy (intel)', C.dim);
-      d.text(px + 24, 7, `~${est.units} units, ~${est.tons}t`, C.text);
-      d.text(px + 2, 8, 'Your lance', C.dim);
-      d.ctext(px + 24, 8, `${tons}t  {${oc}}${ot}{/}`, C.text);
-      wrap(`Expected opposition: ${threatText(k.diff).replace(/\{[^}]*\}/g, '')}. ${MISSION_RISK[k.type] ?? ''}`, pw - 4).slice(0, 3).forEach((l, j) => d.text(px + 2, 10 + j, l, C.text));
-      d.text(px + 2, 14, 'Negotiated terms', C.dim);
-      d.ctext(px + 2, 15, `{#f0c850}${cb(this.n.cash)}{/} · ${this.n.salvage} salvage (${this.n.priority} priority)`, C.text);
+    });
+    if (split) d.text(SX, TOP + 4 * SH - 1, 'Split drop: PAIR A (slots 1–2) and PAIR B (3–4) land on opposite sides of the enemy.', C.cyan, undefined, SW);
+    // ---- Banks
+    const used = (kind: 'mech' | 'pilot', id: string) => this.slots.findIndex((s) => s[kind] === id);
+    ui.panel(MBX, TOP, MBW, BH, '\'MECHS');
+    const mechs = c.mechs;
+    const mcl = ui.list(MBX + 1, TOP + 1, MBW - 2, BH - 2, mechs, this.mechList, (m, _j, lx, ly, lw, hov) => {
+      const ready = mechReady(c, m), at = used('mech', m.uid);
+      const bg = hov ? '#16222c' : C.panel;
+      d.fill(lx, ly, lw, 2, ' ', C.text, bg);
+      d.text(lx + 1, ly, frameName(m), ready && at < 0 ? C.bright : C.faint, bg, lw - 8);
+      d.text(lx + lw - 5, ly, at >= 0 ? `#${at + 1}` : `${frameTons(m)}t`, at >= 0 ? C.accent : C.dim, bg);
+      d.text(lx + 1, ly + 1, !ready ? 'In the \'Mech bay (work order)' : weaponSummary(m), !ready ? C.warn : C.dim, bg, lw - 2);
+      if (hov && pressed && ready && !this.drag) this.drag = { kind: 'mech', id: m.uid, from: at >= 0 ? at : null, x0: mx, y0: my, moved: false };
+    }, 2);
+    ui.panel(PBX, TOP, PBW, BH, 'MECHWARRIORS');
+    const pilots = c.pilots.filter((p) => !p.dead);
+    const pcl = ui.list(PBX + 1, TOP + 1, PBW - 2, BH - 2, pilots, this.pilotList, (p, _j, lx, ly, lw, hov) => {
+      const ok = isAvailable(p), at = used('pilot', p.id);
+      const bg = hov ? '#16222c' : C.panel;
+      d.fill(lx, ly, lw, 2, ' ', C.text, bg);
+      d.text(lx + 1, ly, p.sigil, ok && at < 0 ? p.color : C.faint, bg);
+      d.text(lx + 3, ly, p.callsign, ok && at < 0 ? C.bright : C.faint, bg, 12);
+      d.ctext(lx + 16, ly, skillLine(p), C.text, bg);
+      if (at >= 0) d.text(lx + lw - 3, ly, `#${at + 1}`, C.accent, bg);
+      d.ctext(lx + 1, ly + 1, !ok ? `{#e8a03a}Injured (${p.healDays} day${p.healDays === 1 ? '' : 's'}){/}` : `${healthPips(p)} {#6d7f8a}${p.name}{/}`, C.dim, bg, lw - 2);
+      if (hov && pressed && ok && !this.drag) this.drag = { kind: 'pilot', id: p.id, from: at >= 0 ? at : null, x0: mx, y0: my, moved: false };
+    }, 2);
+    // ---- Drag and drop (a press and release without moving counts as a click)
+    if (this.drag) {
+      const g = this.drag;
+      if (Math.abs(mx - g.x0) + Math.abs(my - g.y0) >= 2) g.moved = true;
+      if (g.moved) {
+        const label = g.kind === 'mech' ? frameName(c.mechs.find((x) => x.uid === g.id)!) : c.pilots.find((x) => x.id === g.id)!.callsign;
+        d.text(Math.min(COLS - label.length - 3, mx + 1), my, ` ${label} `, C.bg, C.accent, 99, true);
+        ui.cursor = 'pointer';
+      }
+      if (!inp.down) {
+        if (g.moved) { const to = slotAt(mx, my); if (to !== null) this.place(g.kind, g.id, to, g.from); else if (overBank(mx, my)) this.place(g.kind, g.id, null, g.from); }
+        else if (g.from === null) {
+          // Click on a bank entry: fill the chosen slot, or the first slot missing one
+          const to = this.sel ?? this.slots.findIndex((s) => !s[g.kind]);
+          if (to >= 0) this.place(g.kind, g.id, to, null);
+          if (this.sel !== null && this.slots[this.sel].mech && this.slots[this.sel].pilot) this.sel = null;
+        } else this.sel = this.sel === g.from ? null : g.from;
+        this.drag = null;
+        inp.clicked = false;
+      }
     }
+    void mcl; void pcl;
+    // ---- Intel strip
+    const iy = TOP + BH + 1;
+    const est = oppositionEstimate(rt);
+    const odds = fightOdds(c, k, this.slots), [ot, oc] = oddsText(odds.ratio);
+    d.ctext(MBX, iy, `{#6d7f8a}Enemy (intel){/} ~${est.units} units, ~${est.tons}t   {#6d7f8a}Your lance{/} ${tons}t {${oc}}${ot}{/}`, C.text, undefined, COLS - MBX - 1);
+    d.ctext(MBX, iy + 1, `{#6d7f8a}Terms{/} {#f0c850}${cb(this.n.cash)}{/} · ${this.n.salvage} salvage (${this.n.priority} priority)`, C.text, undefined, COLS - MBX - 1);
+    wrap(`${threatText(k.diff).replace(/\{[^}]*\}/g, '')}. ${MISSION_RISK[k.type] ?? ''}`, COLS - MBX - 1).slice(0, 3).forEach((l, j) => d.text(MBX, iy + 2 + j, l, C.dim));
     const ready = this.slots.filter((s) => s.mech && s.pilot);
     if (ui.button(2, ROWS - 3, 'Cancel contract', { key: 'Escape' })) app.pop();
-    if (ui.button(32, ROWS - 3, 'Auto-fill best', { key: 'a', tip: 'Heaviest ready \'Mechs, best available MechWarriors.' })) { this.slots = defaultSlots(c); this.pick = null; }
+    if (ui.button(30, ROWS - 3, 'Auto-fill best', { key: 'a', tip: 'Strongest ready \'Mechs, best available MechWarriors.' })) { this.slots = defaultSlots(c); this.sel = null; }
+    if (ui.button(52, ROWS - 3, 'Previous lance', { key: 'p', tip: 'The lance you last deployed, slot for slot. Anyone not available leaves a gap.' })) this.previousLance();
     if (ui.button(COLS - 24, ROWS - 3, 'LAUNCH', { key: 'Enter', style: 'block', w: 20, center: true, disabled: !ready.length, tip: ready.length ? 'Drop into combat.' : 'Assign at least one \'Mech and MechWarrior.' })) this.launch();
   }
 

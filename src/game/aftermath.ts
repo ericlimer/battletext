@@ -46,6 +46,46 @@ export function launchContract(c: Company, k: Contract, lance: { mech: Frame; pi
   });
 }
 
+/** What a field of wrecks yields: parts of destroyed 'Mechs (more for a clean kill), their surviving gear, and some bonus loot. */
+export function salvagePool(c: Company, r: RNG, d: number, destroyed: { frame: Frame; how: string }[]): SalvageEntry[] {
+  const pool: SalvageEntry[] = [];
+  for (const { frame: f, how } of destroyed) {
+    if (f.kind === 'mech') {
+      const n = partsFor(how);
+      const ch = chassis(f.defId);
+      for (let i = 0; i < n; i++) pool.push({ kind: 'part', id: f.defId, label: `${ch.name} ${ch.id} part`, value: ch.cost / PARTS_NEEDED });
+    }
+    let hs = 0;
+    for (const it of f.items) {
+      if (it.dead) continue;
+      const dd = item(it.id);
+      if (dd.kind === 'ammo') continue;
+      if (dd.kind === 'heatsink' && ++hs > 2) continue;
+      if (pool.filter((pe) => pe.id === it.id).length >= 3) continue;
+      if (f.kind !== 'mech' && r.chance(0.4)) continue;
+      pool.push({ kind: 'item', id: it.id, label: dd.name, value: dd.cost });
+    }
+  }
+  // Bonus loot
+  const nb = r.int(1, 2) + Math.floor(d / 4);
+  for (let i = 0; i < nb; i++) {
+    // Rarer gear only turns up on harder contracts (lostech such as Gauss only at 9+ skulls)
+    const maxR = Math.floor((d + 1) / 2);
+    const pool2 = BASE_WEAPONS.filter((w) => item(w).rarity <= maxR);
+    let id = r.weighted(pool2.length ? pool2 : BASE_WEAPONS, (w) => 1 / (1 + item(w).rarity * 1.5));
+    if (r.chance(0.12 + d * 0.04)) id = `${id}+${r.chance(0.7) ? 1 : 2}${r.pick(bonusesFor(id))}`;
+    pool.push({ kind: 'item', id, label: item(id).name, value: item(id).cost });
+  }
+  // The employer's quartermaster can often turn up a part for a chassis you're already collecting
+  const collecting = Object.entries(c.parts).filter(([, n]) => n > 0 && n < PARTS_NEEDED).map(([id]) => id);
+  if (collecting.length && r.chance(0.35 + d * 0.04)) {
+    const id = r.pick(collecting), ch = chassis(id);
+    pool.push({ kind: 'part', id, label: `${ch.name} ${ch.id} part`, value: ch.cost / PARTS_NEEDED });
+  }
+  pool.sort((a, b2) => b2.value - a.value);
+  return pool;
+}
+
 function partsFor(how: string): number {
   if (how === 'ct' || how === 'ammo') return 1;
   if (how === 'legs') return 2;
@@ -172,43 +212,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   if (win && !wiped && neg.salvage > 0) {
     res.salvageShares = neg.salvage;
     res.priority = Math.min(neg.priority, neg.salvage);
-    const pool: SalvageEntry[] = [];
-    for (const u of rt.enemyUnits) {
-      if (u.alive || u.fled) continue;
-      const f = u.frame;
-      if (f.kind === 'mech') {
-        const n = partsFor(u.destroyHow);
-        const ch = chassis(f.defId);
-        for (let i = 0; i < n; i++) pool.push({ kind: 'part', id: f.defId, label: `${ch.name} ${ch.id} part`, value: ch.cost / PARTS_NEEDED });
-      }
-      let hs = 0;
-      for (const it of f.items) {
-        if (it.dead) continue;
-        const dd = item(it.id);
-        if (dd.kind === 'ammo') continue;
-        if (dd.kind === 'heatsink' && ++hs > 2) continue;
-        if (pool.filter((pe) => pe.id === it.id).length >= 3) continue;
-        if (f.kind !== 'mech' && r.chance(0.4)) continue;
-        pool.push({ kind: 'item', id: it.id, label: dd.name, value: dd.cost });
-      }
-    }
-    // Bonus loot
-    const nb = r.int(1, 2) + Math.floor(d / 4);
-    for (let i = 0; i < nb; i++) {
-      // Rarer gear only turns up on harder contracts (lostech such as Gauss only at 9+ skulls)
-      const maxR = Math.floor((d + 1) / 2);
-      const pool2 = BASE_WEAPONS.filter((w) => item(w).rarity <= maxR);
-      let id = r.weighted(pool2.length ? pool2 : BASE_WEAPONS, (w) => 1 / (1 + item(w).rarity * 1.5));
-      if (r.chance(0.12 + d * 0.04)) id = `${id}+${r.chance(0.7) ? 1 : 2}${r.pick(bonusesFor(id))}`;
-      pool.push({ kind: 'item', id, label: item(id).name, value: item(id).cost });
-    }
-    // The employer's quartermaster can often turn up a part for a chassis you're already collecting
-    const collecting = Object.entries(c.parts).filter(([, n]) => n > 0 && n < PARTS_NEEDED).map(([id]) => id);
-    if (collecting.length && r.chance(0.35 + d * 0.04)) {
-      const id = r.pick(collecting), ch = chassis(id);
-      pool.push({ kind: 'part', id, label: `${ch.name} ${ch.id} part`, value: ch.cost / PARTS_NEEDED });
-    }
-    pool.sort((a, b2) => b2.value - a.value);
+    const pool = salvagePool(c, r, d, rt.enemyUnits.filter((u) => !u.alive && !u.fled).map((u) => ({ frame: u.frame, how: u.destroyHow })));
     res.pool = pool;
   }
   res.days = contractDays(k);

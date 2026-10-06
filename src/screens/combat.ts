@@ -14,14 +14,14 @@ import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
 import { portraitOf, portraitSize, drawPortrait, locTip } from './portrait';
 import { track, flush } from '../game/telemetry';
-import { TUNE, TUNE_DEFS, saveTune, resetTune, tuneDiff, applyPreset, REVIEWER_PRESET } from '../game/tuning';
+import { TUNE, TUNE_DEFS, saveTune, resetTune, tuneDiff, applyPreset, REVIEWER_PRESET, OPTS, saveOpts } from '../game/tuning';
 import { UnderFire, startUnderFire, underFireShot, underFireMelee, drawUnderFire } from './underfire';
-import { drawDoll, heatBar, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
+import { drawDoll, heatBar, heatState, simpleBar, pipStr, frameTitle, classTag, skillLine, healthPips, weaponTip, locName } from './widgets';
 import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
 
 const MX = 0, MY = 1, VW = 50, VH = 36;
-const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 29; // attack-timing panel, over the map
+const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 31; // attack-timing panel, over the map
 const PX = 100, PW = 50;
 
 /** Body order for listing what is mounted where ('Mech, then vehicle locations). */
@@ -578,6 +578,68 @@ export class CombatScreen implements Screen {
     // its animations have finished playing.
   }
 
+  /** The three tiles in reach (walk or jump) that give the most expected damage on the target, ranked 1..3. */
+  bestKey = ''; bestCache: Map<number, { rank: number; ev: number; mode: MoveMode }> | null = null;
+  bestSpots(u: Unit, t: Unit, reach: Reach): Map<number, { rank: number; ev: number; mode: MoveMode }> {
+    const b = this.b, m = b.map;
+    const key = `${this.reachKey}|${t.id}:${t.x},${t.y}|${this.mode}|${[...this.weaponsOff].length}`;
+    if (this.bestCache && this.bestKey === key) return this.bestCache;
+    const ws = b.weaponsOf(u).filter((w) => !this.weaponsOff.has(w));
+    const tiles = new Map<number, MoveMode>();
+    if (this.mode === 'jump') for (const i of reach.jump.keys()) tiles.set(i, 'jump'); else for (const i of reach.walk.keys()) tiles.set(i, 'walk');
+    tiles.set(u.y * m.w + u.x, u.moved ?? 'walk');
+    const here = b.expectedDamage(u, t, { x: u.x, y: u.y, moved: u.moved }, ws);
+    const scored: [number, number, MoveMode][] = [];
+    for (const [i, mode] of tiles) {
+      const x = i % m.w, y = (i / m.w) | 0;
+      const ev = (x === u.x && y === u.y) ? here : b.expectedDamage(u, t, { x, y, moved: mode }, ws);
+      if (ev > 0) scored.push([i, ev, mode]);
+    }
+    scored.sort((p, q) => q[1] - p[1] || dist(p[0] % m.w, (p[0] / m.w) | 0, u.x, u.y) - dist(q[0] % m.w, (q[0] / m.w) | 0, u.x, u.y));
+    const out = new Map<number, { rank: number; ev: number; mode: MoveMode }>();
+    // Only worth showing when moving actually beats standing still
+    if (scored.length && scored[0][1] > here + 0.5) scored.slice(0, 3).forEach(([i, ev, mode], k) => out.set(i, { rank: k + 1, ev, mode }));
+    this.bestKey = key; this.bestCache = out;
+    return out;
+  }
+
+  // ---- Undo move (an option in the [T] panel) ----------------------------------------------
+  undoSnap: { u: Unit; x: number; y: number; facing: number; runDir: number | undefined; moved: MoveMode | null; movedSteps: number; pips: number; heat: number; stab: number; guarded: boolean; entrenched: boolean; struct: number; seen: Set<string>; acted: number; round: number } | null = null;
+  snapUnit(u: Unit): NonNullable<CombatScreen['undoSnap']> {
+    const b = this.b;
+    return { u, x: u.x, y: u.y, facing: u.facing, runDir: u.runDir, moved: u.moved, movedSteps: u.movedSteps, pips: u.pips, heat: u.heat, stab: u.stab, guarded: u.guarded, entrenched: u.entrenched,
+      struct: Object.values(u.frame.struct).reduce((a, v) => a + Math.max(0, v), 0), seen: new Set([...b.seen[0]].map(String)), acted: b.units.filter((v) => v.acted).length, round: b.round };
+  }
+  /** Why the last move can't be taken back, or null if it can. */
+  undoBlocked(): string | null {
+    const s = this.undoSnap, b = this.b;
+    if (!OPTS.undo) return 'Undo is switched off ([T] panel).';
+    if (!s) return 'Nothing to undo.';
+    const u = s.u;
+    if (b.result || !u.alive || b.round !== s.round) return 'Too late to undo.';
+    if (u.attacked) return 'Already fired this activation.';
+    if (b.active && b.active !== u) return 'Another unit is acting.';
+    if (b.units.filter((v) => v.acted).length !== s.acted + (u.acted ? 1 : 0)) return 'Another unit has acted since.';
+    if (Object.values(u.frame.struct).reduce((a, v) => a + Math.max(0, v), 0) !== s.struct) return 'The \'Mech took damage since.';
+    if ([...b.seen[0]].some((id) => !s.seen.has(String(id)))) return 'The move revealed new contacts.';
+    if (this.queue.length || this.anims.length) return 'Wait for the action to finish.';
+    return null;
+  }
+  undoMove(): void {
+    const s = this.undoSnap, b = this.b;
+    if (!s || this.undoBlocked()) return;
+    const u = s.u;
+    Object.assign(u, { x: s.x, y: s.y, facing: s.facing, runDir: s.runDir, moved: s.moved, movedSteps: s.movedSteps, pips: s.pips, heat: s.heat, stab: s.stab, guarded: s.guarded, entrenched: s.entrenched });
+    u.acted = false;
+    b.active = u;
+    b.updateVisibility();
+    this.undoSnap = null;
+    this.select(u);
+    this.mode = 'move'; this.pending = null; this.reach = null;
+    b.say(`${u.name}: move taken back.`, '#6d7f8a');
+    this.pull();
+  }
+
   endActivation(u: Unit): void {
     this.b.finishActivation(u);
     this.pull();
@@ -590,6 +652,7 @@ export class CombatScreen implements Screen {
     const map = mode === 'walk' ? r.walk : mode === 'sprint' ? r.sprint : r.jump;
     if (!map.has(tile)) return;
     const path = this.b.pathTo(u, map, tile, mode);
+    this.undoSnap = this.snapUnit(u);
     this.b.move(u, path, mode);
     this.pull();
     this.pending = null;
@@ -805,6 +868,7 @@ export class CombatScreen implements Screen {
     this.hoverTile = this.mouseTile();
     if (!this.playerTurn()) return;
     const u = this.sel;
+    if (ui.key('u') && OPTS.undo) { const why = this.undoBlocked(); if (why) this.b.say(`Can't undo: ${why}`, C.dim); else this.undoMove(); }
     if (ui.key('Tab')) {
       if (!b.active) {
         const p = b.pending(0).filter((x) => x.team === 0);
@@ -968,12 +1032,16 @@ export class CombatScreen implements Screen {
 
   actBrace(u: Unit): void {
     if (!this.b.isMech(u)) return;
+    // Brace again while choosing a facing: keep the current facing and end the turn, so B-B skips quickly
+    if (this.mode === 'facing' && this.b.active === u) { if (this.braceKeyAt === this.time) return; this.facingDir = u.facing; this.confirmFacing(u); return; }
     if (!this.commit(u)) return;
+    this.braceKeyAt = this.time;
     this.b.brace(u);
     this.mode = 'facing';
     this.facingDir = u.facing;
     this.pull();
   }
+  braceKeyAt = -1;
   actVigilance(u: Unit): void {
     if (this.b.resolve[0] < this.b.resolveCost() || u.attacked) return;
     if (!this.commit(u)) return;
@@ -1040,6 +1108,8 @@ export class CombatScreen implements Screen {
     if (ui.button(x + 2, y, 'Replay last volley', { key: 'y', disabled: !this.lastVolley.length || this.queue.length > 0 })) this.replayVolley();
     if (ui.button(x + 26, y, 'Reset all', { key: '0' })) resetTune();
     if (ui.button(x + 40, y, "Reviewer's preset", { key: '9' })) applyPreset(REVIEWER_PRESET);
+    y += 2;
+    if (ui.button(x + 2, y, `Undo move [U]: ${OPTS.undo ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.undo ? C.green : C.dim, tip: 'Take back your last move (and the facing you ended on) as long as you have not fired and nothing new came into view. Only while it is still your turn.' })) { OPTS.undo = !OPTS.undo; saveOpts(); }
   }
 
   /** Folds repeated volleys of the same weapon at the same target into one log line. */
@@ -1200,6 +1270,7 @@ export class CombatScreen implements Screen {
 
     const facingU = act && u && this.mode === 'facing' ? u : null;
     const markers = this.goalMarkers();
+    const best = act && u && reach && this.target && (this.mode === 'move' || this.mode === 'jump') ? this.bestSpots(u, this.target, reach) : null;
     const shakeX = this.fx.shake > 0 ? Math.round((Math.random() - 0.5) * this.fx.shake * 2) : 0;
     for (let vy = 0; vy < VH; vy++) {
       for (let vx = 0; vx < VW; vx++) {
@@ -1231,6 +1302,8 @@ export class CombatScreen implements Screen {
           const fade = 1 - dist(x, y, facingU.x, facingU.y) / 8;
           if (arc === 'front') bg = lerp(bg, '#ffb030', 0.45 * fade + 0.1); else if (arc === 'rear') bg = lerp(bg, '#ff3020', 0.5 * fade + 0.1);
         }
+        const bs = best?.get(i);
+        if (bs) { bg = lerp(bg, '#f0c040', 0.38 + 0.08 * Math.sin(this.time * 4)); if (!b.unitAt(x, y) && i !== pendingTile) { ch = String(bs.rank); fg = '#fff4c0'; } }
         const mk = markers.get(i);
         if (mk) { bg = lerp(bg, mk.color, 0.3 + 0.1 * Math.sin(this.time * 3)); if (mk.force || ch === '·' || ch === '.') { ch = mk.glyph; fg = mk.force ? lerp(mk.color, '#ffffff', 0.3 + 0.3 * Math.sin(this.time * 4)) : mk.color; } }
         if (meleeSpots?.has(i)) bg = lerp(bg, '#c06a2a', 0.45 + 0.1 * Math.sin(this.time * 6));
@@ -1280,6 +1353,7 @@ export class CombatScreen implements Screen {
       if (un === this.meleeTarget) bg = lerp(bg, '#e08030', 0.6);
       if (un.acted && un.alive && side === 0) fg = lerp(fg, '#405060', 0.4);
       if (un.shutdown) fg = lerp(fg, '#303030', 0.5);
+      else if (un.frame.kind === 'mech' && un.heat >= un.stats.heatCap * 0.75) fg = lerp(fg, '#ff7a2a', 0.5 + 0.5 * Math.sin(this.time * 7));
       let glyph = this.glyphOf(un);
       if (un.prone) bg = lerp(bg, '#8a7010', 0.5);
       const hf = this.hitFlash.get(un.id);
@@ -1298,6 +1372,7 @@ export class CombatScreen implements Screen {
         }
       }
     }
+    if (best && ht >= 0 && best.has(ht)) { const e = best.get(ht)!; ui.setTip([`Firing spot #${e.rank} on ${this.glyphOf(this.target!)}`, `~${Math.round(e.ev)} expected damage from here with the selected weapons${e.mode === 'jump' ? ' (jumping costs heat)' : ''}. The gold squares are the three best spots in reach.`]); }
     // Line of fire to the hovered enemy
     if (act && u && ht >= 0) {
       const hx = ht % m.w, hy = (ht / m.w) | 0;
@@ -1562,12 +1637,12 @@ export class CombatScreen implements Screen {
     btn('Vigil', 'V', false, !mech || u.attacked || b.resolve[0] < b.resolveCost(), `Vigilance (${b.resolveCost()} Resolve): Guarded + Entrenched, clears stability and debuffs. Ends activation.`, () => this.actVigilance(u));
     btn('Reserve', 'R', false, b.active === u || u.phase <= 1, 'Delay this unit to the next phase.', () => this.actReserve(u));
     if (has(u.pilot ?? undefined, 'sensorlock')) btn('Lock', 'L', this.mode === 'lock', !b.canAttack(u), 'Sensor Lock a detected enemy: -2 evasion, visible to all. Uses your attack.', () => { this.mode = this.mode === 'lock' ? 'move' : 'lock'; });
-    if (mech && (this.ejectArm || this.dangerous(u))) btn(this.ejectArm ? 'EJECT!' : 'Eject', 'X', this.ejectArm, false, 'Eject the pilot. The \'Mech is abandoned but recoverable; the pilot survives. Press twice.', () => this.actEject(u));
+    if (mech) btn(this.ejectArm ? 'EJECT!' : 'Eject', 'X', this.ejectArm, false, 'Eject the pilot. The \'Mech is abandoned but recoverable; the pilot survives. Press twice.', () => this.actEject(u));
     btn(this.mode === 'facing' ? 'Confirm' : 'Done', 'E', this.mode === 'facing', false, 'End activation: choose a facing with the mouse, then click.', () => {
       if (this.mode === 'facing') this.confirmFacing(u); else { this.mode = 'facing'; this.facingDir = u.facing; }
     });
     // Mode hint line
-    const hint = this.mode === 'look' ? 'Movement overlay hidden. [W] shows it again.' : u.shutdown ? '{#ff6a2a}SHUTDOWN{/} — [Space] restarts the reactor (this uses the whole activation).' : this.mode === 'facing' ? (u.moved === 'sprint' ? 'After a sprint you can only turn 45° from your run. Click/[E] confirms.' : 'Point to set facing. Click/[E] confirms, [Esc] goes back.') :
+    const hint = this.mode === 'look' ? 'Movement overlay hidden. [W] shows it again.' : u.prone && this.mode === 'move' ? '{#f0d050}PRONE{/} — this \'Mech stands up when it acts: no move this turn, but it can still [F]ire, [B]race, or [X] eject.' : u.shutdown ? '{#ff6a2a}SHUTDOWN{/} — [Space] restarts the reactor (this uses the whole activation).' : this.mode === 'facing' ? (u.moved === 'sprint' ? 'After a sprint you can only turn 45° from your run. Click/[E] confirms.' : 'Point to set facing. Click/[E] confirms, [Esc] goes back.') :
       this.mode === 'called' ? (this.calledLoc ? `PRECISION: aiming at the ${locName(this.calledLoc)}. [F]ire, or click another location.` : `PRECISION: click a location on the target doll, then [F]ire.${this.target && !this.target.prone && !this.target.shutdown ? ' Head: only when prone or shut down.' : ''}`) :
       this.mode === 'melee' || this.mode === 'dfa' ? (this.meleeTarget ? 'Click a highlighted tile, or the target again.' : 'Click an adjacent-reachable enemy.') :
       this.mode === 'lock' ? 'Click a detected enemy to Sensor Lock.' :
@@ -1714,7 +1789,11 @@ export class CombatScreen implements Screen {
       if (u.alive) {
         d.text(x + 1, yy + 1, 'A', C.faint, bg); simpleBar(d, x + 2, yy + 1, 12, arm / Math.max(1, marm), '#a8b8c0', '#161c22');
         d.text(x + 15, yy + 1, 'S', C.faint, bg); simpleBar(d, x + 16, yy + 1, 10, st / Math.max(1, mst), healthColor(st / Math.max(1, mst)), '#161c22');
-        if (b.isMech(u)) { d.text(x + 28, yy + 1, 'H', '#ff8a4a', bg); simpleBar(d, x + 29, yy + 1, 9, u.heat / u.stats.heatCap, '#ff6a2a', '#1a1210', 0.75); }
+        if (b.isMech(u)) {
+          d.text(x + 28, yy + 1, 'H', '#ff8a4a', bg); simpleBar(d, x + 29, yy + 1, 9, u.heat / u.stats.heatCap, '#ff6a2a', '#1a1210', 0.75, '#ff3a1a');
+          const hs = heatState(u.heat, u.stats.heatCap, false);
+          if (hs && !u.shutdown) d.text(x + 37, yy, hs.label === 'OVERHEAT' ? 'HOT' : '', hs.color, bg, 99, true);
+        }
         if (ui.hover(x, yy, PW, 2)) ui.setTip([`${u.name}: armor ${arm}/${marm}, structure ${st}/${mst}${b.isMech(u) ? `, heat ${Math.round(u.heat)}/${u.stats.heatCap}` : ''}`]);
         if (u.pilot && u.team === 0) d.ctext(x + 41, yy + 1, healthPips(u.pilot), C.text, bg);
       }
@@ -1729,12 +1808,10 @@ export class CombatScreen implements Screen {
         let hp = 0, mx = 0;
         for (const k in f.maxArmor) { hp += f.armor[k]; mx += f.maxArmor[k]; }
         for (const k in f.maxStruct) { hp += Math.max(0, f.struct[k]); mx += f.maxStruct[k]; }
-        // Mirrors the convoy AI: haulers hold until a lance 'Mech is within 10 tiles and no hostile within 8
-        const waiting = v.alive && !v.fled && (!b.units.some((o) => o.team === 0 && o.alive && dist(o.x, o.y, v.x, v.y) <= 10) || b.units.some((o) => SIDE(o.team) === 1 && o.alive && o.deployed && !o.fled && b.seen[0].has(o.id) && dist(o.x, o.y, v.x, v.y) <= 8));
-        const st = v.fled ? 'SAFE' : !v.alive ? 'LOST' : `${Math.round((hp / Math.max(1, mx)) * 100)}%${waiting ? ' HOLD' : ''}`;
+        const st = v.fled ? 'SAFE' : !v.alive ? 'LOST' : `${Math.round((hp / Math.max(1, mx)) * 100)}%`;
         d.text(x + 9 + i * 11, yy, this.glyphOf(v), v.alive || v.fled ? C.ally : C.faint);
         d.text(x + 12 + i * 11, yy, st, v.fled ? C.green : !v.alive ? C.red : healthColor(hp / Math.max(1, mx)));
-        if (ui.hover(x + 9 + i * 11, yy, 10, 1)) ui.setTip([`${b.fullName(v)}: ${v.fled ? 'reached the exit' : v.alive ? `armor+structure ${hp}/${mx}` : 'destroyed'}`, ...(waiting ? ['HOLD: waiting — haulers only roll with one of your \'Mechs within 10 tiles, and stop while hostiles are within 8.'] : [])]);
+        if (ui.hover(x + 9 + i * 11, yy, 10, 1)) ui.setTip([`${b.fullName(v)}: ${v.fled ? 'reached the exit' : v.alive ? `armor+structure ${hp}/${mx}` : 'destroyed'}`]);
       });
       yy += 2;
     }
@@ -1792,10 +1869,11 @@ export class CombatScreen implements Screen {
     if (b.isMech(u)) {
       const wOn = this.sel === u ? this.firePlan(u).flatMap((p) => p.weapons) : [];
       const proj = b.projectedHeat(u, wOn) + (this.pending?.mode === 'jump' ? this.pendingSteps(u) * 3 : 0);
-      d.text(sx, y, 'HEAT', '#ff8a4a');
-      d.text(sx + 10, y, `${Math.round(u.heat)}/${s.heatCap}`, C.text);
+      const hs = heatState(u.heat, s.heatCap, u.shutdown), hp = heatState(proj, s.heatCap, false);
+      d.text(sx, y, hs ? hs.label : 'HEAT', hs ? hs.color : '#ff8a4a', undefined, 99, !!hs);
+      d.ctext(sx + 10, y, `${Math.round(u.heat)}${Math.round(proj) !== Math.round(u.heat) ? `→{${hp?.label === 'OVERHEAT' ? '#ff4a2a' : '#e8d0b0'}}${Math.round(proj)}{/}` : `/${s.heatCap}`}`, C.text);
       heatBar(d, sx, y + 1, 16, u.heat, proj, s.heatCap, b.dissipation(u));
-      if (ui.hover(sx, y, 17, 2)) ui.setTip([`Heat ${Math.round(u.heat)} → ${Math.round(proj)} after this attack; dissipates ${b.dissipation(u)}/turn.`, 'Above the red line (75%) the \'Mech overheats: -10% accuracy and internal damage. At 100% it shuts down.']);
+      if (ui.hover(sx, y, 17, 2)) ui.setTip([`Heat ${Math.round(u.heat)}/${s.heatCap}${Math.round(proj) !== Math.round(u.heat) ? ` → ${Math.round(proj)} with this attack` : ''}. Cools ${b.dissipation(u)} at the end of each turn.`, 'Bright fill: heat now. Dark fill: heat this attack adds. Red line (75%): past it the \'Mech is OVERHEATING (-10% accuracy, internal damage). At 100% it shuts down.']);
       d.text(sx, y + 2, 'STABILITY', '#8ab4ff');
       simpleBar(d, sx, y + 3, 16, u.stab / s.stabMax, u.unsteady ? '#f0d050' : '#4a7ad0', '#141a24', 0.5);
       if (ui.hover(sx, y + 2, 17, 2)) ui.setTip(['Stability damage from heavy impacts. Past 50% the unit is Unsteady (loses evasion); at 100% it is knocked down. Bracing clears it.']);
@@ -1930,6 +2008,7 @@ export class CombatScreen implements Screen {
     if (t.unsteady) tags.push('{#f0d050}UNSTEADY{/}');
     if (t.prone) tags.push('{#f0d050}PRONE{/}');
     if (t.shutdown) tags.push('{#ff6a2a}SHUTDOWN{/}');
+    else if (b.isMech(t) && t.heat >= t.stats.heatCap * 0.75) tags.push('{#ff4a2a}OVERHEATING{/}');
     if (arc) tags.push(`{#6d7f8a}arc{/} {${arc === 'rear' ? '#6ad46a' : arc === 'front' ? '#c8d2d8' : '#f0d050'}}${arc.toUpperCase()}{/}`);
     d.ctext(x + 1, y, tags.join('  '), C.text, undefined, PW - 2);
     y++;
@@ -1976,7 +2055,7 @@ export class CombatScreen implements Screen {
     simpleBar(d, sx, y + 3, 16, st / Math.max(1, mst), '#d0a040');
     if (b.isMech(t)) {
       d.text(sx, y + 4, 'HEAT', '#ff8a4a');
-      simpleBar(d, sx + 5, y + 4, 11, t.heat / t.stats.heatCap, '#ff6a2a', '#1a1210', 0.75);
+      simpleBar(d, sx + 5, y + 4, 11, t.heat / t.stats.heatCap, '#ff6a2a', '#1a1210', 0.75, '#ff3a1a');
       d.text(sx, y + 5, 'STAB', '#8ab4ff');
       simpleBar(d, sx + 5, y + 5, 11, t.stab / t.stats.stabMax, t.unsteady ? '#f0d050' : '#4a7ad0', '#141a24', 0.5);
     }

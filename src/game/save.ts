@@ -2,9 +2,11 @@
 
 import { Company } from './company';
 import { ensureIcons } from './pilot';
+import { applyFixes } from './fixes';
 
 const KEY = 'battletext.career.v1';
 export let company: Company | null = null;
+
 export function setCompany(c: Company | null): void { company = c; }
 
 export function hasSave(): boolean {
@@ -31,7 +33,9 @@ export function loadGame(): Company | null {
     // Older saves could keep fallen MechWarriors assigned to the lance
     c.lancePilots = c.lancePilots.map((id: string | null) => (id && c.pilots.some((p: { id: string; dead?: boolean }) => p.id === id && !p.dead) ? id : null));
     ensureIcons(c.pilots);
+    const fixed = applyFixes(c);
     company = c;
+    if (fixed) saveGame(c);
     return c;
   } catch { return null; }
 }

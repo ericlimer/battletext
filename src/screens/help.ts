@@ -53,7 +53,7 @@ const PAGES: [string, string[]][] = [
     '{#f0a830}■ Destroy Base.{/} Level the base\'s primary structures. Turrets and a garrison lance defend it.',
     '{#f0a830}⌂ Defend Base.{/} Waves of raiders go for your employer\'s facility. Keep at least one primary structure standing; allied turrets help.',
     '{#f0a830}» Ambush Convoy.{/} Destroy at least two of four haulers (three on 4+ skull contracts) before they leave the map. Their escort screens ahead.',
-    '{#f0a830}« Escort Convoy.{/} The haulers wait for your lance and halt when hostiles close in. Get two of three to the far edge (marked ×).',
+    '{#f0a830}« Escort Convoy.{/} The haulers drive for the far edge (marked ×) from the start and will not wait for you. Get two of three out, or destroy every hostile.',
     '{#f0a830}◎ Target Acquisition.{/} Move a unit onto each of three beacons with no enemy within two tiles to secure it.',
     '',
     'Every contract has optional objectives worth bonus C-Bills. You can withdraw at any time, but the employer will not pay and your standing suffers.',

@@ -87,7 +87,8 @@ export function drawDoll(ui: UI, x: number, y: number, f: Frame, o: DollOpts = {
 export function heatBar(d: Display, x: number, y: number, w: number, heat: number, projected: number, cap: number, dissip: number): void {
   const cells = w;
   const f = (v: number) => Math.max(0, Math.min(1, v / cap));
-  const cur = f(heat), proj = f(projected), after = f(Math.max(0, projected - dissip));
+  const cur = f(heat), proj = f(projected);
+  void dissip;
   for (let i = 0; i < cells; i++) {
     const a = (i + 0.5) / cells;
     let bg = '#1a1210';
@@ -95,16 +96,15 @@ export function heatBar(d: Display, x: number, y: number, w: number, heat: numbe
     let fg = '#ff6a2a';
     if (a <= cur) bg = lerp('#a03010', '#ff6a2a', a);
     else if (a <= proj) bg = '#5a2410';
-    if (a > after - 1 / cells / 2 && a <= after + 1 / cells / 2 && proj > 0) { ch = '▏'; fg = '#ffe0a0'; }
     if (Math.abs(a - 0.75) < 0.5 / cells) { ch = '│'; fg = '#ff3a1a'; }
     d.set(x + i, y, ch, fg, bg);
   }
 }
 
-export function simpleBar(d: Display, x: number, y: number, w: number, frac: number, color: string, back = '#161c22', mark = -1): void {
+export function simpleBar(d: Display, x: number, y: number, w: number, frac: number, color: string, back = '#161c22', mark = -1, markColor = '#ffffff'): void {
   for (let i = 0; i < w; i++) {
     const a = (i + 0.5) / w;
-    d.set(x + i, y, Math.abs(a - mark) < 0.5 / w ? '│' : ' ', '#ffffff', a <= frac ? color : back);
+    d.set(x + i, y, Math.abs(a - mark) < 0.5 / w ? '│' : ' ', markColor, a <= frac ? color : back);
   }
 }
 
@@ -177,3 +177,11 @@ export function statsSummary(f: Frame): { label: string; val: string; frac: numb
 }
 
 export function locName(l: string): string { return LOC_NAMES[l] ?? l; }
+
+/** How hot a unit runs, for labels: shut down, overheating (above the 75% line), or running warm (above half). */
+export function heatState(heat: number, cap: number, shutdown: boolean): { label: string; color: string } | null {
+  if (shutdown) return { label: 'SHUTDOWN', color: '#ff6a2a' };
+  if (heat >= cap * 0.75) return { label: 'OVERHEAT', color: '#ff4a2a' };
+  if (heat >= cap * 0.5) return { label: 'WARM', color: '#e8a03a' };
+  return null;
+}

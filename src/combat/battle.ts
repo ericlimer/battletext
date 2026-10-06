@@ -288,7 +288,8 @@ export class Battle {
     for (const u of this.live()) if (u.sensorLocked > 0) u.sensorLocked--;
     this.check();
     // Stalemate guard: if nobody has damaged anything for a long time, both sides disengage
-    if (!this.result && this.round - this.lastDamageRound >= 12) {
+    const hostiles = this.units.some((u) => SIDE(u.team) === 1 && u.alive && u.deployed && !u.fled && u.tag !== 'convoy');
+    if (!this.result && hostiles && this.round - this.lastDamageRound >= 12) {
       this.say('Neither side can make progress. Both forces disengage.', '#f0a830');
       this.finish('withdraw');
     }

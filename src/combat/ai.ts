@@ -111,11 +111,9 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
 
   // ---- Convoys drive for the exit -----------------------------------------------------
   if ((u.tag === 'convoy' || (u as any)._fleeing) && u.ai.goal) {
-    // Escorted convoys wait for their escort to catch up; hunted convoys run when they see trouble
+    // Hunted convoys run when they see trouble
     const friendlyConvoy = u.tag === 'convoy' && SIDE(u.team) === 0;
-    const escortNear = b.units.some((v) => v.team === 0 && v.alive && dist(v.x, v.y, u.x, u.y) <= 10);
-    const hostileClose = enemies.some((e) => e.alive && e.deployed && b.seen[side].has(e.id) && dist(e.x, e.y, u.x, u.y) <= 8);
-    if (friendlyConvoy && (!escortNear || hostileClose)) { b.finishActivation(u); return; }
+    // An escorted convoy keeps rolling for the exit whatever happens: the lance has to keep up and screen it
     const threatened = visible.some((e) => dist(e.x, e.y, u.x, u.y) <= 10);
     moveToward(b, u, u.ai.goal[0], u.ai.goal[1], (u.tag === 'convoy' && !friendlyConvoy && threatened && unitHealth(u) < 0.5) || ((u as any)._fleeing && !u.tag) ? 'sprint' : 'walk');
     const [gx, gy] = u.ai.goal;

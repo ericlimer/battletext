@@ -43,3 +43,8 @@ export function resetTune(): void {
 export function tuneDiff(): Record<string, number> {
   return Object.fromEntries(TUNE_DEFS.filter((t) => Math.abs(TUNE[t.key] - t.def) > 1e-9).map((t) => [t.key, TUNE[t.key]]));
 }
+
+/** Play options kept per browser: semi-debug helpers the player can switch off. */
+export const OPTS = { undo: true };
+try { const o = JSON.parse(localStorage.getItem('bt.opts') ?? '{}'); if (typeof o.undo === 'boolean') OPTS.undo = o.undo; } catch { /* private mode */ }
+export function saveOpts(): void { try { localStorage.setItem('bt.opts', JSON.stringify(OPTS)); } catch { /* private mode */ } }

@@ -62,5 +62,13 @@ for (let o = 0; o < 8; o++) {
   for (const u of rt.playerUnits) u.alive = false;
   b.check();
   check(b.result === 'win' && objectivesSummary(rt).primaryOk, `assassinate: wiped during extraction still pays (${b.result})`);
+}// Escort: wiping out the opposing force completes the contract without waiting for the haulers to drive off
+{
+  const rt = setupMission({ type: 'escort', difficulty: 3, biome: 'lowlands', seed: 44, night: false, employer: 'davion', target: 'liao', player: generateForce(new RNG(12), 3, 'davion', 4, { noVehicles: true }) });
+  const b = rt.battle; b.start();
+  for (const u of rt.enemyUnits) { u.deployed = true; if (u.tag !== 'convoy') u.alive = false; }
+  b.check();
+  check(b.result === 'win' && objectivesSummary(rt).primaryOk, `escort: opfor wiped out completes the contract (${b.result})`);
 }
+
 process.exit(fails ? 1 : 0);

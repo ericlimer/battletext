@@ -114,6 +114,8 @@ export interface Company {
   pendingEvent?: string;
   ironman: boolean;
   commanderId: string;
+  /** One-off corrections already applied to this save (see game/fixes.ts). */
+  fixes?: string[];
   pendingSalvage?: { pool: { kind: 'part' | 'item'; id: string; label: string; value: number }[]; shares: number; priority: number; seed: number; name: string };
   lastEventDay?: number;
   recentEvents?: string[];

@@ -150,7 +150,10 @@ export class MechLabScreen implements Screen {
     });
     if (cl >= 0) this.held = this.held === ids[cl] ? null : ids[cl];
     if (!ids.length) d.text(2, 7, 'Nothing in storage.', C.faint);
-    d.text(1, ROWS - 2, 'Click item, then a location.', C.faint);
+    d.ctext(1, ROWS - 5, `Hardpoints  {${HARD_COLORS.B}}B{/} ballistic  {${HARD_COLORS.E}}E{/} energy`, C.faint);
+    d.ctext(1, ROWS - 4, `            {${HARD_COLORS.M}}M{/} missile    {${HARD_COLORS.S}}S{/} support`, C.faint);
+    d.text(1, ROWS - 3, '            □ free  ■ used', C.faint);
+    d.text(1, ROWS - 2, 'Click item, then a green location.', C.faint);
   }
 
   drawLoc(ui: UI, l: Loc): void {
@@ -190,14 +193,25 @@ export class MechLabScreen implements Screen {
     const usedHp: Record<string, number> = {};
     for (const it of f.items) if (it.loc === l && item(it.id).kind === 'weapon') { const hh = item(it.id).hard!; usedHp[hh] = (usedHp[hh] ?? 0) + 1; }
     const cnt: Record<string, number> = {};
+    // Hardpoints as chips: ■ taken by a weapon, □ free for one of that type
     let hx = x + 1;
+    const wide = hp.length <= 5;
+    const free: Record<string, number> = {};
     for (const hh of hp) {
       cnt[hh] = (cnt[hh] ?? 0) + 1;
       const filled = cnt[hh] <= (usedHp[hh] ?? 0);
-      d.text(hx, yy, filled ? hh : hh.toLowerCase(), filled ? HARD_COLORS[hh] : lerp(HARD_COLORS[hh], C.panel, 0.55), C.panel, 99, filled);
+      if (!filled) free[hh] = (free[hh] ?? 0) + 1;
+      if (wide) { d.text(hx, yy, filled ? '■' : '□', filled ? HARD_COLORS[hh] : lerp(HARD_COLORS[hh], C.panel, 0.3), C.panel); hx++; }
+      d.text(hx, yy, hh, filled ? HARD_COLORS[hh] : lerp(HARD_COLORS[hh], C.panel, 0.3), C.panel, 99, true);
       hx++;
     }
-    if (!hp.length) d.text(x + 1, yy, 'none', C.faint);
+    if (!hp.length) d.text(x + 1, yy, 'no weapons', C.faint);
+    if (ui.hover(x + 1, yy, BOX_W - 6, 1)) {
+      const nm: Record<string, string> = { B: 'Ballistic', E: 'Energy', M: 'Missile', S: 'Support' };
+      const tally = (rec: Record<string, number>) => Object.entries(rec).map(([k, v]) => `{${HARD_COLORS[k as HardType]}}${v} ${nm[k]}{/}`).join(', ');
+      const all: Record<string, number> = {}; for (const hh of hp) all[hh] = (all[hh] ?? 0) + 1;
+      ui.setTip([`${LOC_NAMES[l]} weapon hardpoints`, hp.length ? `Has ${tally(all)}. Free: ${Object.keys(free).length ? tally(free) : 'none'}.` : 'No weapon hardpoints: equipment only (heat sinks, ammo, jump jets).', '{#6d7f8a}Each weapon needs a free hardpoint of its type (■ taken, □ free) plus enough slots. Equipment needs only slots.{/}']);
+    }
     if (l === 'LL' || l === 'RL' || l === 'LT' || l === 'RT' || l === 'CT') { if (ch.jump) d.text(x + BOX_W - 4, yy, `J${ch.jump}`, C.faint); }
     yy++;
     // Slots

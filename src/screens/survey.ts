@@ -156,6 +156,6 @@ export const MISSION_RISK: Record<string, string> = {
   destroybase: 'Defensive turrets add firepower the estimate counts; buildings soak shots.',
   defendbase: 'Attackers arrive in waves; the base must survive.',
   ambush: 'Haulers flee for the edge — fast \'Mechs and long range matter more than armor.',
-  escort: 'Haulers only move with your \'Mechs close; losing two fails the contract.',
+  escort: 'The haulers drive for the exit without waiting; stay with them. Losing two fails the contract.',
   capture: 'You must hold each beacon with nobody hostile nearby.',
 };

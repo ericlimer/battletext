@@ -12,7 +12,9 @@ await page.waitForTimeout(+wait);
 for (const a of JSON.parse(actions)) {
   if (a.key) await page.keyboard.press(a.key);
   if (a.click) await page.mouse.click(a.click[0] * 10 + 5, a.click[1] * 20 + 10);
-  if (a.move) await page.mouse.move(a.move[0] * 10 + 5, a.move[1] * 20 + 10);
+  if (a.move) await page.mouse.move(a.move[0] * 10 + 5, a.move[1] * 20 + 10, { steps: 4 });
+  if (a.down) { await page.mouse.move(a.down[0] * 10 + 5, a.down[1] * 20 + 10); await page.mouse.down(); }
+  if (a.up) { await page.mouse.move(a.up[0] * 10 + 5, a.up[1] * 20 + 10, { steps: 6 }); await page.waitForTimeout(100); await page.mouse.up(); }
   if (a.eval) await page.evaluate(a.eval);
   await page.waitForTimeout(a.wait ?? 300);
 }

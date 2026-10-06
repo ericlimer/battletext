@@ -58,6 +58,8 @@ export interface MissionRuntime {
   enemyUnits: Unit[];
   playerUnits: Unit[];
   briefing: string[];
+  /** How the lances meet: 'split' drops slots 1-2 and 3-4 on opposite sides of the enemy. */
+  layout?: 'line' | 'split' | 'center';
 }
 
 // ---- Force generation --------------------------------------------------------------------
@@ -314,7 +316,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (const pu of playerUnits) { pu.tag = 'guard'; pu.ai.goal = [cu[0]?.x ?? 6, cu[0]?.y ?? rd.wy]; }
       objectives.push({ id: 'escort', text: 'At least 2 convoy vehicles reach the east edge', primary: true, status: 'active', bonus: 0 });
       objectives.push({ id: 'allsafe', text: 'All convoy vehicles survive', primary: false, status: 'active', bonus });
-      briefing.push(`${art(emp.short)} ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east. The haulers only roll while one of your 'Mechs is within 10 tiles, and halt when hostiles close in.`);
+      briefing.push(`${art(emp.short)} ${emp.short} convoy must cross ${tgt.short}-held territory. Keep it alive until it exits east. The haulers drive for the exit from the start and will not wait for you, so stay with them and screen them.`);
       break;
     }
     case 'capture': {
@@ -353,7 +355,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       briefing[0] = `${tgt.short} commander "${tg.pilot?.callsign}" is overseeing operations here. ${emp.short} wants them dead. If the target escapes, the contract is void.`;
     }
   }
-  const rt: MissionRuntime = { spec, battle: b, objectives, enemyUnits, playerUnits, briefing };
+  const rt: MissionRuntime = { spec, battle: b, objectives, enemyUnits, playerUnits, briefing, layout };
   // Turn or mirror the whole battlefield, so drops come from any edge
   // Drawn from the contract seed alone, so the battlefield matches the survey whatever lance deploys
   orientMission(rt, spec.orientation ?? new RNG(spec.seed * 7919 + 13).int(0, 7));
@@ -502,8 +504,11 @@ function installHooks(rt: MissionRuntime): void {
         if (dead >= 2) { obj(rt, 'escort')!.status = 'failed'; return 'loss'; }
         // Done once every hauler is out or lost — or the road is clear, so the rest are sure to make it
         const clear = rt.enemyUnits.every((u) => u.deployed && (!u.alive || u.fled)) && !b.units.some((u) => u.alive && u.deployed && !u.fled && SIDE(u.team) === 1);
-        if (safe >= 2 && (safe + dead === cv.length || clear)) {
+        // With the opposing force wiped out the convoy is safe: the job is done without waiting for it to drive off
+        if ((safe >= 2 && safe + dead === cv.length) || clear) {
+          if (clear && safe + dead < cv.length) b.say('Hostiles destroyed. The convoy has a clear road out. Contract complete.', '#4ad48a');
           obj(rt, 'escort')!.status = 'done';
+          obj(rt, 'escort')!.progress = clear && safe + dead < cv.length ? `road clear, ${dead} lost` : `${safe} safe, ${dead} lost`;
           const a = obj(rt, 'allsafe')!; if (a.status === 'active') a.status = dead === 0 ? 'done' : 'failed';
           return 'win';
         }
