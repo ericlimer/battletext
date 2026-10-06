@@ -12,7 +12,7 @@ import { BIOME_INFO, TERRAIN, dist, dirTo, DIRS, Structure } from '../combat/ter
 import { item, ItemDef } from '../data/items';
 import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
-import { portraitOf, drawPortrait, locTip } from './portrait';
+import { portraitOf, portraitSize, drawPortrait, locTip } from './portrait';
 import { track, flush } from '../game/telemetry';
 import { TUNE, TUNE_DEFS, saveTune, resetTune, tuneDiff, applyPreset, REVIEWER_PRESET } from '../game/tuning';
 import { UnderFire, startUnderFire, underFireShot, underFireMelee, drawUnderFire } from './underfire';
@@ -23,6 +23,9 @@ import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
 const MX = 0, MY = 1, VW = 50, VH = 36;
 const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 29; // attack-timing panel, over the map
 const PX = 100, PW = 50;
+
+/** Body order for listing what is mounted where ('Mech, then vehicle locations). */
+const LOC_ORDER = ['HD', 'RA', 'RT', 'CT', 'LT', 'LA', 'RL', 'LL', 'T', 'F', 'L', 'R', 'B'];
 
 type Mode = 'move' | 'look' | 'jump' | 'melee' | 'dfa' | 'facing' | 'called' | 'lock';
 
@@ -1167,7 +1170,7 @@ export class CombatScreen implements Screen {
     const lights = this.fx.lights();
     // At night every friendly 'Mech carries its own floodlights
     if (m.night) for (const pu of b.units) if (pu.alive && pu.deployed && !pu.fled && SIDE(pu.team) === 0) lights.push({ x: pu.x, y: pu.y, r: 4.5, color: '#c8d0d8', intensity: 0.16 });
-    const ambient = m.night ? 0.55 : 1;
+    const ambient = m.night ? 0.62 : 1;
     const u = this.sel;
     const act = this.playerTurn() && this.canAct(u);
     const reach = act && u && !u.shutdown ? this.getReach(u) : null;
@@ -1209,7 +1212,7 @@ export class CombatScreen implements Screen {
         const vis = b.visibleTiles[i];
         let lr = ambient, lg = ambient, lb = ambient * (m.night ? 1.15 : 1);
         if (lights.length) { const L = lightAt(lights, x, y); lr += L[0] * 1.3; lg += L[1] * 1.3; lb += L[2] * 1.3; }
-        if (!vis) { const k = m.night ? 0.55 : 0.62; lr *= k; lg *= k; lb *= k * (m.night ? 1.22 : 1.1); fg = desaturate(fg, m.night ? 0.6 : 0.35); }
+        if (!vis) { const k = m.night ? 0.72 : 0.62; lr *= k; lg *= k; lb *= k * (m.night ? 1.18 : 1.1); fg = desaturate(fg, m.night ? 0.5 : 0.35); }
         fg = light(fg, lr, lg, lb);
         bg = light(bg, lr, lg, lb);
         // overlays
@@ -1565,7 +1568,7 @@ export class CombatScreen implements Screen {
     });
     // Mode hint line
     const hint = this.mode === 'look' ? 'Movement overlay hidden. [W] shows it again.' : u.shutdown ? '{#ff6a2a}SHUTDOWN{/} — [Space] restarts the reactor (this uses the whole activation).' : this.mode === 'facing' ? (u.moved === 'sprint' ? 'After a sprint you can only turn 45° from your run. Click/[E] confirms.' : 'Point to set facing. Click/[E] confirms, [Esc] goes back.') :
-      this.mode === 'called' ? (this.calledLoc ? `PRECISION: aiming at the ${locName(this.calledLoc)}. [F]ire, or click another location.` : 'PRECISION: click a location on the target doll, then [F]ire.') :
+      this.mode === 'called' ? (this.calledLoc ? `PRECISION: aiming at the ${locName(this.calledLoc)}. [F]ire, or click another location.` : `PRECISION: click a location on the target doll, then [F]ire.${this.target && !this.target.prone && !this.target.shutdown ? ' Head: only when prone or shut down.' : ''}`) :
       this.mode === 'melee' || this.mode === 'dfa' ? (this.meleeTarget ? 'Click a highlighted tile, or the target again.' : 'Click an adjacent-reachable enemy.') :
       this.mode === 'lock' ? 'Click a detected enemy to Sensor Lock.' :
       this.pending ? `[Space]/click again to move · ${pipStr(this.b.pipsFor(u, this.pending.mode, this.pendingSteps(u)), this.b.maxPips(u))}${this.pending.mode === 'jump' ? ` · {#ff8a4a}+${this.pendingSteps(u) * 3} heat → ${Math.round(u.heat + this.pendingSteps(u) * 3)}/${u.stats.heatCap}{/}` : ''}` :
@@ -1588,35 +1591,19 @@ export class CombatScreen implements Screen {
     if (!heavy) return;
     const k = Math.min(1, 0.35 + dmg / 180 + share);
     this.fx.glitch = Math.max(this.fx.glitch, k);
+    this.fx.flash = Math.max(this.fx.flash, 0.12 + k * 0.15);
     this.fx.shake = Math.max(this.fx.shake, 0.3 + k * 0.5);
     if (v.t && SIDE(v.t.team) === 0) this.fx.hurt = Math.max(this.fx.hurt, k);
     this.wait += TUNE.hitStop * k; // hit-stop
   }
 
-  /** Post-process the map: displaced scanline bands with a colour split, plus a red vignette when you're hurt. */
+  /** Post-process the map: faint scanlines after a heavy hit, plus a red vignette when you're hurt. */
   drawDistortion(d: Display): void {
     const g = this.fx.glitch, h = this.fx.hurt;
     if (g <= 0.02 && h <= 0.02) return;
     if (g > 0.02) {
-      const bands = Math.ceil(g * 7);
-      for (let n = 0; n < bands; n++) {
-        const y0 = MY + Math.floor(Math.random() * VH), hgt = 1 + Math.floor(Math.random() * (1 + g * 2.5));
-        // Even offsets keep the two-column map tiles whole
-        const off = (Math.random() < 0.5 ? -2 : 2) * (1 + Math.floor(Math.random() * g * 2.5));
-        const tint = Math.random() < 0.5 ? '#ff3040' : '#30e0ff';
-        for (let y = y0; y < Math.min(MY + VH, y0 + hgt); y++) {
-          const row = y * COLS;
-          const ch = d.ch.slice(row + MX, row + MX + VW * 2), fg = d.fg.slice(row + MX, row + MX + VW * 2), bg = d.bg.slice(row + MX, row + MX + VW * 2), fl = d.fl.slice(row + MX, row + MX + VW * 2);
-          for (let x = 0; x < VW * 2; x++) {
-            const sx = Math.max(0, Math.min(VW * 2 - 1, x - off)), i = row + MX + x;
-            d.ch[i] = ch[sx]; d.fl[i] = fl[sx];
-            d.fg[i] = lerp(fg[sx], tint, 0.35 * g);
-            d.bg[i] = lerp(bg[sx], tint, 0.18 * g);
-          }
-        }
-      }
       // Faint scanlines across the whole view
-      for (let y = MY; y < MY + VH; y += 2) for (let x = MX; x < MX + VW * 2; x++) { const i = y * COLS + x; d.bg[i] = lerp(d.bg[i], '#000000', 0.25 * g); }
+      for (let y = MY; y < MY + VH; y += 2) for (let x = MX; x < MX + VW * 2; x++) { const i = y * COLS + x; d.bg[i] = lerp(d.bg[i], '#000000', 0.18 * g); }
     }
     if (h > 0.02) {
       for (let y = MY; y < MY + VH; y++) for (let x = MX; x < MX + VW * 2; x++) {
@@ -1964,14 +1951,21 @@ export class CombatScreen implements Screen {
         pct[l] = (((tb[key] ?? 0) + boost) / (tot + boost)) * 100;
       }
     }
+    // Enemy loadout grouped by where it is mounted, so you know which part to shoot off; hovering a line lights that part
+    const sx = x + 32;
+    const groups = new Map<string, { n: string; loc: string; c: number }>();
+    for (const w of b.weaponsOf(t)) { const n = item(w.id).name, k = `${w.loc}|${n}`; const g = groups.get(k); if (g) g.c++; else groups.set(k, { n, loc: w.loc, c: 1 }); }
+    const wrows = [...groups.values()].sort((p, q) => LOC_ORDER.indexOf(p.loc) - LOC_ORDER.indexOf(q.loc));
+    const more = wrows.length > 4 ? wrows.splice(3).length : 0;
+    wrows.forEach((g, k) => { if (ui.hover(sx, y + 6 + k, 18, 1)) { if (!hl) hl = g.loc; ui.setTip([`${g.c > 1 ? g.c + '× ' : ''}${g.n}`, `Mounted in the ${locName(g.loc)}. Destroy that location to knock it out${t.frame.kind === 'mech' ? ' ([P] Precision Strike aims there)' : ''}.`]); } });
     let hovLoc: string | null = null;
     drawDoll(ui, x + 1, y, t.frame, { highlight: hl, pct, onHover: (l) => { hovLoc = l; } });
+    if (calling && hovLoc === 'HD' && pct && pct.HD === undefined) ui.setTip(['Head: not targetable now', 'A standing \'Mech keeps its cockpit out of a called shot. Knock it down or make it shut down (overheat), and Precision Strike can aim at the head.']);
     if (calling && hovLoc && pct && (pct as Record<string, number>)[hovLoc] !== undefined) {
       ui.setTip([`Precision Strike: ${locName(hovLoc)}`, `Click to aim. ~${Math.round((pct as Record<string, number>)[hovLoc])}% of hits will land here.`]);
       if (ui.click(x + 1, y, 29, DOLL_H)) this.calledLoc = hovLoc;
     }
     // Right column: summary
-    const sx = x + 32;
     const f = t.frame;
     let arm = 0, marm = 0, st = 0, mst = 0;
     for (const k in f.maxArmor) { arm += f.armor[k]; marm += f.maxArmor[k]; }
@@ -1987,11 +1981,12 @@ export class CombatScreen implements Screen {
       simpleBar(d, sx + 5, y + 5, 11, t.stab / t.stats.stabMax, t.unsteady ? '#f0d050' : '#4a7ad0', '#141a24', 0.5);
     }
     // Weapons (enemy loadout is visible)
-    let wy = y + 6;
-    const ws = b.weaponsOf(t);
-    const names = new Map<string, number>();
-    for (const w of ws) names.set(item(w.id).name, (names.get(item(w.id).name) ?? 0) + 1);
-    for (const [n, c] of names) { if (wy > y + 9) break; d.text(sx, wy++, `${c > 1 ? c + 'x ' : ''}${n}`, C.dim, undefined, 17); }
+    wrows.forEach((g, k) => {
+      const on = hl === g.loc;
+      d.text(sx, y + 6 + k, g.loc.padEnd(3), on ? C.accent : C.faint);
+      d.text(sx + 3, y + 6 + k, `${g.c > 1 ? g.c + 'x ' : ''}${g.n}`, on ? C.bright : C.dim, undefined, 15);
+    });
+    if (more) d.text(sx + 3, y + 9, `+${more} more`, C.faint);
     y += DOLL_H + 1;
     // Melee / DFA preview
     if (a && a.team === 0 && side === 1 && this.canAct(a) && (this.mode === 'melee' || this.mode === 'dfa')) {
@@ -2087,7 +2082,7 @@ export class CombatScreen implements Screen {
   drawInspect(ui: UI): void {
     const d = ui.d, u = this.inspect!, b = this.b;
     const art = portraitOf(u.frame);
-    const aw = art ? Math.max(...art.rows.map((r) => r.length)) : 30, ah = art ? art.rows.length : 6;
+    const [aw, ah] = art ? portraitSize(art) : [30, 6];
     const w = Math.max(76, aw + 46), h = Math.max(ah, 16) + 7;
     const x = MX + VW - (w >> 1), y = MY + Math.max(1, (VH - h) >> 1);
     const side = SIDE(u.team);

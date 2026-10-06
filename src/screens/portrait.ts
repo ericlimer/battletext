@@ -5,12 +5,24 @@ import { C, lerp, scale } from '../engine/color';
 import { UI } from '../engine/ui';
 import { Screen, app } from './app';
 import { MechArt, artFor, ART_NAMES } from '../data/mechart';
+import { PixArt, pixFor, pixZone, pixWidth, pixColor } from '../data/pixart';
 import { chassis, CHASSIS } from '../data/mechs';
 import { Frame } from '../game/frame';
 import { LOC_NAMES } from '../data/items';
 
-export function portraitOf(f: Frame): MechArt | null {
-  return f.kind === 'mech' ? artFor(chassis(f.defId).name) : null;
+export type Portrait = MechArt | PixArt;
+const isPix = (a: Portrait): a is PixArt => 'px' in a;
+
+/** A chassis's portrait: pixel art where drawn, else the older ASCII line art. */
+export function portraitOf(f: Frame): Portrait | null {
+  if (f.kind !== 'mech') return null;
+  const n = chassis(f.defId).name;
+  return pixFor(n) ?? artFor(n);
+}
+
+/** Size in cells. */
+export function portraitSize(a: Portrait): [number, number] {
+  return isPix(a) ? [pixWidth(a), Math.ceil(a.px.length / 2)] : [Math.max(...a.rows.map((r) => r.length)), a.rows.length];
 }
 
 /** Which body location a cell of the portrait shows. */
@@ -63,7 +75,8 @@ function tint(col: string, h: number): string {
 export interface PortraitOpts { frame?: Frame; highlight?: string | null; dim?: number; onHover?: (loc: string) => void; ui?: UI }
 
 /** Draws a portrait with its top-left at (x, y). Returns its size. */
-export function drawPortrait(d: Display, a: MechArt, x: number, y: number, o: PortraitOpts = {}): [number, number] {
+export function drawPortrait(d: Display, a: Portrait, x: number, y: number, o: PortraitOpts = {}): [number, number] {
+  if (isPix(a)) return drawPix(d, a, x, y, o);
   const w = Math.max(...a.rows.map((r) => r.length));
   a.rows.forEach((row, ry) => {
     for (let rx = 0; rx < row.length; rx++) {
@@ -84,6 +97,39 @@ export function drawPortrait(d: Display, a: MechArt, x: number, y: number, o: Po
   return [w, a.rows.length];
 }
 
+/** Pixel portrait: two pixels per cell (▀ over ▄), tinted per location like the ASCII art. */
+function drawPix(d: Display, a: PixArt, x: number, y: number, o: PortraitOpts): [number, number] {
+  const w = pixWidth(a), h = a.px.length, rows = Math.ceil(h / 2);
+  let hov: string | null = null;
+  if (o.ui && o.onHover) {
+    const mx = Math.floor(o.ui.inp.mx) - x, my = Math.floor(o.ui.inp.my) - y;
+    if (mx >= 0 && my >= 0 && mx < w && my < rows) {
+      const py = [my * 2, my * 2 + 1].find((yy) => pixColor(a.px[yy]?.[mx], yy, h));
+      if (py !== undefined) hov = pixZone(a, mx, py);
+    }
+  }
+  const col = (px: number, py: number): string | null => {
+    let c = pixColor(a.px[py]?.[px], py, h);
+    if (!c) return null;
+    const z = pixZone(a, px, py);
+    if (o.frame) c = tint(c, locHealth(o.frame, z));
+    const hl = o.highlight ?? hov;
+    if (hl && hl === z) c = lerp(c, '#ffffff', 0.35);
+    if (o.dim) c = scale(c, o.dim);
+    return c;
+  };
+  for (let r = 0; r < rows; r++) for (let i = 0; i < w; i++) {
+    const top = col(i, r * 2), bot = col(i, r * 2 + 1);
+    if (!top && !bot) continue;
+    const bg = d.getBg(x + i, y + r);
+    if (top && bot && top === bot) d.set(x + i, y + r, '█', top, bg);
+    else if (top) d.set(x + i, y + r, '▀', top, bot ?? bg);
+    else d.set(x + i, y + r, '▄', bot!, bg);
+  }
+  if (hov && o.onHover) o.onHover(hov);
+  return [w, rows];
+}
+
 /** Hover text for a portrait location. */
 export function locTip(f: Frame, loc: string): string[] {
   const s = f.struct[loc] ?? 0;
@@ -97,11 +143,11 @@ export class ArtSheetScreen implements Screen {
   render(ui: UI): void {
     const d = ui.d;
     d.fill(0, 0, COLS, ROWS, ' ', C.text, C.bg);
-    const names = ART_NAMES;
+    const names = [...new Set([...CHASSIS.map((c) => c.name), ...ART_NAMES])].filter((n) => pixFor(n) || artFor(n));
     const per = 8;
     const list = names.slice(this.page * per, this.page * per + per);
     list.forEach((n, i) => {
-      const a = artFor(n)!;
+      const a = (pixFor(n) ?? artFor(n))!;
       const cx = 1 + (i % 4) * 37, cy = 1 + Math.floor(i / 4) * 23;
       d.text(cx, cy, n.toUpperCase(), C.accent);
       const ch = CHASSIS.find((c) => c.name === n);

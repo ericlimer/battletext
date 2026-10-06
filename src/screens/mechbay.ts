@@ -1,4 +1,4 @@
-import { portraitOf, drawPortrait, locTip } from './portrait';
+import { portraitOf, portraitSize, drawPortrait, locTip } from './portrait';
 // Mech Bay: roster, repair, storage, assembly from parts, sale.
 
 import { UI } from '../engine/ui';
@@ -120,9 +120,10 @@ export function drawMechBayTab(ui: UI, argo: ArgoScreen, x: number, y: number, w
   ly++;
   const colW = Math.floor((dw - 4) / 4);
   if (showArt && art) {
-    const aw = Math.max(...art.rows.map((r) => r.length));
+    const [aw, ah] = portraitSize(art);
+    const avail = y + h - 8 - (ly + 1); // stand on the line above the action bar
     let hov: string | null = null;
-    drawPortrait(d, art, dx + Math.max(2, (dw - aw) >> 1), ly + 1, { frame: m, ui, onHover: (l) => { hov = l; } });
+    drawPortrait(d, art, dx + Math.max(2, (dw - aw) >> 1), ly + 1 + Math.max(0, avail - ah), { frame: m, ui, onHover: (l) => { hov = l; } });
     if (hov) ui.setTip(locTip(m, hov));
   } else MECH_LOCS.forEach((l, i) => {
     const cx = dx + 2 + (i % 4) * colW, cy = ly + Math.floor(i / 4) * 9;

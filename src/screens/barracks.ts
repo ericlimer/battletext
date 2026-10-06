@@ -5,11 +5,30 @@ import { C } from '../engine/color';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
 import { pilotCap, pilotStatus, addLog, sys } from '../game/company';
-import { Pilot, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
+import { Pilot, Skill, AbilityDef, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
 import { cb, cbk, wrap } from '../engine/util';
 import { skillLine, healthPips } from './widgets';
 
 let trainConfirm = '';
+
+/** What a skill level unlocks, for the milestone pips. */
+function milestone(s: Skill, lv: number): { kind: 'ability' | 'health'; text: string; more: string[] } | null {
+  const abs = ABILITIES.filter((a) => a.skill === s && a.tier === lv);
+  if (abs.length) return { kind: 'ability', text: abs.map((a) => a.name).join(', ') + (s === 'gut' && (lv === 4 || lv === 7 || lv === 10) ? ' and +1 health' : ''), more: abs.map((a) => a.desc) };
+  if (s === 'gut' && (lv === 4 || lv === 7 || lv === 10)) return { kind: 'health', text: '+1 pilot health', more: ['One more injury before the pilot is out of the fight.'] };
+  return null;
+}
+
+/** Tooltip for an ability: what it does, and whether this pilot can still take it. */
+function abilityTip(a: AbilityDef, p?: Pilot): string[] {
+  const out = [`{#f0a830}${a.name}{/} {#6d7f8a}(${SKILL_NAMES[a.skill]} ${a.tier}, ${a.active ? 'active: a button in combat' : 'passive'}){/}`, a.desc];
+  if (p && !p.abilities.includes(a.id)) {
+    if (p.abilities.length >= 3) out.push('{#ff6a5a}This pilot already has the maximum of 3 abilities.{/}');
+    else if (a.tier === 8 && p.abilities.some((x) => ability(x).tier === 8)) out.push('{#ff6a5a}Only one tier-8 ability per pilot, and this one has it.{/}');
+    else if (a.tier === 8 && !p.abilities.some((x) => ability(x).skill === a.skill)) out.push(`Needs ${ABILITIES.find((b) => b.skill === a.skill && b.tier === 5)!.name} (the ${SKILL_NAMES[a.skill]} 5 ability) first.`);
+  }
+  return out;
+}
 
 export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, w: number, h: number): void {
   const d = ui.d, c = company!;
@@ -60,10 +79,17 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
   d.ctext(dx + 3, yy++, `Experience: {#f0a830}${p.xp}{/} unspent  {#6d7f8a}(${p.xpTotal} total){/}`, C.dim);
   yy++;
   // Skills with training buttons
+  let pipTip: string[] | null = null;
   for (const s of SKILLS) {
     const v = p[s];
     d.text(dx + 3, yy, SKILL_NAMES[s].padEnd(10), C.text);
-    for (let k = 0; k < 10; k++) d.set(dx + 13 + k * 2, yy, k < v ? '■' : '·', k < v ? (k >= 7 ? C.accent : k >= 4 ? C.cyan : C.text) : C.faint);
+    // Milestone pips: ◆ an ability unlocks at that level, ♥ Guts adds pilot health
+    for (let k = 0; k < 10; k++) {
+      const lv = k + 1, ms = milestone(s, lv), have = k < v;
+      const col = have ? (k >= 7 ? C.accent : k >= 4 ? C.cyan : C.text) : ms ? (ms.kind === 'ability' ? '#a07a30' : '#a04a4a') : C.faint;
+      d.set(dx + 13 + k * 2, yy, ms ? (ms.kind === 'ability' ? (have ? '◆' : '◇') : have ? '♥' : '♡') : have ? '■' : '·', col);
+      if (ms && ui.hover(dx + 13 + k * 2, yy, 1, 1)) pipTip = [`${SKILL_NAMES[s]} ${lv}: ${ms.text}`, ...ms.more];
+    }
     d.text(dx + 34, yy, String(v).padStart(2), C.bright, undefined, 99, true);
     if (st.mode === 'roster' && !p.dead && v < 10) {
       const cost = xpCost(v);
@@ -78,9 +104,11 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
         }
       }
     }
-    if (ui.hover(dx + 3, yy, 32, 1)) ui.setTip(SKILL_DESC[s]);
+    if (pipTip) ui.setTip(pipTip); else if (ui.hover(dx + 3, yy, 32, 1)) ui.setTip(SKILL_DESC[s]);
+    pipTip = null;
     yy++;
   }
+  d.ctext(dx + 3, yy++, '{#a07a30}◇{/} ability unlocks   {#a04a4a}♡{/} +1 pilot health   {#3b4a54}(hover a marker){/}', C.faint);
   // What the numbers mean in combat
   yy++;
   d.text(dx + 3, yy++, 'COMBAT PROFILE', C.accent, undefined, 99, true);
@@ -102,11 +130,17 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
   for (const a of p.abilities) {
     const ab = ability(a);
     d.ctext(dx + 3, yy, `{#f0a830}${ab.name}{/} {#6d7f8a}(${SKILL_NAMES[ab.skill]} ${ab.tier}){/}`, C.text);
+    if (ui.hover(dx + 3, yy, 30, 1)) ui.setTip(abilityTip(ab));
     for (const l of wrap(ab.desc, dw - 36)) d.text(dx + 34, yy++, l, C.dim);
   }
   // Next abilities
   const next = ABILITIES.filter((a) => !p.abilities.includes(a.id) && p[a.skill] < a.tier && p[a.skill] >= a.tier - 3).slice(0, 2);
-  for (const a of next) d.ctext(dx + 3, yy++, `{#3b4a54}Next: ${a.name} at ${SKILL_NAMES[a.skill]} ${a.tier}{/}`, C.faint);
+  for (const a of next) {
+    const w = 6 + a.name.length;
+    d.ctext(dx + 3, yy, `{#4a5a64}Next:{/} {#7ab8d0}${a.name}{/} {#4a5a64}at ${SKILL_NAMES[a.skill]} ${a.tier}{/}`, C.faint);
+    if (ui.hover(dx + 3, yy, w + 14, 1)) { d.text(dx + 9, yy, a.name, C.bright); ui.setTip(abilityTip(a, p)); }
+    yy++;
+  }
   yy++;
   if (p.timeline.length && st.mode === 'roster') {
     d.text(dx + 3, yy++, 'SERVICE RECORD', C.accent, undefined, 99, true);
