@@ -13,7 +13,7 @@ const FIXES: Fix[] = [
     // Escort "Pathfinder" (day 42): the opposing force was wiped out but the haulers waited for an escort and the
     // stalemate guard withdrew the lance. Both rules changed; the employer pays and the salvage is offered as for
     // a win. Damage, injuries and reputation stand.
-    id: 'pathfinder-escort-2026-10-06',
+    id: 'pathfinder-escort-2026-10-06', // keep in FIX_IDS (fixids.ts)
     applies: (c) => c.log.some((l) => l.text === 'Withdrew from "Pathfinder".' && l.day === 42) && !c.pendingSalvage,
     apply: (c) => {
       const pay = 360000;

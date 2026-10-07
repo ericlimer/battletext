@@ -27,6 +27,8 @@ export class MonthReportScreen implements Screen {
     row(yy++, 'Contract payments and bonuses', L.contracts);
     row(yy++, 'Sales and other income', L.sales);
     row(yy++, 'Repairs, refits and purchases', -L.other);
+    if (L.loans) row(yy++, 'Loans received', L.loans);
+    if (L.repaid) row(yy++, 'Loan repayments', -L.repaid);
     row(yy++, 'Operating costs (payroll, upkeep)', -L.operating);
     d.hline(x + 4, yy++, w - 8, C.border);
     const net = L.end - L.start;

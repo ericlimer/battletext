@@ -1,10 +1,10 @@
 // Random Argo events with choices, in the spirit of BATTLETECH's travel events.
 
 import { RNG } from '../engine/rng';
-import { Company, addLog, sys, monthlyExpenses, morale, dateStr, pilotCap, workQueueDays } from './company';
+import { Company, addLog, sys, monthlyExpenses, morale, dateStr, pilotCap, workQueueDays, healMult } from './company';
 import { frameName } from './frame';
 import { item } from '../data/items';
-import { Pilot, SKILLS, SKILL_NAMES, makePilot, hasQuirk, health, skillTotal } from './pilot';
+import { Pilot, ensureIcons, SKILLS, SKILL_NAMES, makePilot, hasQuirk, health, skillTotal } from './pilot';
 import { cb } from '../engine/util';
 
 export interface EventChoice {
@@ -31,7 +31,7 @@ const mor = (c: Company, n: number) => { c.moraleMod = Math.max(-20, Math.min(10
 /** The more skilled of the event's two MechWarriors mentors the other. */
 const mentorPair = (x: EventCtx): [Pilot, Pilot] => (skillTotal(x.pilot) >= skillTotal(x.pilot2) ? [x.pilot, x.pilot2] : [x.pilot2, x.pilot]);
 const xp = (p: Pilot, n: number) => { p.xp += n; p.xpTotal += n; };
-const injure = (c: Company, p: Pilot, days: number) => { p.injuries = Math.max(1, p.injuries); p.healDays = Math.max(p.healDays, days); void c; };
+const injure = (c: Company, p: Pilot, days: number) => { p.injuries = Math.max(1, p.injuries); p.healDays = Math.max(p.healDays, Math.max(3, Math.round(days * healMult(c)))); }; // the Medical Bay helps here too
 
 export const EVENTS: GameEvent[] = [
   {
@@ -175,7 +175,7 @@ export const EVENTS: GameEvent[] = [
     text: () => 'A young MechWarrior in a torn militia uniform asks to join. She deserted her unit rather than fire on civilians, and her former commander wants her back.',
     choices: [
       { text: 'Take her on and face the consequences.', req: (c) => (c.pilots.filter((p) => !p.dead).length < pilotCap(c) ? null : 'No bunk free in the barracks'),
-        apply: (c, x, r) => { c.rep['locals'] -= 6; mor(c, 3); const p = makePilot(r, 1, { callsign: 'Maverick', origin: x.sysName + ' militia', bio: `Deserted the ${x.sysName} planetary militia rather than fire on civilians. Her old commander still wants her back.` }); c.pilots.push(p); return 'Maverick joins the company. The locals are furious. Planetary rep -6, morale +3.'; } },
+        apply: (c, x, r) => { c.rep['locals'] -= 6; mor(c, 3); const p = makePilot(r, 1, { callsign: 'Maverick', origin: x.sysName + ' militia', bio: `Deserted the ${x.sysName} planetary militia rather than fire on civilians. Her old commander still wants her back.` }); c.pilots.push(p); ensureIcons(c.pilots); return 'Maverick joins the company. The locals are furious. Planetary rep -6, morale +3.'; } },
       { text: 'Hand her over.', apply: (c) => { c.rep['locals'] += 4; mor(c, -4); return 'The militia thanks you. The crew does not. Planetary rep +4, morale -4.'; } },
     ],
   },
@@ -261,7 +261,7 @@ export const EVENTS: GameEvent[] = [
     weight: (c) => (c.funds < monthlyExpenses(c).total * 1.5 ? 4 : 0),
     text: (c, x) => `Word of your company's finances has spread. A smiling banker from the ${x.sysName} Mercantile Exchange offers an emergency line of credit: ${cb(400000)} now, ${cb(520000)} due in 60 days.`,
     choices: [
-      { text: `Take the loan (+${cb(400000)}).`, apply: (c) => { c.funds += 400000; c.debts = [...(c.debts ?? []), { day: c.day + 60, amount: 520000, who: 'Mercantile Exchange' }]; return `The C-Bills hit your account. ${cb(520000)} will be collected on ${dateStr(c.day + 60)}.`; } },
+      { text: `Take the loan (+${cb(400000)}).`, apply: (c) => { c.funds += 400000; c.borrowed = (c.borrowed ?? 0) + 400000; c.debts = [...(c.debts ?? []), { day: c.day + 60, amount: 520000, who: 'Mercantile Exchange' }]; return `The C-Bills hit your account. ${cb(520000)} will be collected on ${dateStr(c.day + 60)}.`; } },
       { text: 'Decline. The company will survive on its own.', apply: (c) => { mor(c, 1); return 'Your stubbornness earns quiet nods from the crew. Morale +1.'; } },
     ],
   },

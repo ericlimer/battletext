@@ -1,5 +1,6 @@
 // Career state and rules: time, finances, reputation, contracts, markets, hiring, repairs.
 
+import { FIX_IDS } from './fixids';
 import { RNG } from '../engine/rng';
 import { Frame, newMechFrame, frameTons, repairEstimate, repairFully, frameValue, frameSellPrice, refillAmmo, frameName, isFrameDamaged } from './frame';
 import { track } from './telemetry';
@@ -130,15 +131,17 @@ export interface Company {
   eventCounts?: Record<string, number>;
   fundsHistory?: number[]; // sampled every 3 days
   blackMarket?: boolean; // membership bought from a pirate contact
-  monthStart?: { day: number; funds: number; earned: number; spent: number; borrowed?: number };
+  monthStart?: { day: number; funds: number; earned: number; spent: number; borrowed?: number; repaid?: number };
   /** C-Bills borrowed from the bank over the career. */
   borrowed?: number;
+  /** C-Bills repaid on loans over the career. */
+  repaid?: number;
   ledger?: MonthLedger[];
   blackStores?: Record<string, StoreItem[]>;
   blackStoreDay?: Record<string, number>;
 }
 
-export interface MonthLedger { day: number; start: number; end: number; contracts: number; operating: number; other: number; sales: number; loans?: number; }
+export interface MonthLedger { day: number; start: number; end: number; contracts: number; operating: number; other: number; sales: number; loans?: number; repaid?: number; }
 export const BLACK_MARKET_FEE = 300000;
 /** Pirate havens and frontier worlds host a black market. */
 export function hasBlackMarket(s: StarSystem): boolean { return s.owner === 'pirates' || s.tags.includes('frontier'); }
@@ -240,7 +243,7 @@ export function newCompany(opts: { name: string; commander: string; callsign: st
     expense: 2, rep, mrb: 0, pilots, mechs, storage: [], parts: {},
     inventory: { ML: 2, SL: 1, HS: 2, 'SRM4': 1, 'A-SRM': 1, 'A-LRM': 1 },
     location: start, travel: null, systems, contracts: {}, stores: {}, hires: {}, upgrades: [], work: [],
-    lance: mechs.map((m) => m.uid), lancePilots: pilots.slice(0, 4).map((p) => p.id), log: [], moraleMod: 0,
+    lance: mechs.map((m) => m.uid), lancePilots: pilots.slice(0, 4).map((p) => p.id), log: [], fixes: [...FIX_IDS], moraleMod: 0,
     stats: { missions: 0, wins: 0, kills: 0, earned: 0, spent: 0, mechsLost: 0, pilotsLost: 0 },
     negativeMonths: 0, gameOver: '', rngState: r.seed(), lastExpenses: 0, ironman: opts.ironman, commanderId: cmd.id,
   };
@@ -482,7 +485,7 @@ export function refreshSystem(c: Company, force = false): void {
   const s = sys(c);
   const r = rngOf(c);
   const k = c.contracts[s.id] ?? [];
-  const valid = k.filter((x) => x.expires > c.day);
+  const valid = k.filter((x) => x.expires > c.day || x.booked); // a booked job waits for you
   const want = 5 + (has(c, 'comms') ? 1 : 0) + (s.tags.includes('capital') ? 1 : 0);
   c.contracts[s.id] = valid; // genContract reads the board it is filling (variety, name dedupe)
   if (force || valid.length < want - 2 || c.day - s.contractsDay > 12) {
@@ -572,7 +575,7 @@ export function advanceDay(c: Company): DayReport {
   if (c.day % 3 === 0) c.fundsHistory = [...(c.fundsHistory ?? []), c.funds].slice(-120);
   if (c.day % 4 === 0 && c.moraleMod !== 0) c.moraleMod += c.moraleMod > 0 ? -1 : 1;
   for (const debt of (c.debts ?? []).filter((x) => c.day >= x.day)) {
-    c.funds -= debt.amount; c.stats.spent += debt.amount;
+    c.funds -= debt.amount; c.repaid = (c.repaid ?? 0) + debt.amount;
     say(`The ${debt.who} collected ${cb(debt.amount)} in loan repayments.`, '#f0a830');
   }
   if (c.debts?.length) c.debts = c.debts.filter((x) => c.day < x.day);
@@ -609,10 +612,10 @@ export function advanceDay(c: Company): DayReport {
     const ms = c.monthStart ?? { day: c.day - 30, funds: c.funds + e.total, earned: c.stats.earned, spent: c.stats.spent - e.total };
     const contracts = c.stats.earned - ms.earned, spentAll = c.stats.spent - ms.spent;
     const other = spentAll - e.total;
-    const loans = (c.borrowed ?? 0) - (ms.borrowed ?? 0);
-    const sales = c.funds - ms.funds - contracts + spentAll - loans;
-    c.ledger = [...(c.ledger ?? []), { day: c.day, start: ms.funds, end: c.funds, contracts, operating: e.total, other, sales, loans }].slice(-12);
-    c.monthStart = { day: c.day, funds: c.funds, earned: c.stats.earned, spent: c.stats.spent, borrowed: c.borrowed ?? 0 };
+    const loans = (c.borrowed ?? 0) - (ms.borrowed ?? 0), repaid = (c.repaid ?? 0) - (ms.repaid ?? 0);
+    const sales = c.funds - ms.funds - contracts + spentAll - loans + repaid;
+    c.ledger = [...(c.ledger ?? []), { day: c.day, start: ms.funds, end: c.funds, contracts, operating: e.total, other, sales, loans, repaid }].slice(-12);
+    c.monthStart = { day: c.day, funds: c.funds, earned: c.stats.earned, spent: c.stats.spent, borrowed: c.borrowed ?? 0, repaid: c.repaid ?? 0 };
     const mor = morale(c);
     if (mor >= 40) say('The crew is inspired. MechWarriors will learn faster on the next contracts.', '#6ad46a');
     if (mor < 12) {
@@ -650,7 +653,7 @@ function liquidate(c: Company, say: (t: string, col?: string) => void): void {
   let raised = 0;
   for (const [id, n] of Object.entries(c.inventory)) { if (c.funds >= 0) break; const v = sellPrice(c, id) * n; c.funds += v; raised += v; c.inventory[id] = 0; }
   for (const [id, n] of Object.entries(c.parts)) { if (c.funds >= 0) break; const v = partSellPrice(id) * n; c.funds += v; raised += v; c.parts[id] = 0; }
-  const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const worth = Math.min(Math.round(frameValue(m) * 0.35), frameSellPrice(m)); const v = Math.min(worth, -c.funds); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); say(`Creditors seized ${frameName(m)}${worth > v ? ` against ${cb(v)} of debt — no change given` : ''}.`, '#e8503a'); } };
+  const sellM = (arr: Frame[]) => { while (c.funds < 0 && arr.length) { const m = arr.pop()!; const worth = Math.min(Math.round(frameValue(m) * 0.35), frameSellPrice(m)); const v = Math.min(worth, -c.funds); c.funds += v; raised += v; c.lance = c.lance.map((u) => (u === m.uid ? null : u)); c.work = c.work.filter((w) => w.mechUid !== m.uid); say(`Creditors seized ${frameName(m)}${worth > v ? ` against ${cb(v)} of debt — no change given` : ''}.`, '#e8503a'); } };
   sellM(c.storage);
   if (c.funds < 0 && c.mechs.length > 1) { const keep = c.mechs.slice(0, 1); const rest = c.mechs.slice(1); sellM(rest); c.mechs = [...keep, ...rest]; }
   if (raised) say(`Forced liquidation raised ${cb(raised)} to cover debts.`, '#f0a830');

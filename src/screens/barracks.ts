@@ -5,7 +5,7 @@ import { C } from '../engine/color';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
 import { pilotCap, pilotStatus, addLog, sys } from '../game/company';
-import { Pilot, Skill, AbilityDef, ROLES, roleOf, isRoleSkill, nextUnlock, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
+import { Pilot, Skill, AbilityDef, ensureIcons, ROLES, roleOf, isRoleSkill, nextUnlock, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
 import { cb, cbk, wrap } from '../engine/util';
 import { skillLine, healthPips, roleTag, ROLE_COLOR } from './widgets';
 
@@ -181,6 +181,7 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
       c.funds -= p.hireCost ?? 0;
       c.stats.spent += p.hireCost ?? 0;
       c.pilots.push(p);
+      ensureIcons(c.pilots); // settle the sigil now, not at the next save
       c.hires[c.location] = list.filter((q) => q !== p);
       p.timeline.push(`Joined ${c.name} on day ${c.day}.`);
       addLog(c, `Hired ${p.callsign} (${p.name}) for ${cb(p.hireCost ?? 0)}.`, '#6ad46a');

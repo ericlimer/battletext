@@ -24,16 +24,21 @@ function valid(o: unknown): o is Company {
   return !!c && typeof c === 'object' && c.version === 1 && Array.isArray(c.pilots) && Array.isArray(c.systems) && Array.isArray(c.mechs);
 }
 
+/** Load-time upkeep for any save (local, imported or backup). Returns true when the save changed. */
+function prepare(c: Company): boolean {
+  // Older saves could keep fallen MechWarriors assigned to the lance
+  c.lancePilots = c.lancePilots.map((id) => (id && c.pilots.some((p) => p.id === id && !p.dead) ? id : null));
+  ensureIcons(c.pilots);
+  return applyFixes(c);
+}
+
 export function loadGame(): Company | null {
   try {
     const s = localStorage.getItem(KEY);
     if (!s) return null;
     const c = JSON.parse(s);
     if (!valid(c)) return null;
-    // Older saves could keep fallen MechWarriors assigned to the lance
-    c.lancePilots = c.lancePilots.map((id: string | null) => (id && c.pilots.some((p: { id: string; dead?: boolean }) => p.id === id && !p.dead) ? id : null));
-    ensureIcons(c.pilots);
-    const fixed = applyFixes(c);
+    const fixed = prepare(c);
     company = c;
     if (fixed) saveGame(c);
     return c;
@@ -59,6 +64,7 @@ export function restoreBackup(): Company | null {
     if (!s) return null;
     const c = JSON.parse(s);
     if (!valid(c)) return null;
+    prepare(c);
     company = c;
     saveGame(c);
     return c;
@@ -93,6 +99,7 @@ export function importSave(text: string): boolean {
   try {
     const c = JSON.parse(text);
     if (!valid(c)) return false;
+    prepare(c);
     company = c;
     saveGame(c);
     return true;
