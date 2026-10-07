@@ -8,7 +8,7 @@ import { faction } from '../data/factions';
 import { Frame, newMechFrame, newVehicleFrame } from '../game/frame';
 import { Pilot, makePilot, uniqueCallsign } from '../game/pilot';
 import { Battle, Unit, SIDE } from './battle';
-import { Biome, generateMap, MapGenOpts, TERRAIN, BattleMap, dist, computeHillshade } from './terrain';
+import { Biome, generateMap, MapGenOpts, TERRAIN, BattleMap, dist, computeHillshade, MAP_STYLE_INFO } from './terrain';
 
 export type MissionType = 'battle' | 'assassinate' | 'destroybase' | 'defendbase' | 'ambush' | 'escort' | 'capture';
 
@@ -336,6 +336,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
     }
   }
   if (t !== 'battle' && t !== 'defendbase') briefing.push('Once the objective is met you are paid, but the job is not over: finish off the remaining hostiles or fall back to the extraction zone at your drop point.');
+  { const si = MAP_STYLE_INFO[map.style ?? 'open']; briefing.push(`Terrain: ${si.name} — ${si.hint}`); }
   if (spec.night) briefing.push('Night operation: visual range reduced to 360m. Sensors unaffected.');
 
   // Unique callsigns within each side keep the combat log readable

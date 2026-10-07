@@ -8,7 +8,7 @@ import { Battle, Unit, BEvent, SIDE, MoveMode, attackArc, HitCalc, Assignment, s
 import { aiTakeTurn } from '../combat/ai';
 import { MissionRuntime, MISSION_INFO } from '../combat/missions';
 import { FX, lightAt } from '../combat/fx';
-import { BIOME_INFO, TERRAIN, dist, dirTo, DIRS, Structure } from '../combat/terrain';
+import { BIOME_INFO, MAP_STYLE_INFO, TERRAIN, dist, dirTo, DIRS, Structure } from '../combat/terrain';
 import { item, ItemDef } from '../data/items';
 import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
@@ -1301,9 +1301,22 @@ export class CombatScreen implements Screen {
         const vis = b.visibleTiles[i];
         let lr = ambient, lg = ambient, lb = ambient * (m.night ? 1.15 : 1);
         if (lights.length) { const L = lightAt(lights, x, y); lr += L[0] * 1.3; lg += L[1] * 1.3; lb += L[2] * 1.3; }
-        if (!vis) { const k = m.night ? 0.72 : 0.62; lr *= k; lg *= k; lb *= k * (m.night ? 1.18 : 1.1); fg = desaturate(fg, m.night ? 0.5 : 0.35); }
-        fg = light(fg, lr, lg, lb);
-        bg = light(bg, lr, lg, lb);
+        if (!vis) {
+          const k = m.night ? 0.72 : 0.62; lr *= k; lg *= k; lb *= k * (m.night ? 1.18 : 1.1);
+          // Walls, rock and chasms keep their colour and glyph brightness in fog so the layout stays readable on dense maps
+          const solid = m.terr[i] === 'rock' || m.terr[i] === 'building' || m.terr[i] === 'wall' || m.terr[i] === 'chasm';
+          if (solid) {
+            const lift = 0.92 / k;
+            fg = light(desaturate(fg, m.night ? 0.2 : 0.08), lr * lift, lg * lift, lb * lift);
+            bg = light(scale(bg, m.terr[i] === 'chasm' ? 0.7 : 0.8), lr, lg, lb);
+          } else {
+            fg = light(desaturate(fg, m.night ? 0.5 : 0.35), lr, lg, lb);
+            bg = light(bg, lr, lg, lb);
+          }
+        } else {
+          fg = light(fg, lr, lg, lb);
+          bg = light(bg, lr, lg, lb);
+        }
         // overlays
         if (reach && act) {
           if (this.mode === 'jump') { if (reach.jump.has(i)) bg = lerp(bg, '#2a8a4a', 0.32); }
@@ -1577,7 +1590,7 @@ export class CombatScreen implements Screen {
       d.text(1, y0, info, C.dim, C.panel);
     }
     const bi = BIOME_INFO[m.biome];
-    const env = ` ${bi.name}${m.night ? ' · Night' : ''} · cooling ×${bi.heatMult} `;
+    const env = ` ${bi.name}${m.style && m.style !== 'open' ? ` · ${MAP_STYLE_INFO[m.style].short}` : ''}${m.night ? ' · Night' : ''} · cooling ×${bi.heatMult} `;
     d.text(PX - 2 - env.length, y0, env, C.faint, C.panel);
     // Elevation tint legend while [Z] is on
     {

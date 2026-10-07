@@ -33,14 +33,14 @@ export const TERRAIN: Record<Terrain, TerrainInfo> = {
 /** Battlefield layouts: the classic open field, or one of the broken, close-quarters archetypes. */
 export type MapStyle = 'open' | 'canyons' | 'ridges' | 'mesas' | 'craters' | 'crevasses' | 'ruins';
 export const MAP_STYLES: MapStyle[] = ['open', 'canyons', 'ridges', 'mesas', 'craters', 'crevasses', 'ruins'];
-export const MAP_STYLE_INFO: Record<MapStyle, { name: string; desc: string }> = {
-  open: { name: 'Open Ground', desc: 'Rolling country with scattered cover.' },
-  canyons: { name: 'Canyon Network', desc: 'Winding gorges between sheer rock walls; plateaus above them for whoever can jump.' },
-  ridges: { name: 'Ridgelines', desc: 'Rock ridges cut across the area, crossed by a few narrow passes.' },
-  mesas: { name: 'Mesa Field', desc: 'Buttes and flat-topped mesas; most tops are reached by a single ramp, or by jump jets.' },
-  craters: { name: 'Crater Field', desc: 'Walled impact craters breached in a few places, cut by rilles.' },
-  crevasses: { name: 'Crevasse Field', desc: 'Open cracks that only jump jets can clear, crossed by a few bridges.' },
-  ruins: { name: 'Ruined Town', desc: 'Gutted blocks and rubble-choked streets. Buildings can be blasted open.' },
+export const MAP_STYLE_INFO: Record<MapStyle, { name: string; short: string; desc: string; hint: string }> = {
+  open: { name: 'Open Ground', short: 'Open', desc: 'Rolling country with scattered cover.', hint: 'long sight lines; use woods and hills for cover.' },
+  canyons: { name: 'Canyon Network', short: 'Canyons', desc: 'Winding gorges between sheer rock walls; plateaus above them for whoever can jump.', hint: 'narrow gorges and choke points; jump jets cut corners and reach the high plateaus.' },
+  ridges: { name: 'Ridgelines', short: 'Ridges', desc: 'Rock ridges cut across the area, crossed by a few narrow passes.', hint: 'ridges block fire and movement; fight for the passes or jump over.' },
+  mesas: { name: 'Mesa Field', short: 'Mesas', desc: 'Buttes and flat-topped mesas; most tops are reached by a single ramp, or by jump jets.', hint: 'mesa tops give high ground over the flats; find the ramp or jump up.' },
+  craters: { name: 'Crater Field', short: 'Craters', desc: 'Walled impact craters breached in a few places, cut by rilles.', hint: 'crater rims are cover and high ground; breaches are choke points.' },
+  crevasses: { name: 'Crevasse Field', short: 'Crevasses', desc: 'Open cracks that only jump jets can clear, crossed by a few bridges.', hint: 'cracks cannot be walked; bridges are choke points, jump jets go anywhere.' },
+  ruins: { name: 'Ruined Town', short: 'Ruins', desc: 'Gutted blocks and rubble-choked streets. Buildings can be blasted open.', hint: 'short sight lines and close fights; blast walls open for a shortcut.' },
 };
 /** How often each dense archetype turns up on a world (the classic open map takes the rest). */
 const STYLE_WEIGHTS: Record<Biome, Partial<Record<MapStyle, number>>> = {

@@ -10,7 +10,7 @@ import { company, saveGame, saveBackup } from '../game/save';
 import { Company, Contract, Negotiation, negotiate, negotiateShares, maxShares, maxContractDiff, sys, mechReady, mrbLevel, PARTS_NEEDED, maxSlider, contractDays, workQueueDays, startTravel, travelMult } from '../game/company';
 import { route } from '../game/world';
 import { MISSION_INFO } from '../combat/missions';
-import { BIOME_INFO } from '../combat/terrain';
+import { BIOME_INFO, MAP_STYLE_INFO } from '../combat/terrain';
 import { faction, repLevel } from '../data/factions';
 import { cb, cbk, wrap } from '../engine/util';
 import { Frame, frameName, frameTons, weaponSummary, frameStats, repairEstimate } from '../game/frame';
@@ -18,7 +18,7 @@ import { Pilot, isAvailable, health, skillTotal, roleOf } from '../game/pilot';
 import { launchContract, resolveContract, MissionResult, SalvageEntry } from '../game/aftermath';
 import { SalvageScreen } from './salvage';
 import { CombatScreen } from './combat';
-import { surveyOf, drawSurvey, oppositionEstimate, likelyLance, defaultSlots, daysToContract, fightOdds, oddsText, MISSION_RISK, surveySize } from './survey';
+import { surveyOf, drawSurvey, tileColor, oppositionEstimate, likelyLance, defaultSlots, daysToContract, fightOdds, oddsText, MISSION_RISK, surveySize } from './survey';
 import { skillLine, simpleBar, healthPips, weaponTip, roleTag } from './widgets';
 import { item } from '../data/items';
 import { chassis } from '../data/mechs';
@@ -70,6 +70,7 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
   d.ctext(dx + 3, yy++, `Target    {${tgt.color}}${tgt.name}{/}  {#6d7f8a}(${repLevel(c.rep[k.target] ?? 0).name}){/}`, C.dim);
   wrap(`${mi.name} — ${mi.desc}`, dw - 16).forEach((l, i) => d.ctext(dx + 3, yy++, i ? `          ${l}` : `Mission   {#f2f6f8}${l.replace(mi.name, `${mi.name}{/}`)}`, C.dim));
   d.ctext(dx + 3, yy++, `Terrain   {#f2f6f8}${BIOME_INFO[k.biome].name}{/} — ${BIOME_INFO[k.biome].desc}${k.night ? ' {#b27ae8}Night.{/}' : ''}`, C.dim, undefined, dw - 6);
+  { const si = MAP_STYLE_INFO[surveyOf(c, k).battle.map.style ?? 'open']; wrap(`${si.name} — ${si.hint}`, dw - 16).forEach((l, i) => d.ctext(dx + 3, yy++, i ? `          ${l}` : `Layout    {#f2f6f8}${l.replace(si.name, `${si.name}{/}`)}`, C.dim)); }
   for (const l of wrap(k.flavor, dw - 8)) d.text(dx + 3, yy++, l, C.text);
   yy++;
   d.ctext(dx + 3, yy++, `Maximum payment {#f0c850}${cb(k.pay)}{/}   Salvage up to {#f2f6f8}${k.salvageMax}{/} shares`, C.dim);
@@ -109,9 +110,21 @@ export function drawContractsTab(ui: UI, argo: ArgoScreen, x: number, y: number,
     if (k.type === 'destroybase') legend.push('{#e8603a}■{/} target');
     if (k.type === 'defendbase') legend.push('{#3aa8d8}■{/} protect');
     if (k.type === 'escort' || k.type === 'ambush') legend.push('{#d8d0b8}─{/} road');
-    legend.forEach((l, i) => d.ctext(lx, sy + 1 + i, l, C.dim, undefined, dw - (lx - dx) - 2));
-    d.text(lx, sy + 6, `${sm.w}×${sm.h} tiles`, C.faint, undefined, dw - (lx - dx) - 2);
-    if (k.night) d.text(lx, sy + 7, 'Night: sight 10', '#b27ae8');
+    // Swatches for the walls, plateaus and chasms that shape dense maps
+    const swatch = (test: (i: number) => boolean, label: string) => {
+      for (let i = 0; i < sm.w * sm.h; i++) if (test(i)) { legend.push(`{${tileColor(rt, i)}}██{/} ${label}`); return; }
+    };
+    swatch((i) => sm.elev[i] >= 3 && sm.terr[i] !== 'rock', 'plateau (jump/ramp)');
+    swatch((i) => sm.terr[i] === 'rock' && sm.elev[i] < 3, 'rock wall');
+    swatch((i) => sm.terr[i] === 'chasm', 'chasm (jump)');
+    const lw = dw - (lx - dx) - 2;
+    let ly = sy;
+    if (sm.style && sm.style !== 'open') d.text(lx, ly++, MAP_STYLE_INFO[sm.style].name, C.text, undefined, lw);
+    ly++;
+    legend.forEach((l) => d.ctext(lx, ly++, l, C.dim, undefined, lw));
+    ly++;
+    d.text(lx, ly++, `${sm.w}×${sm.h} tiles`, C.faint, undefined, lw);
+    if (k.night) d.text(lx, ly, 'Night: sight 10', '#b27ae8');
   }
 }
 

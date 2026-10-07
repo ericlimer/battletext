@@ -60,18 +60,30 @@ export function surveyOf(c: Company, k: Contract): MissionRuntime {
   return rt;
 }
 
-function tileColor(rt: MissionRuntime, i: number): string {
+export function tileColor(rt: MissionRuntime, i: number): string {
   const m = rt.battle.map;
   const B = BIOME_INFO[m.biome];
   const e = m.elev[i];
-  const base = scale(B.ground[e], 1.25 + e * 0.22 + m.hill[i] * 0.25);
+  let base = scale(B.ground[e], 1.25 + e * 0.22 + m.hill[i] * 0.25);
+  // Plateau tops (only jump jets or a ramp get you up) read pale, their cliff rims paler still
+  if (e >= 3) {
+    const x = i % m.w, y = (i / m.w) | 0;
+    let rim = false;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= m.w || yy >= m.h) continue;
+      const j = yy * m.w + xx;
+      if (m.elev[j] <= 1 || m.terr[j] === 'chasm') rim = true;
+    }
+    base = lerp(base, '#f4f0e0', rim ? 0.5 : 0.3);
+  }
   switch (m.terr[i]) {
     case 'lforest': return lerp(base, B.forest[0], 0.45);
     case 'hforest': return lerp(base, B.forest[1], 0.55);
     case 'water': return scale(B.water[1], 1.6);
     case 'deep': return scale(B.water[1], 1.1);
-    case 'rock': return scale(B.rock, 0.9);
-    case 'chasm': return scale(B.ground[0], 0.4);
+    case 'rock': return e >= 3 ? lerp(base, B.rock, 0.5) : scale(B.rock, 0.62);
+    case 'chasm': return '#040506';
     case 'road': return lerp(base, '#d8d0b8', 0.35);
     case 'building': case 'wall': {
       const st = m.structures[m.struct[i]];
