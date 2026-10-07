@@ -18,6 +18,10 @@ async function boot(): Promise<void> {
   document.getElementById('boot')?.remove();
   const d = new Display(canvas);
   const inp = new Input(d);
+  // Keys pressed before boot finished (index.html holds them) would otherwise be lost: replay them on the first frame
+  const early: KeyboardEvent[] = (window as any).__earlyKeys ?? [];
+  (window as any).__earlyKeys = null;
+  for (const e of early) inp.keys.push({ key: e.key, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, used: false });
   const ui = new UI(d, inp);
   const app = new App(d, ui, inp);
   setApp(app);

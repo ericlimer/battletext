@@ -2,6 +2,7 @@
 import { RNG } from '../src/engine/rng';
 import { setupMission, generateForce, objectivesSummary } from '../src/combat/missions';
 import { aiTakeTurn } from '../src/combat/ai';
+import { COLORS as PILOT_COLORS, COMMANDER_COLOR } from '../src/game/pilot';
 let fails = 0;
 const check = (ok: boolean, msg: string) => { if (!ok) { fails++; console.log('FAIL', msg); } else console.log('ok  ', msg); };
 // A player unit that moved in round 1 must be free to move again in round 2
@@ -69,6 +70,37 @@ for (let o = 0; o < 8; o++) {
   for (const u of rt.enemyUnits) { u.deployed = true; if (u.tag !== 'convoy') u.alive = false; }
   b.check();
   check(b.result === 'win' && objectivesSummary(rt).primaryOk, `escort: opfor wiped out completes the contract (${b.result})`);
+}
+
+// Pilot colours stay out of the enemy red/orange band; the player's autopilot never cooks its own 'Mechs; an attacker is named once it fires
+{
+  const hue = (h: string) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); const mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx === mn) return -1; const d = mx - mn; const x = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return (x * 60 + 360) % 360; };
+  const bad = [...PILOT_COLORS, COMMANDER_COLOR].filter((c) => { const h = hue(c); return h >= 0 && (h < 45 || h > 340); });
+  check(!bad.length, `pilot colours avoid the enemy red/orange hues (${bad.join(' ')})`);
+  let cooked = 0;
+  for (const [i, type] of (['destroybase', 'battle', 'defendbase'] as const).entries()) {
+    const rt = setupMission({ type, difficulty: 4, biome: 'desert', seed: 90 + i, night: false, employer: 'davion', target: 'liao', player: generateForce(new RNG(40 + i), 4, 'davion', 4, { noVehicles: true }), basePay: 500000 } as any);
+    const b = rt.battle; b.start(); let g = 0;
+    while (!b.result && g++ < 1500 && b.round <= 12) { const n = b.advance(); if (n.who === 'none') break; const u = n.who === 'ai' ? n.unit! : b.pending(0).find((x) => x.team === 0)!; const l0 = b.log.length, hot = u.heat > u.stats.heatCap * 0.75; aiTakeTurn(b, u); if (u.team === 0 && !hot && b.log.slice(l0).some((l) => l.text.includes('internal heat damage'))) cooked++; }
+  }
+  check(cooked === 0, `autopilot: no self-inflicted heat damage on the player's side (${cooked}; enemy flamers aside)`);
+  const rt = setupMission({ type: 'battle', difficulty: 3, biome: 'lowlands', seed: 9, night: true, employer: 'davion', target: 'liao', player: generateForce(new RNG(7), 3, 'davion', 4, { noVehicles: true }) });
+  const b = rt.battle; b.start();
+  const a = rt.enemyUnits.find((u) => u.frame.kind === 'mech')!, t = rt.playerUnits[0];
+  b.seen[0].delete(a.id);
+  const before = b.displayName(a);
+  a.x = t.x + 1; a.y = t.y; b.melee(a, t, [], false); b.seen[0].delete(a.id);
+  check(before === 'Unknown contact' && b.displayName(a) !== 'Unknown contact', `attacking reveals the attacker's name (${before} → ${b.displayName(a)})`);
+}
+
+// Assassination progress ("round N of 9") is refreshed as each round starts, before anyone acts
+{
+  const rt = setupMission({ type: 'assassinate', difficulty: 3, biome: 'lowlands', seed: 31, night: false, employer: 'davion', target: 'liao', player: generateForce(new RNG(11), 3, 'davion', 4, { noVehicles: true }) });
+  const b = rt.battle; b.start();
+  let g = 0;
+  while (!b.result && g++ < 800 && b.round < 3) { const n = b.advance(); if (n.who === 'none' || b.round >= 3) break; aiTakeTurn(b, n.who === 'ai' ? n.unit! : b.pending(0).find((x) => x.team === 0)!); }
+  const o = rt.objectives.find((x) => x.id === 'target')!;
+  check(b.round < 3 || b.result !== '' || o.status !== 'active' || !!o.progress?.includes(`round ${b.round} of 9`) || !!o.progress?.startsWith('ESCAPING'), `assassinate: progress matches the round at round start (r${b.round}: ${o.progress})`);
 }
 
 process.exit(fails ? 1 : 0);

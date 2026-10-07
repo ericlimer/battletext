@@ -193,7 +193,9 @@ const BIO_C = ['Quiet, methodical, and deeply superstitious about their cockpit.
   'Survived an ejection at 400 meters and has not stopped talking about it.', 'Is convinced the dropship\'s coffee is poisoned.'];
 // Pilot icons: a symbol + colour pair unique within the company. Symbols avoid glyphs the battle map uses.
 export const SIGILS = ['☼', '♦', '♥', '§', 'Ω', 'Δ', 'Ψ', 'Σ', '†', '‡', '¥', 'Φ', 'Θ', 'λ', 'µ', '☾', '✦', '♪', '¶', 'Ж'];
-export const COLORS = ['#ff6a5a', '#f0a830', '#f0e050', '#8ae878', '#4ad8c8', '#5fa8ff', '#b27ae8', '#ff7ad0', '#e8e8e8', '#c89a68'];
+// No reds, oranges or browns (hue ~340-45°): those read as enemy (C.enemy) on the map. Old colours are reassigned on load.
+export const COLORS = ['#f0e050', '#8ae878', '#4ad8c8', '#5fa8ff', '#b27ae8', '#ff7ad0', '#e8e8e8', '#c8f060', '#9a9aff', '#a0e8ff'];
+export const COMMANDER_COLOR = '#ffd84a'; // gold, clear of the enemy red/orange band
 
 /** Gives p an icon nobody in `others` has, preferring a symbol and a colour that are both unused. */
 export function assignIcon(p: Pilot, others: Pilot[], rnd: () => number = Math.random): void {
@@ -217,7 +219,7 @@ export function ensureIcons(pilots: Pilot[]): void {
   const live = pilots.filter((p) => !p.dead);
   const symbolsLeft = live.length <= SIGILS.length;
   for (const p of live) {
-    if (p.commander) { p.sigil = '★'; p.color = '#f0a830'; done.push(p); continue; }
+    if (p.commander) { p.sigil = '★'; p.color = COMMANDER_COLOR; done.push(p); continue; }
     // While there are symbols to spare, each pilot gets their own symbol, not just their own colour
     const clash = done.some((q) => q.sigil === p.sigil && (symbolsLeft || q.color === p.color));
     if (!SIGILS.includes(p.sigil) || !COLORS.includes(p.color) || clash) assignIcon(p, done);

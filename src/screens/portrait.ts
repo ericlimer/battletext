@@ -6,23 +6,26 @@ import { UI } from '../engine/ui';
 import { Screen, app } from './app';
 import { MechArt, artFor, ART_NAMES } from '../data/mechart';
 import { PixArt, pixFor, pixZone, pixWidth, pixColor } from '../data/pixart';
+import { VehArt, VPIX } from '../data/pixart/vehicles';
 import { chassis, CHASSIS } from '../data/mechs';
 import { Frame } from '../game/frame';
 import { LOC_NAMES } from '../data/items';
 
-export type Portrait = MechArt | PixArt;
-const isPix = (a: Portrait): a is PixArt => 'px' in a;
+export type Portrait = MechArt | PixArt | VehArt;
+const isPix = (a: Portrait): a is PixArt | VehArt => 'px' in a;
+/** Location a pixel shows: 'Mechs use the zone spec, vehicles a per-pixel mask. */
+const zoneOf = (a: PixArt | VehArt, x: number, y: number): string => ('zones' in a ? a.zones[y]?.[x] ?? '.' : pixZone(a, x, y));
 
 /** A chassis's portrait: pixel art where drawn, else the older ASCII line art. */
 export function portraitOf(f: Frame): Portrait | null {
-  if (f.kind !== 'mech') return null;
+  if (f.kind !== 'mech') return VPIX[f.defId] ?? null;
   const n = chassis(f.defId).name;
   return pixFor(n) ?? artFor(n);
 }
 
 /** Size in cells. */
 export function portraitSize(a: Portrait): [number, number] {
-  return isPix(a) ? [pixWidth(a), Math.ceil(a.px.length / 2)] : [Math.max(...a.rows.map((r) => r.length)), a.rows.length];
+  return isPix(a) ? [Math.max(...a.px.map((r) => r.length)), Math.ceil(a.px.length / 2)] : [Math.max(...a.rows.map((r) => r.length)), a.rows.length];
 }
 
 /** Which body location a cell of the portrait shows. */
@@ -98,21 +101,21 @@ export function drawPortrait(d: Display, a: Portrait, x: number, y: number, o: P
 }
 
 /** Pixel portrait: two pixels per cell (▀ over ▄), tinted per location like the ASCII art. */
-function drawPix(d: Display, a: PixArt, x: number, y: number, o: PortraitOpts): [number, number] {
-  const w = pixWidth(a), h = a.px.length, rows = Math.ceil(h / 2);
+function drawPix(d: Display, a: PixArt | VehArt, x: number, y: number, o: PortraitOpts): [number, number] {
+  const w = Math.max(...a.px.map((r) => r.length)), h = a.px.length, rows = Math.ceil(h / 2);
   let hov: string | null = null;
   if (o.ui && o.onHover) {
     const mx = Math.floor(o.ui.inp.mx) - x, my = Math.floor(o.ui.inp.my) - y;
     if (mx >= 0 && my >= 0 && mx < w && my < rows) {
       const py = [my * 2, my * 2 + 1].find((yy) => pixColor(a.px[yy]?.[mx], yy, h));
-      if (py !== undefined) hov = pixZone(a, mx, py);
+      if (py !== undefined) { const z = zoneOf(a, mx, py); if (z !== '.') hov = z; }
     }
   }
   const col = (px: number, py: number): string | null => {
     let c = pixColor(a.px[py]?.[px], py, h);
     if (!c) return null;
-    const z = pixZone(a, px, py);
-    if (o.frame) c = tint(c, locHealth(o.frame, z));
+    const z = zoneOf(a, px, py);
+    if (o.frame && z !== '.') c = tint(c, locHealth(o.frame, z));
     const hl = o.highlight ?? hov;
     if (hl && hl === z) c = lerp(c, '#ffffff', 0.35);
     if (o.dim) c = scale(c, o.dim);

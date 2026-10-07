@@ -523,6 +523,9 @@ function installHooks(rt: MissionRuntime): void {
   const startExtraction = () => {
     const ps = rt.playerUnits.filter((u) => u.deployed !== false);
     let cx = Math.round(ps.reduce((a, u) => a + u.startX, 0) / Math.max(1, ps.length)), cy = Math.round(ps.reduce((a, u) => a + u.startY, 0) / Math.max(1, ps.length));
+    // An escort's lance travels with the convoy, so it extracts where the convoy leaves rather than back at the drop
+    const cg = t === 'escort' ? b.units.find((u) => u.tag === 'convoy' && u.ai.goal)?.ai.goal : undefined;
+    if (cg) { cx = Math.max(3, Math.min(b.map.w - 4, cg[0])); cy = Math.max(3, Math.min(b.map.h - 4, cg[1])); }
     // Nearest open ground to the drop point
     const m = b.map;
     let best: [number, number] = [cx, cy], bd = Infinity;
@@ -588,7 +591,7 @@ function installHooks(rt: MissionRuntime): void {
       const bc = open.reduce((a, q) => (dist(u.x, u.y, q.x, q.y) < dist(u.x, u.y, a.x, a.y) ? q : a));
       u.ai.goal = [bc.x, bc.y];
     }
-    // Assassination targets bolt once hurt or after round 6
+    // Assassination targets bolt once hurt or from round 9
     const tg = rt.enemyUnits.find((u) => u.tag === 'target');
     if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 9 || tg.dmgTaken > 300)) {
       (tg as any)._fleeing = true;

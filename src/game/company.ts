@@ -3,7 +3,7 @@
 import { RNG } from '../engine/rng';
 import { Frame, newMechFrame, frameTons, repairEstimate, repairFully, frameValue, frameSellPrice, refillAmmo, frameName, isFrameDamaged } from './frame';
 import { track } from './telemetry';
-import { Pilot, makePilot, salary, health, uniqueCallsign, grantAbilities, assignIcon } from './pilot';
+import { Pilot, makePilot, salary, health, uniqueCallsign, grantAbilities, assignIcon, COMMANDER_COLOR } from './pilot';
 import { StarSystem, generateStarMap, route } from './world';
 import { MissionType, MISSION_INFO, pilotTier } from '../combat/missions';
 import { FACTIONS, faction, repLevel } from '../data/factions';
@@ -213,7 +213,7 @@ export function newCompany(opts: { name: string; commander: string; callsign: st
   const rep: Record<string, number> = {};
   for (const f of FACTIONS) rep[f.id] = f.id === 'pirates' ? -30 : 0;
   for (const [k, v] of Object.entries(bg.rep)) rep[k] = (rep[k] ?? 0) + v;
-  const cmd = makePilot(r, 2, { name: opts.commander, callsign: opts.callsign, commander: true, bio: `Commander of ${opts.name}. ${bg.desc}`, origin: bg.name, sigil: '★', color: '#f0a830' });
+  const cmd = makePilot(r, 2, { name: opts.commander, callsign: opts.callsign, commander: true, bio: `Commander of ${opts.name}. ${bg.desc}`, origin: bg.name, sigil: '★', color: COMMANDER_COLOR });
   cmd.gun = 4; cmd.pil = 4; cmd.gut = 4; cmd.tac = 4;
   for (const [k, v] of Object.entries(bg.skills)) (cmd as any)[k] = Math.max(1, Math.min(10, (cmd as any)[k] + v));
   cmd.abilities = [];

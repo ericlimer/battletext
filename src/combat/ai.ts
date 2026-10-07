@@ -81,6 +81,8 @@ function threatAt(b: Battle, u: Unit, x: number, y: number, pips: number, known:
 
 export function aiTakeTurn(b: Battle, u: Unit): void {
   if (!b.beginActivation(u)) return;
+  // Extracting: an autopilot 'Mech drops whatever it was escorting or guarding and heads for the zone
+  if (b.map.extract && u.team === 0) u.ai.goal = undefined;
   const side = SIDE(u.team);
   const m = b.map;
   const enemies = b.enemiesOf(u);
@@ -133,7 +135,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     const side0 = SIDE(u.team);
     const objs = u.ai.goal ? m.structures.filter((st) => st.objective && !st.destroyed && SIDE(st.team) !== side0) : [];
     if (objs.length && u.frame.kind !== 'turret') {
-      if (structureValue(b, u) > 0) { aiAttackStructure(b, u); b.finishActivation(u); return; }
+      if (structureValue(b, u) > 0 && aiAttackStructure(b, u)) { b.finishActivation(u); return; }
       let bt = objs[0].tiles[0], bd = Infinity;
       for (const st of objs) for (const ti of st.tiles) { const dd = dist(u.x, u.y, ti % m.w, (ti / m.w) | 0); if (dd < bd) { bd = dd; bt = ti; } }
       moveToward(b, u, bt % m.w, (bt / m.w) | 0, 'walk');
@@ -221,6 +223,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     }
     let pos = -exposure + T.cover * 22 + m.elev[c.i] * 3.5 - Math.abs(nearest - pref) * 1.2;
     if (c.mode === 'jump') pos -= (steps * 3 + u.heat > u.stats.heatCap * 0.6 ? 10 : 2);
+    if (c.mode === 'jump' && u.team === 0 && steps * 3 + u.heat > u.stats.heatCap * 0.75) continue; // autopilot never jumps into overheat
     if (T.cool > 0 && u.heat > 40) pos += T.cool * 0.4;
     // cohesion
     if (allies.length) {
@@ -245,6 +248,7 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
       if (t.frame.kind === 'turret' && false) continue;
       for (const dfa of u.stats.jump > 0 ? [false, true] : [false]) {
         if (dist(u.x, u.y, t.x, t.y) > (dfa ? u.stats.jump : u.stats.walk) + 1.5) continue;
+        if (dfa && u.team === 0 && u.heat + Math.round(dist(u.x, u.y, t.x, t.y)) * 3 > u.stats.heatCap * 0.75) continue; // the jump would overheat
         const spots = b.meleeSpots(u, t, dfa);
         if (!spots.size) continue;
         const hc = b.meleeChance(u, t, dfa);
@@ -400,17 +404,19 @@ export function aiAttack(b: Battle, u: Unit, visible: Unit[]): boolean {
   return true;
 }
 
-function pickWithinHeat(b: Battle, u: Unit, usable: [Component, number, number][], finishing: boolean): [Component, number, number][] {
+function pickWithinHeat(b: Battle, u: Unit, usable: [Component, number, number][], finishing: boolean, strict = false): [Component, number, number][] {
   if (u.frame.kind !== 'mech') return usable;
   const cap = u.stats.heatCap;
-  const limit = (finishing ? cap * 0.95 : cap * 0.74) - u.heat + (finishing ? 0 : Math.min(15, b.dissipation(u) * 0.25));
+  // Overheat damage is checked before dissipation, so the player's autopilot (and anyone shooting a building) stays at or under 75%
+  strict ||= u.team === 0;
+  const limit = strict ? cap * 0.75 - u.heat : (finishing ? cap * 0.95 : cap * 0.74) - u.heat + (finishing ? 0 : Math.min(15, b.dissipation(u) * 0.25));
   const sorted = [...usable].sort((a, c) => (c[1] / Math.max(1, c[2])) - (a[1] / Math.max(1, a[2])));
   const out: [Component, number, number][] = [];
   let heat = 0;
   for (const s of sorted) {
     if (s[2] === 0 || heat + s[2] <= limit) { out.push(s); heat += s[2]; }
   }
-  if (!out.length && sorted.length) out.push(sorted[sorted.length - 1]);
+  if (!out.length && sorted.length && !strict) out.push(sorted[sorted.length - 1]);
   return out;
 }
 
@@ -432,9 +438,9 @@ export function aiAttackStructure(b: Battle, u: Unit): boolean {
       ws.push(wc);
       ev += (hc.chance / 100) * (w.dmg ?? 0) * (w.shots ?? 1);
     }
-    if (ws.length && (!best || ev > best.ev)) best = { s, w: pickWithinHeat(b, u, ws.map((c) => [c, 1, item(c.id).heat ?? 0] as [Component, number, number]), false).map((x) => x[0]), ev };
+    if (ws.length && (!best || ev > best.ev)) best = { s, w: pickWithinHeat(b, u, ws.map((c) => [c, 1, item(c.id).heat ?? 0] as [Component, number, number]), false, true).map((x) => x[0]), ev };
   }
-  if (!best) return false;
+  if (!best || !best.w.length) return false;
   b.attack(u, [{ target: null, struct: best.s, weapons: best.w }]);
   return true;
 }

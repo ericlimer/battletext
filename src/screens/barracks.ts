@@ -62,7 +62,13 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     if (rn) d.text(lx + 4, ly + 2, rn, ROLE_COLOR, bg);
     const rx = lx + 4 + (rn ? rn.length + 3 : 0);
     if (rn) d.text(rx - 2, ly + 2, '·', C.faint, bg);
-    d.text(rx, ly + 2, [ab, qs].filter(Boolean).join(' · ') || (p.xp >= 1000 ? `${p.xp} XP unspent` : '—'), ab || qs ? C.faint : p.xp >= 1000 ? C.accent : C.faint, bg, lx + lw - 2 - rx);
+    // Fit the line: full names, then a quirk count, then abilities by first word, then just counts (hover for the lot)
+    const room = lx + lw - 2 - rx, nq = p.quirks?.length ?? 0, qn = nq ? `${nq} quirk${nq > 1 ? 's' : ''}` : '';
+    const abS = p.abilities.map((a) => ability(a).name.split(' ')[0]).join(', '), na = p.abilities.length;
+    const fits = [[ab, qs], [ab, qn], [abS, qs], [abS, qn], [na ? `${na} abilit${na > 1 ? 'ies' : 'y'}` : '', qn]].map((xs) => xs.filter(Boolean).join(' · '));
+    const line = fits.find((t) => t.length <= room) ?? fits[fits.length - 1];
+    d.text(rx, ly + 2, line || (p.xp >= 1000 ? `${p.xp} XP unspent` : '—'), ab || qs ? C.faint : p.xp >= 1000 ? C.accent : C.faint, bg, room);
+    if (line !== fits[0] && ui.hover(rx, ly + 2, room, 1)) ui.setTip([ab && `Abilities: ${ab}`, qs && `Quirks: ${qs}`].filter(Boolean) as string[]);
   }, 3);
   if (cl >= 0) { st.sel = cl; st.confirm = false; }
   const p = list[Math.min(st.sel, list.length - 1)];
@@ -152,7 +158,9 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     for (const l of wrap(ab.desc, dw - 36)) d.text(dx + 34, yy++, l, C.dim);
   }
   // Next abilities
-  const next = ABILITIES.filter((a) => !p.abilities.includes(a.id) && p[a.skill] < a.tier && p[a.skill] >= a.tier - 3).slice(0, 2);
+  // Only abilities this pilot could still take (3 at most, one tier-8, tier-8 after its skill's tier-5)
+  const canTake = (a: AbilityDef) => p.abilities.length < 3 && (a.tier === 5 || (!p.abilities.some((x) => ability(x).tier === 8) && p.abilities.some((x) => ability(x).skill === a.skill)));
+  const next = ABILITIES.filter((a) => !p.abilities.includes(a.id) && p[a.skill] < a.tier && p[a.skill] >= a.tier - 3 && canTake(a)).slice(0, 2);
   for (const a of next) {
     const w = 6 + a.name.length;
     d.ctext(dx + 3, yy, `{#4a5a64}Next:{/} {#7ab8d0}${a.name}{/} {#4a5a64}at ${SKILL_NAMES[a.skill]} ${a.tier}{/}`, C.faint);

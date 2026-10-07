@@ -68,7 +68,7 @@ export type BEvent =
   | { k: 'fire'; u: number; t: number; tx: number; ty: number; w: string; shots: Shot[]; indirect: boolean; total: number; struct?: boolean;
       // Target's armour and structure before and after this weapon, and what it crit, for the attack view
       arm0?: Record<string, number>; str0?: Record<string, number>; arm?: Record<string, number>; str?: Record<string, number>; crits?: string[] }
-  | { k: 'melee'; u: number; t: number; hit: boolean; dmg: number; dfa: boolean; loc: string; arm0?: Record<string, number>; str0?: Record<string, number>; arm?: Record<string, number>; str?: Record<string, number>; crits?: string[] }
+  | { k: 'melee'; u: number; t: number; hit: boolean; dmg: number; dfa: boolean; loc: string; arm0?: Record<string, number>; str0?: Record<string, number>; arm?: Record<string, number>; str?: Record<string, number>; crits?: string[]; legs?: string }
   | { k: 'float'; x: number; y: number; text: string; color: string; big?: boolean }
   | { k: 'log'; text: string; color?: string }
   | { k: 'boom'; x: number; y: number; size: number }
@@ -138,6 +138,8 @@ export class Battle {
   visibleTiles: Uint8Array;
   seen: [Set<number>, Set<number>] = [new Set(), new Set()];
   detected: [Set<number>, Set<number>] = [new Set(), new Set()];
+  /** Enemies the lance has identified by being attacked by them: named in the log even when out of sight. */
+  named = new Set<number>();
   lastAttackRound = 0;
   lastDamageRound = 0;
   active: Unit | null = null;
@@ -189,7 +191,7 @@ export class Battle {
   enemiesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) !== SIDE(u.team)); }
   alliesOf(u: Unit): Unit[] { return this.live().filter((o) => SIDE(o.team) === SIDE(u.team) && o !== u); }
   isMech(u: Unit): boolean { return u.frame.kind === 'mech'; }
-  displayName(u: Unit): string { if (this.volleyName && this.volleyName[0] === u) return this.volleyName[1]; if (SIDE(u.team) === 1 && u.alive && u.deployed && !this.seen[0].has(u.id)) return 'Unknown contact'; return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : u.mapTag ? `${u.mapTag} ${frameShort(u.frame)}` : frameShort(u.frame); }
+  displayName(u: Unit): string { if (this.volleyName && this.volleyName[0] === u) return this.volleyName[1]; if (SIDE(u.team) === 1 && u.alive && u.deployed && !this.seen[0].has(u.id) && !this.named.has(u.id)) return 'Unknown contact'; return u.pilot && u.team === 0 ? `${u.pilot.callsign}` : u.mapTag ? `${u.mapTag} ${frameShort(u.frame)}` : frameShort(u.frame); }
   fullName(u: Unit): string { return frameName(u.frame); }
 
   emit(e: BEvent): void { this.events.push(e); }
@@ -255,6 +257,7 @@ export class Battle {
       this.say(`Dropship inbound. Extraction in ${this.withdrawIn} round${this.withdrawIn > 1 ? 's' : ''}.`, '#5fd0e8');
     }
     this.updateVisibility();
+    this.check(); // refresh objective progress ("round N of 9", a target that just bolted) before anyone acts
   }
 
   /** Units that may act right now for a side, in the current phase. */
@@ -291,7 +294,8 @@ export class Battle {
     const hostiles = this.units.some((u) => SIDE(u.team) === 1 && u.alive && u.deployed && !u.fled && u.tag !== 'convoy');
     if (!this.result && hostiles && this.round - this.lastDamageRound >= 12) {
       this.say('Neither side can make progress. Both forces disengage.', '#f0a830');
-      this.finish('withdraw');
+      // After the objective is met this counts as extracting: the employer still pays
+      this.finish(this.hooks.withdrawn?.() ?? 'withdraw');
     }
   }
 
@@ -694,6 +698,8 @@ export class Battle {
 
   attack(a: Unit, plan: Assignment[], called?: string): void {
     if (!this.canAttack(a)) return;
+    // Opening fire gives the shooter away: from here on the log calls it by name
+    if (SIDE(a.team) === 1 && plan.some((p) => (p.target ? SIDE(p.target.team) !== 1 : !!p.struct))) this.named.add(a.id);
     this.volleyName = null;
     this.volleyName = [a, this.displayName(a)];
     this.volley = []; this.sayBuf = []; this.pendingKnock = new Set();
@@ -1048,6 +1054,7 @@ export class Battle {
 
   melee(a: Unit, t: Unit, path: [number, number][], dfa: boolean): void {
     if (!this.isMech(a) || a.attacked || !t.alive) return;
+    if (SIDE(a.team) === 1) this.named.add(a.id);
     if (path.length >= 2) this.move(a, path, dfa ? 'jump' : 'walk');
     a.moved = dfa ? 'jump' : 'walk';
     a.attacked = true;
@@ -1095,6 +1102,7 @@ export class Battle {
         const w = item(wc.id);
         const shc = this.hitChance(a, t, w);
         if (!shc.ok || !t.alive) continue;
+        if (this.isMech(a) && a.heat + (w.heat ?? 0) > a.stats.heatCap * 0.75) continue; // they only join in while it keeps the 'Mech out of the red
         const shots = this.useAmmo(a, w);
         if (this.isMech(a)) a.heat += w.heat ?? 0;
         this.fireAtUnit(a, t, w, shots, shc, undefined, false);
@@ -1103,8 +1111,13 @@ export class Battle {
     if (dfa) {
       // The attacker's legs take a beating either way
       const legDmg = Math.round(tons * (hit ? 0.25 : 0.4));
-      this.say(`${this.displayName(a)}'s legs take ${legDmg} damage from the landing.`, '#9ab');
+      const before = (l: string) => Math.max(0, a.frame.armor[l] ?? 0) + Math.max(0, a.frame.struct[l]);
+      const b0 = { LL: before('LL'), RL: before('RL') };
+      this.say(`${this.displayName(a)}'s legs take ${2 * Math.round(legDmg / 2)} damage from the landing.`, '#9ab');
       for (const l of ['LL', 'RL']) if (a.frame.struct[l] > 0) this.damage(a, l, Math.round(legDmg / 2), null, 0.5);
+      // The attacker's own losses, for the record sheet's ledger and a float over the attacker
+      ev.legs = (['LL', 'RL'] as const).map((l) => `${l} -${b0[l] - before(l)}${a.frame.struct[l] <= 0 ? ' GONE' : (a.frame.armor[l] ?? 0) <= 0 ? ' IS' : ''}`).join(' ');
+      this.float(a.x, a.y, `LEGS -${b0.LL + b0.RL - before('LL') - before('RL')}`, '#ff9a40');
       if (a.alive) this.applyStability(a, hit ? 20 : 60);
     }
     this.updateVisibility();

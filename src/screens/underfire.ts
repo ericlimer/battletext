@@ -11,9 +11,9 @@ import { TUNE } from '../game/tuning';
 type Fire = Extract<BEvent, { k: 'fire' }>;
 type Melee = Extract<BEvent, { k: 'melee' }>;
 /** One attack landing on the sheet: a weapon's shots, or a melee blow. */
-type Blow = { name: string; hits: number; shots: number; total: number; arm0: Record<string, number>; str0: Record<string, number>; arm: Record<string, number>; str: Record<string, number>; crits: string[] };
+type Blow = { name: string; hits: number; shots: number; total: number; arm0: Record<string, number>; str0: Record<string, number>; arm: Record<string, number>; str: Record<string, number>; crits: string[]; legs?: string };
 type Snap = { arm: Record<string, number>; str: Record<string, number> };
-type Row = { w: string; hits: number; shots: number; locs: string; crits: string[] };
+type Row = { w: string; hits: number; shots: number; locs: string; crits: string[]; legs?: string };
 
 export interface UnderFire {
   a: Unit; t: Unit; title: string; arc: string;
@@ -140,7 +140,7 @@ export function underFireShot(uf: UnderFire, e: Fire, at: number): void {
 /** Queue a melee or death-from-above blow. */
 export function underFireMelee(uf: UnderFire, e: Melee, at: number): void {
   if (e.t !== uf.t.id || !e.arm || !e.arm0 || !e.str || !e.str0) return;
-  uf.pend.push({ at, e: { name: e.dfa ? 'Death From Above' : 'Melee', hits: e.hit ? 1 : 0, shots: 1, total: e.dmg, arm0: e.arm0, str0: e.str0, arm: e.arm, str: e.str, crits: e.crits ?? [] } });
+  uf.pend.push({ at, e: { name: e.dfa ? 'Death From Above' : 'Melee', hits: e.hit ? 1 : 0, shots: 1, total: e.dmg, arm0: e.arm0, str0: e.str0, arm: e.arm, str: e.str, crits: e.crits ?? [], legs: e.legs } });
 }
 
 const locLabel = (k: string) => (/^[CLR]TR$/.test(k) ? `${k.slice(0, 2)}(R)` : k);
@@ -157,7 +157,7 @@ function land(uf: UnderFire, e: Blow, now: number): void {
   uf.struck = struck;
   if (struck.size) uf.blinkAt = now;
   // Where the damage actually went, transfers included
-  uf.rows.push({ w: e.name, hits: e.hits, shots: e.shots, locs: [...struck].map(([l, d]) => `${locLabel(l)} -${d}`).join(' '), crits: e.crits });
+  uf.rows.push({ w: e.name, hits: e.hits, shots: e.shots, locs: [...struck].map(([l, d]) => `${locLabel(l)} -${d}`).join(' '), crits: e.crits, legs: e.legs });
   uf.dmg += e.total; uf.hits += e.hits; uf.shots += e.shots;
 }
 
@@ -257,6 +257,7 @@ export function drawUnderFire(ui: UI, uf: UnderFire, now: number, x0: number, y0
     const marks = '■'.repeat(Math.min(6, r.hits)) + '·'.repeat(Math.max(0, Math.min(6 - r.hits, r.shots - r.hits)));
     lines.push({ text: r.w.padEnd(16).slice(0, 16), color: r.hits ? C.text : C.dim, marks, locs: r.hits ? r.locs : 'miss', fresh });
     for (const c of r.crits) lines.push({ text: `  ✶ CRIT ${c}`, color: '#f0d050', fresh: false });
+    if (r.legs) lines.push({ text: `  ▼ Landing, own legs ${r.legs}`, color: '#ff9a40', fresh: false });
   });
   const room = y0 + h - 3 - yy;
   for (const ln of lines.slice(-Math.max(1, room))) {

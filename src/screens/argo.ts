@@ -61,6 +61,8 @@ export class ArgoScreen implements Screen {
 
   passDay(): boolean {
     const c = this.c;
+    // Any day that passes (countdown, Advance or +1 Day) pays down the deployment, so it lasts exactly the days shown
+    if ((c.deployDays ?? 0) > 0) c.deployDays = c.deployDays! - 1;
     const rep = advanceDay(c);
     saveGame(c);
     if (rep.gameOver) { this.advancing = false; app.push(new GameOverScreen()); return false; }
@@ -93,7 +95,7 @@ export class ArgoScreen implements Screen {
     if ((c.deployDays ?? 0) > 0 && app.top() === this && !this.menuOpen) {
       this.advT += dt;
       // Deployment days are owed by the company: interruptions (events, month end) only pause them
-      if (this.advT > 0.08) { this.advT = 0; c.deployDays = (c.deployDays ?? 1) - 1; this.passDay(); }
+      if (this.advT > 0.08) { this.advT = 0; this.passDay(); }
       d.text(1, ROWS - 1, ` Returning from deployment… ${c.deployDays} day${c.deployDays === 1 ? '' : 's'} `, C.bg, C.cyan);
     }
     // Continuous time advance

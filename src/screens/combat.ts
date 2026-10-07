@@ -2032,8 +2032,8 @@ export class CombatScreen implements Screen {
     }
     // Enemy loadout grouped by where it is mounted, so you know which part to shoot off; hovering a line lights that part
     const sx = x + 32;
-    const groups = new Map<string, { n: string; loc: string; c: number }>();
-    for (const w of b.weaponsOf(t)) { const n = item(w.id).name, k = `${w.loc}|${n}`; const g = groups.get(k); if (g) g.c++; else groups.set(k, { n, loc: w.loc, c: 1 }); }
+    const groups = new Map<string, { n: string; sh: string; loc: string; c: number }>();
+    for (const w of b.weaponsOf(t)) { const n = item(w.id).name, k = `${w.loc}|${n}`; const g = groups.get(k); if (g) g.c++; else groups.set(k, { n, sh: item(w.id).short, loc: w.loc, c: 1 }); }
     const wrows = [...groups.values()].sort((p, q) => LOC_ORDER.indexOf(p.loc) - LOC_ORDER.indexOf(q.loc));
     const more = wrows.length > 4 ? wrows.splice(3).length : 0;
     wrows.forEach((g, k) => { if (ui.hover(sx, y + 6 + k, 18, 1)) { if (!hl) hl = g.loc; ui.setTip([`${g.c > 1 ? g.c + '× ' : ''}${g.n}`, `Mounted in the ${locName(g.loc)}. Destroy that location to knock it out${t.frame.kind === 'mech' ? ' ([P] Precision Strike aims there)' : ''}.`]); } });
@@ -2063,7 +2063,9 @@ export class CombatScreen implements Screen {
     wrows.forEach((g, k) => {
       const on = hl === g.loc;
       d.text(sx, y + 6 + k, g.loc.padEnd(3), on ? C.accent : C.faint);
-      d.text(sx + 3, y + 6 + k, `${g.c > 1 ? g.c + 'x ' : ''}${g.n}`, on ? C.bright : C.dim, undefined, 15);
+      // Long names ("6x Medium Laser") fall back to the item's short name so the row fits its 15 cells
+      const lbl = (n: string) => `${g.c > 1 ? g.c + 'x ' : ''}${n}`;
+      d.text(sx + 3, y + 6 + k, lbl(g.n).length > 15 && g.sh ? lbl(g.sh) : lbl(g.n), on ? C.bright : C.dim, undefined, 15);
     });
     if (more) d.text(sx + 3, y + 9, `+${more} more`, C.faint);
     y += DOLL_H + 1;
@@ -2173,7 +2175,7 @@ export class CombatScreen implements Screen {
     d.text(x + w - 2 - classTag(u.frame).length, y + 1, classTag(u.frame), C.dim);
     let hov: string | null = null;
     if (art) drawPortrait(d, art, x + 2, y + 3, { frame: u.frame, ui, onHover: (l) => { hov = l; } });
-    else d.text(x + 2, y + 4, 'No portrait for vehicles and emplacements.', C.faint);
+    else d.text(x + 2, y + 4, 'No portrait for this unit.', C.faint);
     // Per-location readout
     const rx = x + aw + 5;
     d.text(rx, y + 3, 'LOCATION        ARMOR   STRUCT', C.faint);
