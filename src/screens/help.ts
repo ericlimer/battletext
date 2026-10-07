@@ -25,6 +25,7 @@ const PAGES: [string, string[]][] = [
     '',
     '{#f0a830}Attacking.{/} Click an enemy to target it, then click again or press [F]. Toggle weapons with [1]-[9] or by clicking them. A pilot with Multi-Target can Shift-click a second (and third) enemy to split the enabled weapons between them; reassigned weapons show →tag in orange. Hover a weapon for the complete to-hit breakdown: gunnery, range bands, evasion, height, cover, jumping, indirect fire.',
     '',
+    '{#f0a830}Arcs and height.{/} Attacks from a flank get +5% to hit, from the rear +10% and half again the chance of critical hits on thin rear armor. Firing from higher ground gets +5% plus 5% per level of height over the target; firing uphill costs 5% per level. Jump onto a plateau or behind a line to use both.',
     '{#f0a830}Damage.{/} Hits land on locations by attack arc: front, side or rear (rear torsos have thin armor). Damage chews through armor, then structure; structure hits may cause critical hits that destroy components — or detonate ammunition. Lose a side torso and you lose that arm. The \'Mech dies if its head or center torso is destroyed, both legs are gone, or its pilot is incapacitated.',
     '',
     '{#f0a830}Stability & Heat.{/} Heavy weapons and melee fill the target\'s stability bar; past half it is Unsteady (no evasion), full means a knockdown. Heat above 75% overheats (-10% accuracy, internal damage); at 100% the \'Mech shuts down.',

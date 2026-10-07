@@ -2096,8 +2096,8 @@ export class CombatScreen implements Screen {
       if (spot < 0) { let bc = Infinity; for (const [i, [cc]] of spots) if (cc < bc) { bc = cc; spot = i; } }
       d.text(x + 1, y, dfa ? 'DEATH FROM ABOVE' : 'MELEE', C.accent, undefined, 99, true);
       if (!spots.size) { d.text(x + 1, y + 1, 'No reachable attack position.', C.red); return; }
-      const mc = b.meleeChance(a, t, dfa);
       const sx = spot % b.map.w, sy = (spot / b.map.w) | 0;
+      const mc = b.meleeChance(a, t, dfa, { x: sx, y: sy });
       const marc = attackArc(t, sx, sy);
       const mdmg = dfa ? a.stats.dfaDmg : a.stats.meleeDmg;
       d.ctext(x + 1, y + 1, `Hit {#f2f6f8}${Math.round(mc.chance)}%{/} · damage {#f0d050}${t.guarded && marc !== 'rear' ? Math.round(mdmg * 0.6) : mdmg}{/} · arc {${marc === 'rear' ? '#6ad46a' : '#c8d2d8'}}${marc.toUpperCase()}{/}${spots.has(ht) ? ' {#6d7f8a}(this spot){/}' : ' {#6d7f8a}(nearest spot){/}'}`, C.dim, undefined, PW - 2);

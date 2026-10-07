@@ -604,9 +604,16 @@ export class Battle {
     if (a.accDebuff) mods.push(['Sensors scrambled', -a.accDebuff]);
     if (this.isMech(a) && a.heat > a.stats.heatCap * 0.75 && !hasQuirk(pil, 'coolhead')) mods.push(['Overheated', -10]);
     if (hasQuirk(pil, 'reckless') && from.moved) mods.push(['Reckless', -5]);
-    const eh = m.elev[from.y * m.w + from.x], th = m.elev[ty * m.w + tx];
-    if (eh > th) mods.push(['Height advantage', 10]);
-    else if (eh < th) mods.push(['Target elevated', -5]);
+    // High ground pays by how far above the target you stand; firing uphill costs the same way
+    const eh = m.elev[from.y * m.w + from.x], th = m.elev[ty * m.w + tx], dh = eh - th;
+    if (dh > 0) mods.push([`Height advantage${dh > 1 ? ` ×${dh}` : ''}`, 5 + 5 * dh]);
+    else if (dh < 0) mods.push([`Target elevated${dh < -1 ? ` ×${-dh}` : ''}`, 5 * dh]);
+    // Flanks and rear: the target can't bring its torso twist and arms to bear
+    if (t && t.frame.kind !== 'turret') {
+      const arc = attackArc({ x: tx, y: ty, facing: t.facing }, from.x, from.y);
+      if (arc === 'rear') mods.push(['Rear attack', 10]);
+      else if (arc !== 'front') mods.push(['Flank attack', 5]);
+    }
     if (t) {
       // Sensor lock strips its pips once, when applied
       const pips = t.pips;
@@ -623,11 +630,12 @@ export class Battle {
     return res;
   }
 
-  meleeChance(a: Unit, t: Unit, dfa: boolean): HitCalc {
+  meleeChance(a: Unit, t: Unit, dfa: boolean, from: { x: number; y: number } = a): HitCalc {
     const mods: [string, number][] = [];
     const pil = a.pilot?.pil ?? 3;
     mods.push([`Piloting ${pil}`, 60 + pil * 3]);
     if (dfa) mods.push(['Death From Above', -10]);
+    if (t.frame.kind !== 'turret') { const arc = attackArc(t, from.x, from.y); if (arc === 'rear') mods.push(['Rear attack', 10]); else if (arc !== 'front') mods.push(['Flank attack', 5]); }
     if (hasQuirk(a.pilot, 'brawler') || hasQuirk(a.pilot, 'reckless')) mods.push([hasQuirk(a.pilot, 'brawler') ? 'Brawler' : 'Reckless', 5]);
     const pips = t.pips;
     if (pips > 0) mods.push([`Evasion ${'◆'.repeat(pips)} (-5 each in melee)`, -5 * pips]);
@@ -795,6 +803,8 @@ export class Battle {
 
   private fireLands(a: Unit, t: Unit, w: ItemDef, res: Shot[], total: number): void {
     (t as any)._hitRound = this.round;
+    // Shots into the back find thin plating and exposed internals: criticals are half again as likely
+    const rearHit = t.frame.kind === 'mech' && attackArc(t, a.x, a.y) === 'rear';
     const hits = res.filter((r) => r.hit);
     const locs = new Map<string, number>();
     for (const h of hits) locs.set(h.loc, (locs.get(h.loc) ?? 0) + h.dmg);
@@ -804,7 +814,7 @@ export class Battle {
     if (!hits.length) return;
     for (const h of hits) {
       if (!t.alive) break;
-      this.damage(t, h.loc, h.dmg, a, w.crit ?? 1);
+      this.damage(t, h.loc, h.dmg, a, (w.crit ?? 1) * (rearHit ? 1.5 : 1));
     }
     if (t.alive) {
       const stab = (w.stab ?? 0) * hits.length;

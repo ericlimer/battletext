@@ -266,7 +266,9 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
         if (dfa && u.team === 0 && u.heat + Math.round(dist(u.x, u.y, t.x, t.y)) * 3 > u.stats.heatCap * 0.75) continue; // the jump would overheat
         const spots = b.meleeSpots(u, t, dfa);
         if (!spots.size) continue;
-        const hc = b.meleeChance(u, t, dfa);
+        // Judge the swing from the best spot it can reach: a rear spot hits more often
+        let hc = b.meleeChance(u, t, dfa);
+        for (const i of spots.keys()) { const h2 = b.meleeChance(u, t, dfa, { x: i % b.map.w, y: (i / b.map.w) | 0 }); if (h2.chance > hc.chance) hc = h2; }
         const dmg = dfa ? u.stats.dfaDmg : u.stats.meleeDmg;
         let v = (hc.chance / 100) * dmg * targetValue(b, u, t) * (dfa ? 0.85 : 1);
         // melee is attractive vs knocked-down / unsteady targets and for heavies
