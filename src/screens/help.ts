@@ -42,6 +42,8 @@ const PAGES: [string, string[]][] = [
     '{#a8a8a0}▲ ^{/} Crags: impassable, block line of sight.         {#c8c0a8}·{/}  Road: fast movement.',
     '{#b0b0a8}┌─┐{/} Buildings and walls: block movement and sight; can be destroyed. {#ff7a58}╔═╗{/} hostile objective  {#6fd8ff}╔═╗{/} allied objective.',
     '{#7a6e5e}%{/}  Rubble: slow, slight cover.                     {#8a7060}¤ &{/} \'Mech and vehicle wrecks mark where units fell.',
+    '{#6a6a6a}▄ ▀{/} Cliff: a drop of two levels or more. Too steep to walk up or down; jump jets clear it. Plateaus usually have one ramp.',
+    '{#3a3a3a}▀{/}  Chasm: impassable on foot but open to fire. A jump can cross it; you cannot land in it.',
     '',
     '{#f0c040}◎{/}  Data beacon (Target Acquisition).   {#e8503a}×{/}  Escape or exit point.   {#e8503a}?{/}  Sensor contact: something is there, but out of sight.',
     '',
@@ -49,7 +51,7 @@ const PAGES: [string, string[]][] = [
   ]],
   ['MISSIONS', [
     '{#f0a830}⚔ Battle.{/} Destroy every hostile unit. Heavier contracts bring reinforcements.',
-    '{#f0a830}◎ Assassinate.{/} Kill a named commander and their escort. After round 9, or once badly hurt, the target runs for the map edge.',
+    '{#f0a830}◎ Assassinate.{/} Kill a named commander and their escort. After round 11, or once badly hurt, the target runs for the map edge.',
     '{#f0a830}■ Destroy Base.{/} Level the base\'s primary structures. Turrets and a garrison lance defend it.',
     '{#f0a830}⌂ Defend Base.{/} Waves of raiders go for your employer\'s facility. Keep at least one primary structure standing; allied turrets help.',
     '{#f0a830}» Ambush Convoy.{/} Destroy at least two of four haulers (three on 4+ skull contracts) before they leave the map. Their escort screens ahead.',

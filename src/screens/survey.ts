@@ -71,6 +71,7 @@ function tileColor(rt: MissionRuntime, i: number): string {
     case 'water': return scale(B.water[1], 1.6);
     case 'deep': return scale(B.water[1], 1.1);
     case 'rock': return scale(B.rock, 0.9);
+    case 'chasm': return scale(B.ground[0], 0.4);
     case 'road': return lerp(base, '#d8d0b8', 0.35);
     case 'building': case 'wall': {
       const st = m.structures[m.struct[i]];
@@ -136,7 +137,15 @@ export function fightOdds(c: Company, k: Contract, lance?: DropSlot[]): { ratio:
     const w = unitPower(u.frame, u.pilot?.gun ?? 3); ef += w.fp; ed += w.dur;
   }
   const you = pf * pd, them = Math.max(1, ef * ed);
-  return { ratio: Math.sqrt(you / them), you, them };
+  return { ratio: Math.sqrt(you / them) * typeOdds(k.type, k.diff), you, them };
+}
+
+/** Correction for what raw strength misses in each mission type, fitted from simulated missions (scripts/soak-run.ts). */
+export const TYPE_ODDS: Record<string, number> = { battle: 1.1, assassinate: 0.8, destroybase: 0.8, defendbase: 1.6, capture: 1.15, ambush: 1.35, escort: 1.3 };
+export function typeOdds(type: string, diff: number): number {
+  // Escorts are decided by the haulers, which get harder to keep alive as contracts get hotter
+  const escort = type === 'escort' ? 1 - 0.06 * Math.max(0, diff - 4) : 1;
+  return (TYPE_ODDS[type] ?? 1) * escort;
 }
 
 /** Intel estimate of the opposition: unit count and tonnage, rounded so it stays an estimate. */
@@ -152,7 +161,7 @@ export function oddsText(ratio: number): [string, string] {
 
 /** What makes each mission type dangerous beyond raw strength. */
 export const MISSION_RISK: Record<string, string> = {
-  battle: '', assassinate: 'The target bolts for the map edge if hurt or after round 9 — bring speed.',
+  battle: '', assassinate: 'The target bolts for the map edge if hurt or after round 11 — bring speed.',
   destroybase: 'Defensive turrets add firepower the estimate counts; buildings soak shots.',
   defendbase: 'Attackers arrive in waves; the base must survive.',
   ambush: 'Haulers flee for the edge — fast \'Mechs and long range matter more than armor.',

@@ -208,7 +208,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
         // Meeting engagement: the lances start close enough to make contact by round 2
         enemyUnits = place(b, enemyLance(4), 1, W - 20, eStart[1], 6);
       }
-      if (d >= 6 && !spec.enemies) {
+      if (d >= 7 && !spec.enemies) {
         const reinf = generateForce(r, d - 1, spec.target, 2);
         const ru = place(b, reinf, 1, W - 4, r.chance(0.5) ? 5 : H - 6, 6, { deployRound: 3, deployed: false });
         enemyUnits.push(...ru);
@@ -236,7 +236,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       playerUnits = place(b, spec.player, 0, pStart[0], pStart[1], 2);
       const base = mo.base!;
       const cx = base.x + base.w / 2, cy = base.y + base.h / 2;
-      const guards = place(b, enemyLance(d <= 4 ? 3 : 4), 1, Math.floor(cx - 4), Math.floor(cy), 6, { tag: 'guard' }, 3);
+      const guards = place(b, enemyLance(d <= 5 ? 3 : 4), 1, Math.floor(cx - 4), Math.floor(cy), 6, { tag: 'guard' }, 3);
       for (const g of guards) g.ai.goal = [Math.floor(cx), Math.floor(cy)];
       const turrets: Combatant[] = [];
       const nT = 1 + Math.floor(d / 4);
@@ -260,14 +260,15 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       playerUnits = place(b, spec.player, 0, cx + 10, cy, 2);
       // Hardened employer facilities
       for (const st of map.structures) if (st.objective) { st.maxHp *= 2; st.hp = st.maxHp; }
-      const w1 = place(b, enemyLance(d <= 4 ? 3 : 4), 1, W - 5, cy + r.int(-10, 10), 6);
-      const w2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, d >= 5 ? 3 : 2), 1, W - 4, r.chance(0.5) ? 4 : H - 5, 6, { deployRound: 4, deployed: false });
+      const w1 = place(b, enemyLance(d <= 5 ? 3 : 4), 1, W - 5, cy + r.int(-10, 10), 6);
+      const w2 = spec.enemies ? [] : place(b, generateForce(r, d, spec.target, d >= 7 ? 3 : 2), 1, W - 4, r.chance(0.5) ? 4 : H - 5, 6, { deployRound: 4, deployed: false });
       // The employer's base has its own light defenses
       for (const off of [-5, 5]) {
         const spot = findSpot(b, base.x + base.w + 1, cy + off, 3);
         if (spot) { const tu = b.addUnit(newVehicleFrame(d >= 6 ? 'TUR-M' : 'TUR-L'), makePilot(r, 1), 2, spot[0], spot[1], 2); tu.name = 'Turret'; }
       }
-      const w3 = spec.enemies || d < 5 ? [] : place(b, generateForce(r, d, spec.target, 3), 1, W - 4, cy, 6, { deployRound: 7, deployed: false });
+      // Waves ramp with difficulty: a third wave only on the hardest contracts
+      const w3 = spec.enemies || d < 8 ? [] : place(b, generateForce(r, d, spec.target, 2), 1, W - 4, cy, 6, { deployRound: 7, deployed: false });
       enemyUnits = [...w1, ...w2, ...w3];
       // Half of every wave are raiders who go straight for the facility
       enemyUnits.forEach((e, k) => { e.ai.goal = [cx, cy]; if (k % 2 === 0) e.tag = 'raider'; });
@@ -285,7 +286,7 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
       for (let i = 0; i < n; i++) convoy.push({ frame: newVehicleFrame('HAULER'), pilot: makePilot(r, 0) });
       const cu = place(b, convoy, 1, 2, rd.wy, 2, { tag: 'convoy' }, 1);
       for (const c of cu) c.ai.goal = [W - 1, rd.ey];
-      const esc = spec.enemies ?? generateForce(r, d, spec.target, d >= 5 ? 4 : 3);
+      const esc = spec.enemies ?? generateForce(r, d, spec.target, d >= 6 ? 4 : 3);
       // The escort screens ahead of the haulers
       const eu = place(b, esc, 1, 12, rd.wy, 2, { tag: 'escort' });
       for (const e of eu) e.ai.goal = [W - 4, rd.ey];
@@ -322,9 +323,9 @@ export function setupMission(spec: MissionSpec): MissionRuntime {
     case 'capture': {
       playerUnits = place(b, spec.player, 0, pStart[0], pStart[1], 2);
       const mid = beacons[1];
-      const guards = place(b, enemyLance(d <= 4 ? 3 : 4), 1, mid.x + 3, mid.y, 6, { tag: 'guard' }, 3);
+      const guards = place(b, enemyLance(d <= 5 ? 3 : 4), 1, mid.x + 3, mid.y, 6, { tag: 'guard' }, 3);
       guards.forEach((g, k) => { const bc = beacons[k % beacons.length]; g.ai.goal = [bc.x, bc.y]; });
-      const re = spec.enemies || d < 5 ? [] : place(b, generateForce(r, d, spec.target, 2), 1, W - 4, r.chance(0.5) ? 5 : H - 6, 6, { deployRound: 4, deployed: false });
+      const re = spec.enemies || d < 5 ? [] : place(b, generateForce(r, d, spec.target, d >= 8 ? 2 : 1), 1, W - 4, r.chance(0.5) ? 5 : H - 6, 6, { deployRound: 4, deployed: false });
       for (const e of re) e.ai.goal = [mid.x, mid.y];
       enemyUnits = [...guards, ...re];
       for (const pu of playerUnits) { pu.tag = 'capper'; pu.ai.goal = [beacons[0].x, beacons[0].y]; }
@@ -435,7 +436,7 @@ function installHooks(rt: MissionRuntime): void {
         const eo = obj(rt, 'escorts')!;
         if (eo.status === 'active' && esc.every((u) => !u.alive)) eo.status = 'done';
         if (tg && !tg.alive) { const o = obj(rt, 'target')!; o.status = 'done'; o.progress = undefined; return 'win'; }
-        if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `round ${b.round} of 9 — bolts then, or sooner if badly hurt`;
+        if (tg && tg.alive) obj(rt, 'target')!.progress = (tg as any)._fleeing ? `ESCAPING — ${Math.max(0, Math.round(dist(tg.x, tg.y, tg.ai.goal![0], tg.ai.goal![1])))} tiles from the ×` : `round ${b.round} of ${boltRound()} — bolts then, or sooner if badly hurt`;
         if (tg && tg.fled) { const o = obj(rt, 'target')!; if (o.status !== 'failed') b.say(`${tg.pilot?.callsign ?? 'The target'} escaped the area. The contract is void.`, '#e8503a'); o.status = 'failed'; o.progress = 'escaped'; return 'loss'; }
         break;
       }
@@ -519,6 +520,8 @@ function installHooks(rt: MissionRuntime): void {
   };
   // Meeting the objective doesn't end the mission while hostiles are still on the field: the lance must
   // finish them or get back to the extraction zone (or call the DropShip in with a withdrawal).
+  // The assassination target bolts from round 11, or 13 on broken ground where it is slower to run down
+  const boltRound = () => (b.map.style && b.map.style !== 'open' ? 13 : 11);
   const extracting = () => !!b.map.extract;
   const startExtraction = () => {
     const ps = rt.playerUnits.filter((u) => u.deployed !== false);
@@ -591,9 +594,9 @@ function installHooks(rt: MissionRuntime): void {
       const bc = open.reduce((a, q) => (dist(u.x, u.y, q.x, q.y) < dist(u.x, u.y, a.x, a.y) ? q : a));
       u.ai.goal = [bc.x, bc.y];
     }
-    // Assassination targets bolt once hurt or from round 9
+    // Assassination targets bolt once badly hurt or from round 11
     const tg = rt.enemyUnits.find((u) => u.tag === 'target');
-    if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= 9 || tg.dmgTaken > 300)) {
+    if (tg && tg.alive && !(tg as any)._fleeing && (b.round >= boltRound() || tg.dmgTaken > 400)) {
       (tg as any)._fleeing = true;
       b.say(`${tg.pilot?.callsign ?? 'The target'} (${b.displayName(tg)}) is attempting to escape!`, '#f0a830');
     }

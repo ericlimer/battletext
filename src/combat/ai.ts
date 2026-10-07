@@ -113,6 +113,8 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
 
   // ---- Convoys drive for the exit -----------------------------------------------------
   if ((u.tag === 'convoy' || (u as any)._fleeing) && u.ai.goal) {
+    // An exit point inside rock (close country) moves to the nearest ground this unit can stand on
+    u.ai.goal = standableNear(b, u, u.ai.goal[0], u.ai.goal[1]);
     // Hunted convoys run when they see trouble
     const friendlyConvoy = u.tag === 'convoy' && SIDE(u.team) === 0;
     // An escorted convoy keeps rolling for the exit whatever happens: the lance has to keep up and screen it
@@ -186,6 +188,16 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
     if (hp < 0.4) for (const [i] of b.reachable(u, 'sprint')) if (!cands.some((c) => c.i === i)) cands.push({ i, mode: 'sprint', score: 0 });
   }
   const heatRoom = u.frame.kind === 'mech' ? Math.max(0.35, Math.min(1, (u.stats.heatCap * 0.8 + b.dissipation(u) * 0.3 - u.heat) / Math.max(1, u.stats.alphaHeat))) : 1;
+  // Walking distance to the closest known enemy: in broken country the straight line lies, so
+  // range-keeping uses whichever is longer once the detour is substantial
+  // Rounds without anyone firing, or without a shot landing (long-range sniping across a canyon)
+  const stale = Math.max(quiet, b.round - (b.lastDamageRound ?? 0) - 4);
+  let flow: Float32Array | null = null;
+  if (known.length && u.frame.kind !== 'turret' && !u.cannotMove) {
+    const t0 = known.reduce((a, t) => (dist(u.x, u.y, t.x, t.y) < dist(u.x, u.y, a.x, a.y) ? t : a), known[0]);
+    flow = flowField(b, u, t0.x, t0.y);
+    if (!isFinite(flow[cur])) flow = null;
+  }
   let best: Cand | null = null;
   for (const c of cands) {
     const x = c.i % m.w, y = (c.i / m.w) | 0;
@@ -221,7 +233,10 @@ export function aiTakeTurn(b: Battle, u: Unit): void {
       const f = dirTo(x, y, nearT.x, nearT.y);
       for (const t of known) if (t !== nearT && dist(x, y, t.x, t.y) < 12 && attackArc({ x, y, facing: f }, t.x, t.y) === 'rear') exposure += 7;
     }
-    let pos = -exposure + T.cover * 22 + m.elev[c.i] * 3.5 - Math.abs(nearest - pref) * 1.2;
+    const reachD = flow && isFinite(flow[c.i]) ? Math.max(nearest, flow[c.i] * 0.75) : nearest;
+    let pos = -exposure + T.cover * 22 + m.elev[c.i] * 3.5 - Math.abs(reachD - pref) * 1.2;
+    // Long quiet spells (both sides holding behind rock) push units to close the walking distance
+    if (stale >= 2 && flow && isFinite(flow[c.i]) && u.tag !== 'target') pos -= Math.max(0, flow[c.i] - 5) * Math.min(1.5, (stale - 1) * 0.3);
     if (c.mode === 'jump') pos -= (steps * 3 + u.heat > u.stats.heatCap * 0.6 ? 10 : 2);
     if (c.mode === 'jump' && u.team === 0 && steps * 3 + u.heat > u.stats.heatCap * 0.75) continue; // autopilot never jumps into overheat
     if (T.cool > 0 && u.heat > 40) pos += T.cool * 0.4;
@@ -324,8 +339,9 @@ function flowField(b: Battle, u: Unit, gx: number, gy: number): Float32Array {
       if (!dx && !dy) continue;
       const nx = x + dx, ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= m.w || ny >= m.h) continue;
-      const c = b.moveCost(u, nx, ny, x, y);
-      if (!isFinite(c)) continue;
+      // The goal itself may be a structure or a unit's tile: anything next to it counts as arriving
+      const c = i === gi ? 1 : b.moveCost(u, nx, ny, x, y);
+      if (!isFinite(c) || !isFinite(TERRAIN[m.terr[ny * m.w + nx]].cost)) continue;
       const ni = ny * m.w + nx;
       if (f[i] + c < f[ni]) { f[ni] = f[i] + c; open.push(ni); }
     }
@@ -333,6 +349,27 @@ function flowField(b: Battle, u: Unit, gx: number, gy: number): Float32Array {
   if (per.size > 24) per.clear();
   per.set(key, f);
   return f;
+}
+
+/** The goal itself if this unit can stand there, else the nearest tile it can. */
+function standableNear(b: Battle, u: Unit, gx: number, gy: number): [number, number] {
+  const m = b.map;
+  const ok = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= m.w || y >= m.h) return false;
+    const t = m.terr[y * m.w + x];
+    return isFinite(TERRAIN[t].cost) && !(u.frame.kind === 'vehicle' && (t === 'deep' || t === 'hforest'));
+  };
+  if (ok(gx, gy)) return [gx, gy];
+  for (let r = 1; r <= 16; r++) {
+    let best: [number, number] | null = null, bd = Infinity;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !ok(gx + dx, gy + dy)) continue;
+      const d = Math.hypot(dx, dy);
+      if (d < bd) { bd = d; best = [gx + dx, gy + dy]; }
+    }
+    if (best) return best;
+  }
+  return [gx, gy];
 }
 
 /** Rough centre of a force: where to search when nothing has been seen yet. */
@@ -352,6 +389,16 @@ function moveToward(b: Battle, u: Unit, gx: number, gy: number, mode: MoveMode):
   const score = (i: number) => (isFinite(here) ? f[i] : dist(i % m.w, (i / m.w) | 0, gx, gy) + TERRAIN[m.terr[i]].cost * 0.05);
   let bi = -1, bd = isFinite(here) ? here : dist(u.x, u.y, gx, gy);
   for (const [i] of reach) { const d = score(i); if (d < bd) { bd = d; bi = i; } }
+  // Jump jets: hop a cliff, chasm or ridge when that saves real walking (and the heat is affordable)
+  if (u.stats.jump > 0 && isFinite(here) && u.frame.kind === 'mech') {
+    let ji = -1, jd = (bi >= 0 ? bd : here) - 3;
+    for (const [i] of b.reachable(u, 'jump')) {
+      const steps = Math.round(dist(u.x, u.y, i % m.w, (i / m.w) | 0));
+      if (u.heat + steps * 3 > u.stats.heatCap * 0.5) continue;
+      if (f[i] < jd) { jd = f[i]; ji = i; }
+    }
+    if (ji >= 0) { b.move(u, b.pathTo(u, reach, ji, 'jump'), 'jump'); return; }
+  }
   if (bi < 0) return;
   b.move(u, b.pathTo(u, reach, bi, mode), mode);
 }

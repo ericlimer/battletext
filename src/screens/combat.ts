@@ -1164,7 +1164,7 @@ export class CombatScreen implements Screen {
         ch = wave > 0.75 ? '≈' : t === 'deep' ? '≈' : '~';
         break;
       }
-      case 'rock': fg = lerp(scale(B.rock, 1.1), '#ffffff', s * 0.15); bg = scale(B.ground[Math.min(3, e + 1)], 1.05); break;
+      case 'rock': fg = lerp(scale(B.rock, 1.25), '#ffffff', 0.12 + s * 0.15); bg = lerp(scale(B.ground[Math.min(3, e + 1)], 0.42), '#0c0c10', 0.35); break; // dark stone so walls read against the floor
       case 'road': fg = scale(B.road, 1.15); bg = lerp(bg, scale(B.road, 0.45), 0.75); ch = '·'; break;
       case 'building': case 'wall': {
         const st = m.structures[m.struct[i]];
@@ -1196,6 +1196,15 @@ export class CombatScreen implements Screen {
         break;
       }
       case 'rubble': fg = '#7a6e5e'; bg = lerp(bg, '#1a1612', 0.5); break;
+      case 'chasm': {
+        // A black gash; the lip on the far side catches the light
+        bg = scale(B.ground[0], 0.28);
+        fg = scale(B.groundFg, 0.55);
+        const lipN = y > 0 && m.terr[i - m.w] !== 'chasm';
+        ch = lipN ? '▀' : (x * 7 + y * 3) % 6 === 0 ? '·' : ' ';
+        if (lipN) fg = scale(B.ground[Math.min(3, m.elev[i - m.w])], 0.9);
+        break;
+      }
       case 'rough': fg = lerp(bg, scale(B.groundFg, 1.35), 0.75); bg = scale(bg, 0.88); break;
     }
     const mode = ELEV_MODES[this.elevMode];
@@ -1228,6 +1237,15 @@ export class CombatScreen implements Screen {
       const edge = [at(0, 1), at(0, -1), at(-1, 0), at(1, 0)].some((n) => n !== e);
       ch = edge || (x % 3 === 0 && y % 2 === 0) ? String(e) : ' ';
       fg = ['#7a8a96', '#9ad0a0', '#f0d060', '#ff9050'][e];
+    }
+    // Cliffs: a drop of two levels or more to walkable ground can't be walked, only jumped
+    if (ground && mode !== 'Numbers' && mode !== 'Contours') {
+      const walkable = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h && isFinite(TERRAIN[m.terr[yy * m.w + xx]].cost); };
+      const cliff = ([[0, 1], [0, -1], [-1, 0], [1, 0]] as const).findIndex(([dx, dy]) => e - at(dx, dy) >= 2 && walkable(dx, dy));
+      if (cliff >= 0) {
+        ch = ['▄', '▀', '▌', '▐'][cliff];
+        fg = cliff === 0 || cliff === 2 ? lerp(bg, '#000000', 0.62) : lerp(bg, '#ffffff', 0.2);
+      }
     }
     if (m.scorch[i] > 0) bg = lerp(bg, '#0a0806', 0.5 * m.scorch[i]);
     const wr = m.wrecks.get(i) && !this.ghostAt(i) ? m.wrecks.get(i) : undefined;

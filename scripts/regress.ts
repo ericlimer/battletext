@@ -93,14 +93,14 @@ for (let o = 0; o < 8; o++) {
   check(before === 'Unknown contact' && b.displayName(a) !== 'Unknown contact', `attacking reveals the attacker's name (${before} → ${b.displayName(a)})`);
 }
 
-// Assassination progress ("round N of 9") is refreshed as each round starts, before anyone acts
+// Assassination progress ("round N of 11") is refreshed as each round starts, before anyone acts
 {
   const rt = setupMission({ type: 'assassinate', difficulty: 3, biome: 'lowlands', seed: 31, night: false, employer: 'davion', target: 'liao', player: generateForce(new RNG(11), 3, 'davion', 4, { noVehicles: true }) });
   const b = rt.battle; b.start();
   let g = 0;
   while (!b.result && g++ < 800 && b.round < 3) { const n = b.advance(); if (n.who === 'none' || b.round >= 3) break; aiTakeTurn(b, n.who === 'ai' ? n.unit! : b.pending(0).find((x) => x.team === 0)!); }
   const o = rt.objectives.find((x) => x.id === 'target')!;
-  check(b.round < 3 || b.result !== '' || o.status !== 'active' || !!o.progress?.includes(`round ${b.round} of 9`) || !!o.progress?.startsWith('ESCAPING'), `assassinate: progress matches the round at round start (r${b.round}: ${o.progress})`);
+  check(b.round < 3 || b.result !== '' || o.status !== 'active' || !!o.progress?.includes(`round ${b.round} of `) || !!o.progress?.startsWith('ESCAPING'), `assassinate: progress matches the round at round start (r${b.round}: ${o.progress})`);
 }
 
 process.exit(fails ? 1 : 0);

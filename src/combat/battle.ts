@@ -257,7 +257,7 @@ export class Battle {
       this.say(`Dropship inbound. Extraction in ${this.withdrawIn} round${this.withdrawIn > 1 ? 's' : ''}.`, '#5fd0e8');
     }
     this.updateVisibility();
-    this.check(); // refresh objective progress ("round N of 9", a target that just bolted) before anyone acts
+    this.check(); // refresh objective progress ("round N of 11", a target that just bolted) before anyone acts
   }
 
   /** Units that may act right now for a side, in the current phase. */
