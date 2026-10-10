@@ -18,7 +18,8 @@ for (const a of JSON.parse(actions)) {
   if (a.eval) await page.evaluate(a.eval);
   await page.waitForTimeout(a.wait ?? 300);
 }
-await page.screenshot({ path: out });
+const clip = process.env.CLIP ? (([x, y, width, height]) => ({ x, y, width, height }))(process.env.CLIP.split(',').map(Number)) : undefined;
+await page.screenshot({ path: out, clip, ...(/\.jpe?g$/.test(out) ? { quality: 80 } : {}) });
 const le = await page.evaluate(() => window.__lastError);
 if (le) errors.push(le);
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no errors');

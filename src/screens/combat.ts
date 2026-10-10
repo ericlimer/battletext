@@ -845,6 +845,8 @@ export class CombatScreen implements Screen {
     if (ui.key('ArrowDown')) { this.camY += 3 * panSpeed; this.clampCam(); }
     const wh = ui.wheel(MX, MY, VW * 2, VH);
     if (wh) { if (ui.inp.held.has('Shift')) this.camX += wh * 2; else this.camY += wh * 2; this.clampCam(); }
+    // Experimental terrain views on this battle's map (comparison only, read-only)
+    if (ui.key('y')) app.push(new TerrainLab(this.b, (u) => this.glyphOf(u), this.sel));
     if (ui.key('z')) {
       this.elevMode = (this.elevMode + 1) % ELEV_MODES.length;
       try { localStorage.setItem('bt.elevMode', String(this.elevMode)); } catch { /* private mode */ }
@@ -2283,6 +2285,7 @@ export class CombatScreen implements Screen {
 }
 
 import { frameTons } from '../game/frame';
+import { TerrainLab } from './terrainlab';
 function frameTonsOf(u: Unit): number { return frameTons(u.frame); }
 const DOLL_H = 10;
 const ELEV_MODES = ['Shading', 'Tint', 'Contours', 'Terraces', 'Numbers'] as const;
