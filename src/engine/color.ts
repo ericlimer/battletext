@@ -95,3 +95,9 @@ export const C = {
   bad: '#e8503a',
   warn: '#f0c040',
 };
+
+/** Perceived brightness, 0..255. */
+export function lum(c: string): number {
+  const x = rgb(c);
+  return x[0] * 0.3 + x[1] * 0.59 + x[2] * 0.11;
+}

@@ -3,7 +3,7 @@
 import { Screen, app } from './app';
 import { UI } from '../engine/ui';
 import { Display, COLS, ROWS } from '../engine/display';
-import { C, lerp, scale, light, desaturate, healthColor, rgb, hex } from '../engine/color';
+import { C, lerp, scale, light, desaturate, healthColor, rgb, hex, lum } from '../engine/color';
 import { Battle, Unit, BEvent, SIDE, MoveMode, attackArc, HitCalc, Assignment, structLoc } from '../combat/battle';
 import { aiTakeTurn } from '../combat/ai';
 import { MissionRuntime, MISSION_INFO } from '../combat/missions';
@@ -88,6 +88,8 @@ export class CombatScreen implements Screen {
   deadFx = new Map<number, number>();
   autoplay = false;
   plan: { x: number; y: number; moved: MoveMode | null } | null = null;
+  /** Destination under the cursor (or pending) and the evasion it would give. */
+  preview: { tile: number; mode: MoveMode; steps: number; pips: number } | null = null;
   heatConfirm = false;
   hitFlash = new Map<number, number>();
   glyphs = new Map<number, string>();
@@ -1263,6 +1265,7 @@ export class CombatScreen implements Screen {
     const act = this.playerTurn() && this.canAct(u);
     const reach = act && u && !u.shutdown ? this.getReach(u) : null;
     const pathTiles = new Set<number>();
+    this.preview = null;
     let pendingTile = -1, pendingMode: MoveMode | null = null;
     const ht = this.hoverTile;
     if (act && u && reach) {
@@ -1277,6 +1280,8 @@ export class CombatScreen implements Screen {
           const n = Math.ceil(dist(x0, y0, x1, y1) * 2);
           for (let k = 1; k < n; k++) pathTiles.add(Math.round(y0 + (y1 - y0) * k / n) * m.w + Math.round(x0 + (x1 - x0) * k / n));
         } else for (const [px, py] of path.slice(1)) pathTiles.add(py * m.w + px);
+        const steps = mode === 'jump' ? Math.round(dist(u.x, u.y, tile % m.w, (tile / m.w) | 0)) : path.length - 1;
+        this.preview = { tile, mode, steps, pips: b.pipsFor(u, mode, steps) };
       }
     }
     // Melee spots
@@ -1321,11 +1326,18 @@ export class CombatScreen implements Screen {
         if (reach && act) {
           if (this.mode === 'jump') { if (reach.jump.has(i)) bg = lerp(bg, '#2a8a4a', 0.32); }
           else if (this.mode === 'move') {
-            // Water is already blue, so reach over it is drawn paler to stay visible
+            // Reach replaces the terrain hue with one flat colour per mode (terrain only sets its brightness), so water,
+            // sand and grass read the same; tiles on the edge of the range get a brighter rim, and tiles out of reach dim
             const wet = m.terr[i] === 'water' || m.terr[i] === 'deep';
-            // Reachable water drops its wave glyphs and takes a solid tint, so range reads as a shape, not noise
-            if (reach.walk.has(i)) { bg = lerp(bg, wet ? '#9cc8f0' : '#3a8ae8', wet ? 0.55 : 0.34); fg = lerp(fg, '#b0d8ff', 0.35); if (wet) ch = '·'; }
-            else if (reach.sprint.has(i)) { bg = lerp(bg, '#c0a030', wet ? 0.5 : 0.24); fg = lerp(fg, '#f0e090', 0.25); if (wet) ch = '·'; }
+            const inW = reach.walk.has(i), inS = !inW && reach.sprint.has(i);
+            if (inW || inS) {
+              const set = inW ? reach.walk : reach.sprint;
+              const edge = !set.has(i - 1) || !set.has(i + 1) || !set.has(i - m.w) || !set.has(i + m.w);
+              const k = Math.min(1, lum(bg) / 70);
+              bg = lerp(inW ? '#1c3c6c' : '#4a3c14', inW ? '#3a78d0' : '#a08428', 0.35 + 0.4 * k + (edge ? 0.18 : 0));
+              fg = inW ? '#a8ccf4' : '#e8d48a';
+              if (wet) ch = '≈';
+            } else if (vis) { bg = scale(bg, 0.7); fg = scale(fg, 0.75); }
           }
         }
         if (facingU && Math.max(Math.abs(x - facingU.x), Math.abs(y - facingU.y)) <= 6 && (x !== facingU.x || y !== facingU.y)) {
@@ -1580,17 +1592,17 @@ export class CombatScreen implements Screen {
     const y0 = MY + VH;
     d.fill(0, y0, PX - 1, ROWS - y0, ' ', C.text, C.panel);
     d.hline(0, y0, PX - 1, C.border);
-    // Tile info
+    const bi = BIOME_INFO[m.biome];
+    const env = ` ${bi.name}${m.style && m.style !== 'open' ? ` · ${MAP_STYLE_INFO[m.style].short}` : ''}${m.night ? ' · Night' : ''} · cooling ×${bi.heatMult} `;
+    // Tile info, cut short before the [Z] legend
     const ht = this.hoverTile;
     if (ht >= 0) {
       const t = TERRAIN[m.terr[ht]];
       const e = m.elev[ht];
       const s = b.structAt(ht % m.w, (ht / m.w) | 0);
       let info = ` ${s ? s.name : t.name}${e ? ` · Elev ${e}` : ''}${t.cover ? ` · Cover ${Math.round(t.cover * 100)}%` : ''}${t.cool ? ` · +${t.cool} cooling` : ''}${s ? ` · ${Math.max(0, s.hp)}/${s.maxHp} HP${s.objective ? ' · OBJECTIVE' : ''}` : ''} `;
-      d.text(1, y0, info, C.dim, C.panel);
+      d.text(1, y0, info.slice(0, PX - 2 - env.length - 35), C.dim, C.panel);
     }
-    const bi = BIOME_INFO[m.biome];
-    const env = ` ${bi.name}${m.style && m.style !== 'open' ? ` · ${MAP_STYLE_INFO[m.style].short}` : ''}${m.night ? ' · Night' : ''} · cooling ×${bi.heatMult} `;
     d.text(PX - 2 - env.length, y0, env, C.faint, C.panel);
     // Elevation tint legend while [Z] is on
     {
@@ -1909,8 +1921,16 @@ export class CombatScreen implements Screen {
       simpleBar(d, sx, y + 3, 16, u.stab / s.stabMax, u.unsteady ? '#f0d050' : '#4a7ad0', '#141a24', 0.5);
       if (ui.hover(sx, y + 2, 17, 2)) ui.setTip(['Stability damage from heavy impacts. Past 50% the unit is Unsteady (loses evasion); at 100% it is knocked down. Bracing clears it.']);
     }
-    d.text(sx, y + 4, 'EVASION', C.dim);
-    d.text(sx + 8, y + 4, pipStr(u.pips, b.maxPips(u)), '#8ab4ff');
+    // While a destination is hovered or pending, the row previews the evasion that move would give
+    const pv = u === this.sel ? this.preview : null;
+    d.text(sx, y + 4, 'EVASION', pv ? C.bright : C.dim);
+    if (pv) d.text(sx + 8, y + 4, `▸${pipStr(pv.pips, b.maxPips(u))}`, '#c8dcff');
+    else d.text(sx + 8, y + 4, pipStr(u.pips, b.maxPips(u)), '#8ab4ff');
+    if (ui.hover(sx, y + 4, 17, 1)) {
+      const ev = has(u.pilot ?? undefined, 'evasive');
+      ui.setTip([`Evasion ${pipStr(u.pips, b.maxPips(u))}${pv ? `  →  ${pipStr(pv.pips, b.maxPips(u))} after this ${pv.mode} of ${pv.steps}` : ''}`,
+        `Each pip: -8% to be hit (-5% in melee). One pip per ${ev ? '1.6' : '2'} tiles walked${ev ? ' (Evasive Movement)' : ''}, +1 for sprinting; a jump gives 1 per 2 tiles +1. Max ${b.maxPips(u)}. Each attack against the unit strips one.`]);
+    }
     d.text(sx, y + 5, `Move ${s.walk}/${s.sprint}${s.jump ? ` Jump ${s.jump}` : ''}`, C.dim);
     d.text(sx, y + 6, `Phase ${u.phase}${u.reserved ? ' (res)' : ''}`, C.dim);
     const tags: [string, string][] = [];
@@ -2168,7 +2188,7 @@ export class CombatScreen implements Screen {
   drawHelp(ui: UI): void {
     const d = ui.d;
     const lines = [
-      '{#f0a830}MOVEMENT{/}  Blue tiles: walk (may fire after). Amber: sprint (no attack; +1 evasion).',
+      '{#f0a830}MOVEMENT{/}  Blue tiles: walk (may fire after). Amber: sprint (no attack; +1 evasion). Hover a tile to preview its evasion in the panel.',
       '  Click a tile to preview the path, click again or [Space] to confirm. [J] jump mode.',
       '  Moving further builds EVASION ◆: each pip is -8% to be hit. Each attack strips one pip.',
       '{#f0a830}ATTACKING{/}  Click an enemy to target, click again or [F] to fire. [1]-[9] toggle weapons.',
