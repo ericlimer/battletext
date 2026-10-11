@@ -43,6 +43,8 @@ export interface Unit {
   alive: boolean;
   ejected: boolean;
   destroyHow: '' | 'ct' | 'head' | 'legs' | 'pilot' | 'eject' | 'vehicle' | 'ammo';
+  /** Who brought the unit down (for the memorial). */
+  killedBy?: string;
   cageUsed: boolean;
   kills: number;
   dmgDealt: number;
@@ -1036,6 +1038,7 @@ export class Battle {
     if (!t.alive) return;
     t.alive = false;
     t.destroyHow = how;
+    if (by) t.killedBy = by.team === t.team ? `friendly fire from ${by.pilot?.callsign ?? this.fullName(by)}` : `${by.mapTag ? by.mapTag + ' ' : ''}${this.fullName(by)}`;
     if (by) { by.kills++; this.resolve[SIDE(by.team)] = Math.min(this.resolveMax[SIDE(by.team)], this.resolve[SIDE(by.team)] + 20); }
     this.emit({ k: 'boom', x: t.x, y: t.y, size: how === 'eject' || how === 'pilot' ? 1 : 3 });
     this.emit({ k: 'destroyed', u: t.id, how });

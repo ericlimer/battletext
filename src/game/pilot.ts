@@ -35,6 +35,15 @@ export const ROLES: RoleDef[] = [
   { id: 'anchor', name: 'Anchor', skills: ['gut', 'tac'], desc: 'Holds a position and soaks fire.' },
 ];
 export function roleOf(p: Pilot | null | undefined): RoleDef | null { return p?.role ? ROLES.find((r) => r.id === p.role) ?? null : null; }
+/** The role whose two skills are this pilot's strongest pair: highest sum, then the higher of the two, then ROLES order. */
+export function suggestRole(p: Pilot): RoleId {
+  let best = ROLES[0], bs = -1;
+  for (const r of ROLES) {
+    const sc = (p[r.skills[0]] + p[r.skills[1]]) * 100 + Math.max(p[r.skills[0]], p[r.skills[1]]);
+    if (sc > bs) { bs = sc; best = r; }
+  }
+  return best.id;
+}
 export function isRoleSkill(p: Pilot | null | undefined, s: Skill): boolean { return !!roleOf(p)?.skills.includes(s); }
 /** Name of the ability the next point in a skill would unlock, if any. */
 export function nextUnlock(p: Pilot, s: Skill): string | null {
@@ -75,8 +84,12 @@ export interface Pilot {
   hireCost?: number;
   timeline: string[];
   quirks?: string[];
-  /** Player-assigned role: which two skills this MechWarrior is being trained in. */
+  /** Player-assigned role: which two skills this MechWarrior is being trained in. Hire candidates come with one suggested. */
   role?: RoleId;
+  /** Day the pilot joined the company. */
+  joined?: number;
+  /** How the pilot died, recorded at death (older saves only have diedDay). */
+  fell?: { day: number; where: string; mech: string; mission: string; by?: string };
 }
 
 export interface QuirkDef { id: string; name: string; desc: string; good: boolean; }
@@ -163,34 +176,67 @@ const CALLSIGNS = ['Ghost', 'Hammer', 'Vixen', 'Deadeye', 'Tinman', 'Bishop', 'R
 const ORIGINS = ['Federated Suns', 'Capellan Confederation', 'Free Worlds League', 'Taurian Concordat', 'Magistracy of Canopus', 'Aurigan Reach',
   'Lyran Commonwealth', 'Draconis Combine', 'the Periphery', 'Outworlds Alliance', 'a pirate band', 'a Solaris VII stable'];
 // Backgrounds follow from origin: academies and home-guard units of their realm, or a mercenary outfit
-const ACADEMY_VERBS = ['Washed out of the', 'Graduated near the top of the', 'Was expelled from the', 'Finished a hard-won commission at the'];
-const UNIT_VERBS = ['Deserted from the', 'Was a decorated officer in the', 'Spent a decade in the', 'Was blacklisted by the', 'Bought out a contract from the', 'Washed out of the'];
+const ACADEMY_VERBS = ['Washed out of the', 'Graduated near the top of the', 'Was expelled from the', 'Finished a hard-won commission at the',
+  'Scraped through the', 'Taught simulator classes at the', 'Left in their final year at the', 'Graduated dead last from the',
+  'Was quietly asked to leave the', 'Holds two disciplinary records from the'];
+const UNIT_VERBS = ['Deserted from the', 'Was a decorated officer in the', 'Spent a decade in the', 'Was blacklisted by the', 'Bought out a contract from the', 'Washed out of the',
+  'Was cashiered from the', 'Lost a lance and a promotion in the', 'Spent six years as a tech in the', 'Was the last survivor of a company in the',
+  'Resigned a commission in the', 'Was court-martialled and acquitted by the', 'Pulled garrison duty for years in the'];
 const SCHOOLS: Record<string, [string, 'academy' | 'unit'][]> = {
-  'Federated Suns': [['Robinson Battle Academy', 'academy'], ['Davion Light Guards', 'unit'], ['planetary militia', 'unit']],
-  'Capellan Confederation': [['Sian Military Academy', 'academy'], ['Capellan Hussars', 'unit'], ['planetary militia', 'unit']],
-  'Free Worlds League': [['Allison MechWarrior Institute', 'academy'], ['Fusiliers of Oriente', 'unit'], ['planetary militia', 'unit']],
-  'Taurian Concordat': [['Taurian Defense Force', 'unit'], ['Taurian Military Academy', 'academy']],
-  'Magistracy of Canopus': [['Canopian Institute of War', 'academy'], ['Magistracy Royal Guard', 'unit']],
-  'Aurigan Reach': [['Aurigan Coalition', 'unit'], ['Aurigan Royal Academy', 'academy'], ['planetary militia', 'unit']],
-  'Lyran Commonwealth': [['Nagelring', 'academy'], ['Lyran Guards', 'unit'], ['planetary militia', 'unit']],
-  'Draconis Combine': [['Sun Zhang Academy', 'academy'], ['Sword of Light', 'unit']],
-  'the Periphery': [['planetary militia', 'unit'], ['frontier caravan guard', 'unit']],
-  'Outworlds Alliance': [['Outworlds Alliance Militia', 'unit'], ['planetary militia', 'unit']],
-  'a pirate band': [['Tortuga raiders', 'unit'], ['Marian Hegemony slave-legions', 'unit']],
-  'a Solaris VII stable': [['Solaris arena circuit', 'unit'], ['Solaris VII training stables', 'academy']],
+  'Federated Suns': [['Robinson Battle Academy', 'academy'], ['Davion Light Guards', 'unit'], ['planetary militia', 'unit'], ['New Avalon Military Academy', 'academy'], ['Crucis Lancers', 'unit'], ['March Militia', 'unit']],
+  'Capellan Confederation': [['Sian Military Academy', 'academy'], ['Capellan Hussars', 'unit'], ['planetary militia', 'unit'], ['Sarna Military Academy', 'academy'], ['Liao Reserves', 'unit'], ['Capellan home guard', 'unit']],
+  'Free Worlds League': [['Allison MechWarrior Institute', 'academy'], ['Fusiliers of Oriente', 'unit'], ['planetary militia', 'unit'], ['Princefield Academy', 'academy'], ['Marik Militia', 'unit'], ['Atreus garrison regiment', 'unit']],
+  'Taurian Concordat': [['Taurian Defense Force', 'unit'], ['Taurian Military Academy', 'academy'], ['Pleiades Hussars', 'unit'], ['Concordat border pickets', 'unit']],
+  'Magistracy of Canopus': [['Canopian Institute of War', 'academy'], ['Magistracy Royal Guard', 'unit'], ['Canopian Highlanders', 'unit'], ['Crater Cobras training cadre', 'academy']],
+  'Aurigan Reach': [['Aurigan Coalition', 'unit'], ['Aurigan Royal Academy', 'academy'], ['planetary militia', 'unit'], ['Directorate house guard', 'unit'], ['Coromodir cadet school', 'academy'], ['Reach border patrol', 'unit']],
+  'Lyran Commonwealth': [['Nagelring', 'academy'], ['Lyran Guards', 'unit'], ['planetary militia', 'unit'], ['Tharkad Military College', 'academy'], ['Donegal Guards', 'unit'], ['Lyran Regulars', 'unit']],
+  'Draconis Combine': [['Sun Zhang Academy', 'academy'], ['Sword of Light', 'unit'], ['Wisdom of the Dragon academy', 'academy'], ['Combine regular army', 'unit']],
+  'the Periphery': [['planetary militia', 'unit'], ['frontier caravan guard', 'unit'], ['mining-concern security force', 'unit'], ['colony defence corps', 'unit']],
+  'Outworlds Alliance': [['Outworlds Alliance Militia', 'unit'], ['planetary militia', 'unit'], ['Alliance Military Academy', 'academy'], ['Alliance aerospace reserve', 'unit']],
+  'a pirate band': [['Tortuga raiders', 'unit'], ['Marian Hegemony slave-legions', 'unit'], ['Rim Collection reavers', 'unit'], ['Oberon Confederation raiders', 'unit']],
+  'a Solaris VII stable': [['Solaris arena circuit', 'unit'], ['Solaris VII training stables', 'academy'], ['Factory district pit fights', 'unit'], ['Steiner Stadium junior league', 'academy']],
 };
-const MERCS: string[] = ['Kell Hounds', 'Blackhearts', 'Eridani Light Horse', 'Northwind Highlanders'];
+const MERCS: string[] = ['Kell Hounds', 'Blackhearts', 'Eridani Light Horse', 'Northwind Highlanders', 'Gray Death Legion', 'Waco Rangers', 'Hansen\'s Roughriders', 'Snord\'s Irregulars',
+  'Avanti\'s Angels', 'Fighting Urukhai'];
+/** First half of a bio: where the pilot learned their trade. */
 function bioFor(r: RNG, origin: string): string {
   const own = SCHOOLS[origin] ?? [['planetary militia', 'unit']];
   const [where, kind] = r.chance(0.7) || origin === 'a pirate band' ? r.pick(own) : [r.pick(MERCS), 'unit' as const];
   return `${r.pick(kind === 'academy' ? ACADEMY_VERBS : UNIT_VERBS)} ${where}.`;
 }
+// Second half: a character note. Kept unique within the company (see takenBios in company.ts).
 const BIO_C = ['Quiet, methodical, and deeply superstitious about their cockpit.', 'Talks constantly over comms. Nobody minds, because they never miss.',
   'Carries a battered holo of a family nobody has ever met.', 'Has a reputation for pushing reactors past redline.', 'Collects enemy callsigns in a notebook.',
   'Refuses to pilot anything without a proper hand actuator.', 'Owes money to at least three different crime syndicates.',
   'Believes, sincerely, that the Star League will return.', 'Sings off-key during combat drops.', 'Once walked a legged Centurion forty kilometers home.',
   'Keeps the company\'s morale up with an endless supply of bad jokes.', 'Speaks rarely; when they do, people listen.',
-  'Survived an ejection at 400 meters and has not stopped talking about it.', 'Is convinced the dropship\'s coffee is poisoned.'];
+  'Survived an ejection at 400 meters and has not stopped talking about it.', 'Is convinced the dropship\'s coffee is poisoned.',
+  'Sleeps in the cockpit before every drop. Says the bunks are too quiet.', 'Keeps a tally of every heat sink they have ever cooked.',
+  'Pays the techs in cigarettes and gossip. It works.', 'Has a bounty on their head in two star systems and is proud of neither.',
+  'Reads old military manuals for fun and quotes them at the worst moments.', 'Never names their \'Mech. Says it is bad luck to get attached.',
+  'Lost two fingers to a coolant leak and still fires with that hand.', 'Writes letters home every week and never sends them.',
+  'Can strip a medium laser blindfolded and will bet you on it.', 'Distrusts anyone who has never walked a \'Mech through a swamp.',
+  'Gambles away every bonus by the next jump.', 'Has a scar from a Solaris duel they refuse to discuss.',
+  'Hums the same four bars of a lullaby while lining up a shot.', 'Treats every briefing like a negotiation.',
+  'Once held a bridge for six hours with a jammed autocannon.', 'Insists on checking every weld after the techs are done.',
+  'Was declared dead once. The paperwork was never corrected.', 'Keeps a dried flower from a world that no longer exists taped to the HUD.',
+  'Refuses to eat before a drop and is foul-tempered until after.', 'Knows every bar owner within three jumps of the Argo by name.',
+  'Has an opinion about every \'Mech design and most of them are insulting.', 'Volunteers for the night watch and nobody asks why.',
+  'Learned to pilot on an agricultural IndustrialMech and it shows.', 'Is unfailingly polite over open channels, especially to the enemy.',
+  'Counts their ammunition aloud. Every round. Every time.', 'Took a neurohelmet from a dead mentor and still wears it.'];
+/** The parts of a bio that should not repeat within a company: the background and the character note. */
+export function bioFragments(bio: string): string[] {
+  const c = BIO_C.find((x) => bio.endsWith(x));
+  return c ? [bio.slice(0, bio.length - c.length).trim(), c].filter(Boolean) : [bio];
+}
+/** A bio built from pools, steering clear of fragments already in `taken`. With nothing taken it draws exactly as before. */
+export function makeBio(r: RNG, origin: string, taken?: Set<string>): string {
+  let a = bioFor(r, origin);
+  for (let k = 0; k < 8 && taken?.has(a); k++) a = bioFor(r, origin);
+  let b = r.pick(BIO_C);
+  if (taken?.has(b)) { const free = BIO_C.filter((x) => !taken.has(x)); if (free.length) b = r.pick(free); }
+  return `${a} ${b}`;
+}
 // Pilot icons: a symbol + colour pair unique within the company. Symbols avoid glyphs the battle map uses.
 export const SIGILS = ['☼', '♦', '♥', '§', 'Ω', 'Δ', 'Ψ', 'Σ', '†', '‡', '¥', 'Φ', 'Θ', 'λ', 'µ', '☾', '✦', '♪', '¶', 'Ж'];
 // No reds, oranges or browns (hue ~340-45°): those read as enemy (C.enemy) on the map. Old colours are reassigned on load.
@@ -231,7 +277,8 @@ export function ensureIcons(pilots: Pilot[]): void {
 export function iconTag(p: Pilot): string { return `{${p.color}}${p.sigil}{/}`; }
 
 let pid = 0;
-export function makePilot(r: RNG, tier: number, opts: Partial<Pilot> = {}): Pilot {
+/** `taken`: bio fragments already in use in the company (see bioFragments); the new pilot avoids them. */
+export function makePilot(r: RNG, tier: number, opts: Partial<Pilot> = {}, taken?: Set<string>): Pilot {
   // tier: 0 rookie .. 4 elite; distribute skill points
   const budget = 12 + tier * 5 + r.int(-1, 2);
   const s = { gun: 1, pil: 1, gut: 1, tac: 1 };
@@ -254,7 +301,7 @@ export function makePilot(r: RNG, tier: number, opts: Partial<Pilot> = {}): Pilo
     abilities: [],
     injuries: 0,
     healDays: 0,
-    bio: `${bioFor(r, origin)} ${r.pick(BIO_C)}`,
+    bio: makeBio(r, origin, taken),
     origin,
     kills: 0,
     missions: tier * r.int(2, 6),

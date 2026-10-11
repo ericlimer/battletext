@@ -1,6 +1,6 @@
 // Persistence: localStorage autosave plus JSON export/import.
 
-import { Company } from './company';
+import { Company, settleHires } from './company';
 import { ensureIcons } from './pilot';
 import { applyFixes } from './fixes';
 
@@ -29,7 +29,8 @@ function prepare(c: Company): boolean {
   // Older saves could keep fallen MechWarriors assigned to the lance
   c.lancePilots = c.lancePilots.map((id) => (id && c.pilots.some((p) => p.id === id && !p.dead) ? id : null));
   ensureIcons(c.pilots);
-  return applyFixes(c);
+  const hires = settleHires(c); // suggested roles and fresh bios for halls generated before those existed
+  return applyFixes(c) || hires;
 }
 
 export function loadGame(): Company | null {

@@ -175,7 +175,7 @@ export const EVENTS: GameEvent[] = [
     text: () => 'A young MechWarrior in a torn militia uniform asks to join. She deserted her unit rather than fire on civilians, and her former commander wants her back.',
     choices: [
       { text: 'Take her on and face the consequences.', req: (c) => (c.pilots.filter((p) => !p.dead).length < pilotCap(c) ? null : 'No bunk free in the barracks'),
-        apply: (c, x, r) => { c.rep['locals'] -= 6; mor(c, 3); const p = makePilot(r, 1, { callsign: 'Maverick', origin: x.sysName + ' militia', bio: `Deserted the ${x.sysName} planetary militia rather than fire on civilians. Her old commander still wants her back.` }); c.pilots.push(p); ensureIcons(c.pilots); return 'Maverick joins the company. The locals are furious. Planetary rep -6, morale +3.'; } },
+        apply: (c, x, r) => { c.rep['locals'] -= 6; mor(c, 3); const p = makePilot(r, 1, { callsign: 'Maverick', joined: c.day, origin: x.sysName + ' militia', bio: `Deserted the ${x.sysName} planetary militia rather than fire on civilians. Her old commander still wants her back.` }); c.pilots.push(p); ensureIcons(c.pilots); return 'Maverick joins the company. The locals are furious. Planetary rep -6, morale +3.'; } },
       { text: 'Hand her over.', apply: (c) => { c.rep['locals'] += 4; mor(c, -4); return 'The militia thanks you. The crew does not. Planetary rep +4, morale -4.'; } },
     ],
   },

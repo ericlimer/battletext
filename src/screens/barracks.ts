@@ -4,7 +4,7 @@ import { UI } from '../engine/ui';
 import { C } from '../engine/color';
 import type { ArgoScreen } from './argo';
 import { company, saveGame } from '../game/save';
-import { pilotCap, pilotStatus, addLog, sys } from '../game/company';
+import { pilotCap, pilotStatus, addLog, sys, dateStr } from '../game/company';
 import { Pilot, Skill, AbilityDef, ensureIcons, ROLES, roleOf, isRoleSkill, nextUnlock, SKILLS, SKILL_NAMES, SKILL_DESC, xpCost, trainSkill, salary, health, ability, ABILITIES, pilotRank, skillTotal, quirk } from '../game/pilot';
 import { cb, cbk, wrap } from '../engine/util';
 import { skillLine, healthPips, roleTag, ROLE_COLOR } from './widgets';
@@ -35,10 +35,12 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
   const st = (argo.st.barracks ??= { mode: 'roster', sel: 0, list: { scroll: 0 }, confirm: false });
   if (ui.button(x + 2, y, 'ROSTER', { active: st.mode === 'roster', w: 12, center: true })) { st.mode = 'roster'; st.sel = 0; }
   if (ui.button(x + 15, y, 'HIRING HALL', { active: st.mode === 'hire', w: 15, center: true, disabled: !!c.travel, tip: c.travel ? 'Only available while docked.' : '' })) { st.mode = 'hire'; st.sel = 0; }
+  if (ui.button(x + 31, y, 'MEMORIAL', { active: st.mode === 'memorial', w: 12, center: true, tip: 'The MechWarriors this company has lost.' })) { st.mode = 'memorial'; st.sel = 0; st.list.scroll = 0; }
   const living = c.pilots.filter((p) => !p.dead);
-  d.text(x + 34, y, `MechWarriors ${living.length}/${pilotCap(c)}`, C.dim);
-  const list: Pilot[] = st.mode === 'roster' ? [...living, ...c.pilots.filter((p) => p.dead)] : c.hires[c.location] ?? [];
+  d.text(x + 46, y, `MechWarriors ${living.length}/${pilotCap(c)}`, C.dim);
   const y0 = y + 2;
+  if (st.mode === 'memorial') return drawMemorial(ui, st, x, y0, w, h);
+  const list: Pilot[] = st.mode === 'roster' ? living : c.hires[c.location] ?? [];
   ui.panel(x + 1, y0, 52, h - 2, st.mode === 'roster' ? 'ROSTER' : `HIRING HALL · ${sys(c).name.toUpperCase()}`);
   const cl = ui.list(x + 2, y0 + 1, 50, h - 4, list, st.list, (p, i, lx, ly, lw, hov) => {
     const sel = st.sel === i;
@@ -96,7 +98,7 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
       if (ui.button(rx, yy, r.name, { style: 'plain', w: r.name.length + 2, active: on, fg: on ? C.bg : ROLE_COLOR, tip: [`{${ROLE_COLOR}}${r.name}{/}: ${SKILL_NAMES[r.skills[0]]} + ${SKILL_NAMES[r.skills[1]]}`, r.desc, on ? 'Click again to clear the role.' : 'Assign this role. It only marks which skills to train.'] })) { p.role = on ? undefined : r.id; saveGame(c); }
       rx += r.name.length + 3;
     }
-  } else if (roleOf(p)) d.ctext(dx + 3, yy, `Role ${roleTag(p)}`, C.dim);
+  } else if (roleOf(p)) d.ctext(dx + 3, yy, `Role ${roleTag(p)}${st.mode === 'hire' ? ' {#6d7f8a}· suggested by their two strongest skills; yours to change once hired{/}' : ''}`, C.dim, undefined, dw - 6);
   yy += 2;
   // Skills with training buttons
   let pipTip: string[] | null = null;
@@ -183,6 +185,7 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
       c.pilots.push(p);
       ensureIcons(c.pilots); // settle the sigil now, not at the next save
       c.hires[c.location] = list.filter((q) => q !== p);
+      p.joined = c.day;
       p.timeline.push(`Joined ${c.name} on day ${c.day}.`);
       addLog(c, `Hired ${p.callsign} (${p.name}) for ${cb(p.hireCost ?? 0)}.`, '#6ad46a');
       saveGame(c);
@@ -198,4 +201,72 @@ export function drawBarracksTab(ui: UI, argo: ArgoScreen, x: number, y: number, 
     }
   }
   void skillTotal;
+}
+
+// ---- Memorial ------------------------------------------------------------------------------
+const MEM = { border: '#26323a', title: '#9aa8b0', name: '#c8d0d4', text: '#8a979e', faint: '#4a5860', mark: '#b8b0a0', sel: '#121a20', hov: '#0e151a' };
+
+/** What is known of a fallen pilot's death: the record kept since memorials existed, or what older saves left behind. */
+function fellOf(p: Pilot): { day?: number; where?: string; mech?: string; mission?: string; by?: string } {
+  if (p.fell) return p.fell;
+  const m = p.timeline.map((t) => /Killed in action during "(.+)"/.exec(t)).find(Boolean);
+  return { day: p.diedDay, mission: m?.[1] };
+}
+function daysServed(p: Pilot): number | null {
+  const j = p.joined ?? Number(p.timeline.map((t) => /^Joined .* on day (\d+)\./.exec(t)).find(Boolean)?.[1] ?? NaN);
+  const d = fellOf(p).day;
+  return Number.isFinite(j) && d !== undefined ? Math.max(0, d - j) : null;
+}
+
+function drawMemorial(ui: UI, st: { sel: number; list: { scroll: number } }, x: number, y0: number, w: number, h: number): void {
+  const d = ui.d, c = company!;
+  const fallen = c.pilots.filter((p) => p.dead).sort((a, b) => (fellOf(b).day ?? -1) - (fellOf(a).day ?? -1));
+  ui.panel(x + 1, y0, 52, h - 2, 'MEMORIAL', { fg: MEM.border, titleFg: MEM.title });
+  const dx = x + 54, dw = w - 55;
+  if (!fallen.length) {
+    ui.panel(dx, y0, dw, h - 2, '', { fg: MEM.border });
+    d.text(x + 4, y0 + 2, 'No one has fallen. Yet.', MEM.text);
+    d.text(dx + 3, y0 + 2, 'MechWarriors killed in action are remembered here: where they fell, and what they did.', MEM.faint, undefined, dw - 6);
+    return;
+  }
+  const cl = ui.list(x + 2, y0 + 1, 50, h - 4, fallen, st.list, (p, i, lx, ly, lw, hov) => {
+    const sel = st.sel === i, f = fellOf(p);
+    const bg = sel ? MEM.sel : hov ? MEM.hov : C.panel;
+    d.fill(lx, ly, lw, 3, ' ', MEM.text, bg);
+    if (sel) d.vline(lx, ly, 3, MEM.title, '▏', bg);
+    d.text(lx + 2, ly, '✝', MEM.mark, bg);
+    d.text(lx + 4, ly, p.callsign, MEM.name, bg, 16, true);
+    d.text(lx + 21, ly, p.name, MEM.text, bg, lw - 22);
+    d.text(lx + 4, ly + 1, [f.day !== undefined ? dateStr(f.day) : 'Date unrecorded', f.where].filter(Boolean).join(' · '), MEM.text, bg, lw - 5);
+    d.text(lx + 4, ly + 2, [f.mission && `"${f.mission}"`, f.mech].filter(Boolean).join(' · ') || '—', MEM.faint, bg, lw - 5);
+  }, 3);
+  if (cl >= 0) st.sel = cl;
+  const p = fallen[Math.min(st.sel, fallen.length - 1)], f = fellOf(p);
+  ui.panel(dx, y0, dw, h - 2, `✝ ${p.callsign.toUpperCase()}`, { fg: MEM.border, titleFg: MEM.title });
+  let yy = y0 + 2;
+  d.text(dx + 3, yy, p.name, MEM.name, undefined, 40, true);
+  d.text(dx + 48, yy, `${pilotRank(p)} · origin: ${p.origin}`, MEM.faint, undefined, dw - 50);
+  yy += 2;
+  // How they fell, in as much detail as was recorded
+  const parts = [`Fell${f.day !== undefined ? ` on ${dateStr(f.day)}` : ''}${f.where ? ` on ${f.where}` : ''}${f.mission ? `, during "${f.mission}"` : ''}.`];
+  if (f.mech) parts.push(`At the controls of their ${f.mech}${f.by ? `, brought down by ${f.by}` : ''}.`);
+  for (const l of wrap(parts.join(' '), dw - 8)) d.text(dx + 3, yy++, l, MEM.text);
+  yy++;
+  for (const l of wrap(p.bio, dw - 8)) d.text(dx + 3, yy++, l, MEM.faint);
+  yy++;
+  const served = daysServed(p);
+  const stats: [string, string][] = [['Missions', String(p.missions)], ['Kills', String(p.kills)], ...(served !== null ? [['Days served', String(served)] as [string, string]] : []), ['Experience', String(p.xpTotal)]];
+  let sx = dx + 3;
+  for (const [k, v] of stats) { d.ctext(sx, yy, `${k} {${MEM.name}}${v}{/}`, MEM.faint); sx += k.length + v.length + 5; }
+  yy += 2;
+  d.ctext(dx + 3, yy++, `${SKILLS.map((k) => `{${MEM.faint}}${SKILL_NAMES[k]}{/} {${MEM.text}}${p[k]}{/}`).join('   ')}`, MEM.text);
+  if (p.abilities.length) d.ctext(dx + 3, yy++, `{${MEM.faint}}Abilities{/} ${p.abilities.map((a) => ability(a).name).join(', ')}`, MEM.text, undefined, dw - 6);
+  if (p.quirks?.length) d.ctext(dx + 3, yy++, `{${MEM.faint}}Quirks{/} ${p.quirks.map((q) => quirk(q).name).join(', ')}`, MEM.text, undefined, dw - 6);
+  yy++;
+  if (p.timeline.length) {
+    d.text(dx + 3, yy++, 'SERVICE RECORD', MEM.title, undefined, 99, true);
+    const room = Math.max(1, y0 + h - 4 - yy);
+    for (const t of p.timeline.slice(-room)) d.text(dx + 3, yy++, t, MEM.faint, undefined, dw - 6);
+  }
+  if (p.memorial) d.text(dx + 3, y0 + h - 4, 'Remembered by the crew.', MEM.faint);
 }

@@ -158,6 +158,7 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
     if (died && !p.commander) {
       p.dead = true;
       p.diedDay = c.day;
+      p.fell = { day: c.day + contractDays(k), where: sys(c, k.sysId ?? c.location)?.name ?? '', mech: frameName(u.frame), mission: k.name, ...(u.killedBy ? { by: u.killedBy } : {}) };
       c.stats.pilotsLost++;
       c.lancePilots = c.lancePilots.map((id) => (id === p.id ? null : id));
       res.casualties.push(`${p.callsign} (${p.name}) was killed in action.`);
@@ -225,7 +226,6 @@ export function resolveContract(c: Company, k: Contract, neg: Negotiation, rt: M
   addLog(c, summary, win ? '#6ad46a' : '#e8503a', back);
   for (const x of res.casualties) addLog(c, x, '#f08a30', back);
   for (const x of res.mechsLost) addLog(c, x, '#e8503a', back);
-  void sys;
   return res;
 }
 

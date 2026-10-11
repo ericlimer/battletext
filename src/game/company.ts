@@ -4,7 +4,7 @@ import { FIX_IDS } from './fixids';
 import { RNG } from '../engine/rng';
 import { Frame, newMechFrame, frameTons, repairEstimate, repairFully, frameValue, frameSellPrice, refillAmmo, frameName, isFrameDamaged } from './frame';
 import { track } from './telemetry';
-import { Pilot, makePilot, salary, health, uniqueCallsign, grantAbilities, assignIcon, COMMANDER_COLOR } from './pilot';
+import { Pilot, makePilot, makeBio, bioFragments, suggestRole, salary, health, uniqueCallsign, grantAbilities, assignIcon, COMMANDER_COLOR } from './pilot';
 import { StarSystem, generateStarMap, route } from './world';
 import { MissionType, MISSION_INFO, pilotTier } from '../combat/missions';
 import { FACTIONS, faction, repLevel } from '../data/factions';
@@ -223,10 +223,12 @@ export function newCompany(opts: { name: string; commander: string; callsign: st
   cmd.quirks = (cmd.quirks ?? []).filter((q) => q !== 'greedy' && q !== 'loyal' && q !== 'fickle');
   cmd.missions = 0;
   grantAbilities(cmd);
+  cmd.joined = 0;
   const pilots = [cmd];
-  const taken = new Set([cmd.callsign]);
+  const taken = new Set([cmd.callsign]), bios = new Set<string>();
   for (const t of [1, 1, 0, 0]) {
-    const p = makePilot(r, t);
+    const p = makePilot(r, t, { joined: 0 }, bios);
+    for (const f of bioFragments(p.bio)) bios.add(f);
     p.callsign = uniqueCallsign(r, taken);
     taken.add(p.callsign);
     assignIcon(p, pilots, () => r.next());
@@ -462,16 +464,46 @@ function item2sort(s: StoreItem): number {
   return k * 1000 + (BASE_WEAPONS.indexOf(d.base) + 1) * 10 + (d.tier ?? 0);
 }
 
+/** Bio fragments in use by living MechWarriors and every hall's candidates (except `skip`), so new ones read fresh. */
+export function takenBios(c: Company, skip?: string): Set<string> {
+  const out = new Set<string>();
+  const hires = Object.entries(c.hires ?? {}).filter(([id]) => id !== skip).flatMap(([, l]) => l);
+  for (const p of [...c.pilots.filter((q) => !q.dead), ...hires]) for (const f of bioFragments(p.bio)) out.add(f);
+  return out;
+}
+
+/** Load-time upkeep for hire lists: a suggested role on every candidate, and no bio line shared with the roster
+ *  or another candidate (rerolled from the pilot's id, so it is stable). Returns true when anything changed. */
+export function settleHires(c: Company): boolean {
+  let changed = false;
+  const used = new Set<string>();
+  for (const p of c.pilots) if (!p.dead) for (const f of bioFragments(p.bio)) used.add(f);
+  for (const list of Object.values(c.hires ?? {})) for (const p of list) {
+    if (!p.role) { p.role = suggestRole(p); changed = true; }
+    if (bioFragments(p.bio).some((f) => used.has(f))) {
+      let h = 2166136261;
+      for (const ch of p.id) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+      p.bio = makeBio(new RNG(h >>> 0), p.origin, used);
+      changed = true;
+    }
+    for (const f of bioFragments(p.bio)) used.add(f);
+  }
+  return changed;
+}
+
 function genHires(c: Company, r: RNG, s: StarSystem): Pilot[] {
   const n = r.int(2, 3) + (s.tags.includes('starport') ? 2 : 0);
   const taken = new Set(c.pilots.map((p) => p.callsign));
+  const bios = takenBios(c, s.id);
   const out: Pilot[] = [];
   for (let i = 0; i < n; i++) {
     // Capitals draw veterans; nowhere is the hall all rookies
     const tier = Math.max(0, Math.min(4, Math.floor(s.diff / 3) + r.int(0, 1) + (s.tags.includes('capital') ? 1 : 0)));
-    let p = makePilot(r, tier);
+    let p = makePilot(r, tier, {}, bios);
     const firsts = new Set([...c.pilots, ...out].map((q) => q.name.split(' ')[0]));
-    for (let k = 0; k < 6 && firsts.has(p.name.split(' ')[0]); k++) p = makePilot(r, tier);
+    for (let k = 0; k < 6 && firsts.has(p.name.split(' ')[0]); k++) p = makePilot(r, tier, {}, bios);
+    for (const f of bioFragments(p.bio)) bios.add(f);
+    p.role = suggestRole(p); // a suggestion from the two strongest skills; the player can change it once hired
     p.callsign = uniqueCallsign(r, taken);
     taken.add(p.callsign);
     assignIcon(p, [...c.pilots, ...out], () => r.next());
