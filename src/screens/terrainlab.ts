@@ -8,9 +8,9 @@ import { C, lerp, scale, lum } from '../engine/color';
 import { BIOME_INFO, TERRAIN, dist } from '../combat/terrain';
 import type { Battle, Unit } from '../combat/battle';
 import { SIDE } from '../combat/battle';
+import { heightAt, topColor, detailAt, blockCell, topoCell, paint3d, perspective, Project, VBLOCK } from '../combat/heightview';
 
 const MX = 0, MY = 1, VW = 50, VH = 36, PX = 100;
-const VBLOCK = ' ▁▂▃▄▅▆▇█';
 
 interface LabMode { name: string; blurb: string[]; draw(L: TerrainLab, ui: UI): void }
 
@@ -40,52 +40,9 @@ export class TerrainLab implements Screen {
   // ---- shared terrain facts ----
   inb(x: number, y: number): boolean { const m = this.b.map; return x >= 0 && y >= 0 && x < m.w && y < m.h; }
   elev(x: number, y: number): number { const m = this.b.map; return this.inb(x, y) ? m.elev[y * m.w + x] : 0; }
-  /** Height of the tile's top surface in levels, counting what stands on it. */
-  height(x: number, y: number): number {
-    const m = this.b.map;
-    if (!this.inb(x, y)) return 0;
-    const i = y * m.w + x, e = m.elev[i];
-    switch (m.terr[i]) {
-      case 'rock': return e + 1.5;
-      case 'building': return e + 1.25;
-      case 'wall': return e + 0.75;
-      case 'hforest': return e + 0.5;
-      case 'lforest': return e + 0.25;
-      case 'chasm': return e - 1.25;
-      case 'water': return e - 0.12;
-      case 'deep': return e - 0.25;
-      default: return e;
-    }
-  }
-  /** Flat map colour of a tile's top, by terrain, brightened with height. */
-  topColor(x: number, y: number): string {
-    const m = this.b.map, B = BIOME_INFO[m.biome];
-    const i = y * m.w + x, e = m.elev[i];
-    const lvl = [0.75, 1.05, 1.4, 1.8][e];
-    switch (m.terr[i]) {
-      case 'lforest': return scale(lerp(B.forest[0], B.ground[1], 0.5), 0.8 * lvl);
-      case 'hforest': return scale(lerp(B.forest[0], '#000000', 0.25), 0.75 * lvl);
-      case 'water': return scale(B.water[1], 1.5);
-      case 'deep': return scale(B.water[1], 1.1);
-      case 'rock': return scale(lerp(B.rock, '#808080', 0.3), 0.75 * lvl);
-      case 'building': return '#6a6e74';
-      case 'wall': return '#8a8a84';
-      case 'chasm': return '#08080a';
-      case 'road': return scale(B.road, 0.8 * lvl);
-      case 'rubble': return '#4a4038';
-      default: return scale(B.ground[1], 1.25 * lvl);
-    }
-  }
-  detail(x: number, y: number): [string, string] | null {
-    const m = this.b.map, B = BIOME_INFO[m.biome];
-    switch (m.terr[y * m.w + x]) {
-      case 'lforest': return ['♣', lerp(B.forest[1], '#000', 0.1)];
-      case 'hforest': return ['♣', B.forest[1]];
-      case 'water': case 'deep': return ['≈', scale(B.water[0], 0.9)];
-      case 'rock': return ['▲', '#c8c0b8'];
-      default: return null;
-    }
-  }
+  height(x: number, y: number): number { return heightAt(this.b.map, x, y); }
+  topColor(x: number, y: number): string { return topColor(this.b.map, x, y); }
+  detail(x: number, y: number): [string, string] | null { return detailAt(this.b.map, x, y); }
   unitAt(x: number, y: number): Unit | null {
     return this.b.units.find((u) => u.alive && u.deployed && !u.fled && u.x === x && u.y === y) ?? null;
   }
@@ -94,65 +51,9 @@ export class TerrainLab implements Screen {
     return SIDE(u.team) === 0 ? ['#e8f6ff', '#1a5a8a'] : ['#fff0e8', '#8a2a1a'];
   }
 
-  // ---- 3D painter: draws stacked slices into a sub-cell buffer, then folds each cell into two colours ----
-  paint3d(ui: UI, project: (x: number, y: number, z: number) => [number, number, number], step: number): void {
-    const d = ui.d, m = this.b.map;
-    const W = VW * 2, H = VH * 8; // sub-pixels: 2 per tile across, 8 per row down
-    const col = new Array<string>(W * H).fill('#05070a');
-    const top = new Int32Array(W * H).fill(-1);
-    // Draw a little beyond the view so things leaning in from outside still appear
-    const pad = 6;
-    const tiles: { x: number; y: number; h: number; c: string }[] = [];
-    for (let y = this.camY - pad; y < this.camY + VH + pad; y++) for (let x = this.camX - pad; x < this.camX + VW + pad; x++) {
-      if (!this.inb(x, y)) continue;
-      tiles.push({ x, y, h: this.height(x, y), c: this.topColor(x, y) });
-    }
-    const floor = -1.5;
-    const fill = (x: number, y: number, z: number, c: string, t: number) => {
-      const [x0, y0, s] = project(x - this.camX, y - this.camY, z);
-      const [x1, y1] = [x0 + s, y0 + s];
-      const ax = Math.round(x0 * 2), bx = Math.round(x1 * 2), ay = Math.round(y0 * 8), by = Math.round(y1 * 8);
-      // A top whose northern neighbour is lower catches the light along its back edge
-      const lip = t >= 0 && this.height(x, y - 1) < z - 0.2 ? lerp(c, '#ffffff', 0.3) : c;
-      for (let py = Math.max(0, ay); py < Math.min(H, by); py++) for (let px = Math.max(0, ax); px < Math.min(W, bx); px++) { col[py * W + px] = py === ay ? lip : c; top[py * W + px] = t; }
-    };
-    // Ascending height, north to south within a height, so nearer and taller things cover what is behind them
-    for (let z = floor; z <= 3.01 + 1.5; z += step) {
-      for (const t of tiles) {
-        if (t.h < z - 1e-6) continue;
-        const atTop = t.h - z < step - 1e-6;
-        const zz = atTop ? t.h : z;
-        if (atTop) fill(t.x, t.y, zz, t.c, t.y * m.w + t.x);
-        else {
-          // Side walls darken toward their foot
-          const k = 0.35 + 0.35 * Math.max(0, Math.min(1, (z - floor) / (t.h - floor + 0.001)));
-          fill(t.x, t.y, zz, scale(t.c, k), -1);
-        }
-      }
-    }
-    // Fold into cells
-    for (let vy = 0; vy < VH; vy++) for (let cx = 0; cx < W; cx++) {
-      const a = col[(vy * 8) * W + cx], bb = col[(vy * 8 + 7) * W + cx];
-      let s = 8;
-      for (let k = 0; k < 8; k++) if (col[(vy * 8 + k) * W + cx] !== a) { s = k; break; }
-      // A cell mostly covered by one tile top shows that tile's detail glyph (trees, crags, water)
-      const t0 = top[(vy * 8 + 4) * W + cx];
-      let cover = 0;
-      if (t0 >= 0) for (let k = 0; k < 8; k++) if (top[(vy * 8 + k) * W + cx] === t0) cover++;
-      const det = cover >= 6 && cx % 2 === 0 ? this.detail(t0 % m.w, (t0 / m.w) | 0) : null;
-      if (det) d.set(MX + cx, MY + vy, det[0], det[1], col[(vy * 8 + 4) * W + cx]);
-      else if (s === 8) d.set(MX + cx, MY + vy, ' ', a, a);
-      else d.set(MX + cx, MY + vy, VBLOCK[8 - s], bb, a);
-    }
-    // Units stand on their projected tile tops
-    for (const u of this.b.units) {
-      if (!u.alive || !u.deployed || u.fled) continue;
-      const [px, py, s] = project(u.x - this.camX, u.y - this.camY, this.height(u.x, u.y));
-      const cx = Math.round(px * 2 + s - 1), cy = Math.floor(py + s / 2);
-      if (cx < 0 || cx > W - 2 || cy < 0 || cy >= VH) continue;
-      const [fg, bg] = this.unitColors(u);
-      d.wide(MX + cx, MY + cy, this.glyphOf(u), fg, bg);
-    }
+  paint3d(ui: UI, project: Project, step: number): void {
+    const units = this.b.units.filter((u) => u.alive && u.deployed && !u.fled).map((u) => { const [fg, bg] = this.unitColors(u); return { x: u.x, y: u.y, glyph: this.glyphOf(u), fg, bg }; });
+    paint3d(ui.d, this.b.map, { mx: MX, my: MY, vw: VW, vh: VH, camX: this.camX, camY: this.camY }, project, step, units);
   }
 
   /** Wide-cell renderer: one glyph per tile. */
@@ -240,29 +141,8 @@ export const MODES: LabMode[] = [
     blurb: ['Like a survey map: each height band is one flat shade, lighter = higher, and every band edge is a ruled contour line. Double lines are cliffs (a drop of two or more, jump only).',
       'Reads the whole layout at a glance; contour lines also show where you will step up.'],
     draw(L, ui) {
-      const m = L.b.map, B = BIOME_INFO[m.biome];
-      const band = (e: number) => lerp(scale(lerp(B.ground[1], '#4a5a6a', 0.3), [0.5, 0.9, 1.4, 2.0][e]), ['#102030', '#1a3020', '#3a3418', '#4a2a18'][e], 0.25);
-      L.paintFlat(ui, (x, y) => {
-        const i = y * m.w + x, e = m.elev[i], t = m.terr[i];
-        let bg = band(e);
-        const isC = (xx: number, yy: number) => L.inb(xx, yy) && N4.some(([dx, dy]) => L.inb(xx + dx, yy + dy) && L.elev(xx + dx, yy + dy) < L.elev(xx, yy));
-        const cliff = N4.some(([dx, dy]) => L.inb(x + dx, y + dy) && e - L.elev(x + dx, y + dy) >= 2);
-        let ch = (x % 2 === 0 && y % 2 === 0) ? '·' : ' ', fg = lerp(bg, '#ffffff', 0.25);
-        if (isC(x, y)) {
-          const same = (dx: number, dy: number) => isC(x + dx, y + dy) && L.elev(x + dx, y + dy) === e;
-          const key = `${same(0, -1) ? 1 : 0}${same(0, 1) ? 1 : 0}${same(-1, 0) ? 1 : 0}${same(1, 0) ? 1 : 0}`;
-          const S: Record<string, string> = { '0000': ' ', '1100': '│', '0011': '─', '0101': '┌', '0110': '┐', '1001': '└', '1010': '┘', '1101': '├', '1110': '┤', '0111': '┬', '1011': '┴', '1111': '┼', '1000': '│', '0100': '│', '0010': '─', '0001': '─' };
-          const D: Record<string, string> = { '0000': '■', '1100': '║', '0011': '═', '0101': '╔', '0110': '╗', '1001': '╚', '1010': '╝', '1101': '╠', '1110': '╣', '0111': '╦', '1011': '╩', '1111': '╬', '1000': '║', '0100': '║', '0010': '═', '0001': '═' };
-          ch = (cliff ? D : S)[key]; fg = cliff ? '#ffc060' : scale(bg, 0.35);
-        }
-        if (t === 'water' || t === 'deep') { bg = scale(B.water[1], 1.4); ch = '~'; fg = B.water[0]; }
-        if (t === 'lforest' || t === 'hforest') { fg = B.forest[1]; if (!isC(x, y)) ch = t === 'hforest' ? '♣' : '♧'; }
-        if (t === 'rock') { ch = '▲'; fg = '#d0c8c0'; bg = scale(bg, 0.6); }
-        if (t === 'building' || t === 'wall') { ch = '■'; fg = '#c0c0b8'; bg = '#2a2c30'; }
-        if (t === 'chasm') { ch = ' '; bg = '#050507'; }
-        if (t === 'road') fg = B.road;
-        return { ch, fg, bg };
-      });
+      const m = L.b.map;
+      L.paintFlat(ui, (x, y) => (m.terr[y * m.w + x] === 'building' || m.terr[y * m.w + x] === 'wall' ? { ch: '■', fg: '#c0c0b8', bg: '#2a2c30' } : topoCell(m, x, y)));
     },
   },
   {
@@ -307,37 +187,14 @@ export const MODES: LabMode[] = [
     draw(L, ui) {
       const f = L.focus;
       const vx = f ? f.x - L.camX + 0.5 : VW / 2, vy = f ? f.y - L.camY + 0.5 : VH / 2;
-      const s = 0.035;
-      L.paint3d(ui, (x, y, z) => { const k = 1 / (1 - Math.max(-1.5, z) * s); return [vx + (x - vx) * k, vy + (y - vy) * k, k]; }, 0.1);
+      L.paint3d(ui, perspective(vx, vy, 0.035), 0.1);
     },
   },
   {
     name: 'Grid-locked blocks',
     blurb: ['The oblique look without moving anything: each tile stays on its square, but wherever the ground steps down to the south, the lower part of the higher tile is drawn as a dark face. Crags become solid blocks with a lit top and a face; plateaus get a ledge you can see.',
       'Keeps clicking exact and nothing hides behind anything. Faces only show on south-facing drops, so north edges rely on the lighter top colour.'],
-    draw(L, ui) {
-      const d = ui.d, m = L.b.map;
-      for (let vy = 0; vy < VH; vy++) for (let vx = 0; vx < VW; vx++) {
-        const x = vx + L.camX, y = vy + L.camY;
-        if (!L.inb(x, y)) { d.wide(MX + vx * 2, MY + vy, ' ', '#000', '#000'); continue; }
-        const u = L.unitAt(x, y);
-        if (u) { const [fg, bg] = L.unitColors(u); d.wide(MX + vx * 2, MY + vy, L.glyphOf(u), fg, bg); continue; }
-        const h = L.height(x, y), hs = L.inb(x, y + 1) ? L.height(x, y + 1) : h;
-        let top = L.topColor(x, y);
-        // The back edge catches the light when the ground behind is lower
-        if (L.inb(x, y - 1) && L.height(x, y - 1) < h - 0.2) top = lerp(top, '#ffffff', 0.12);
-        const drop = h - hs;
-        if (drop > 0.2) {
-          const face = scale(top, 0.38);
-          const eighths = Math.max(2, Math.min(6, Math.round(drop * 2.5)));
-          d.wide(MX + vx * 2, MY + vy, VBLOCK[eighths], face, top);
-        } else {
-          const det = L.detail(x, y);
-          const t = m.terr[y * m.w + x];
-          d.wide(MX + vx * 2, MY + vy, det ? det[0] : t === 'plain' && (x * 7 + y * 13) % 5 === 0 ? '·' : ' ', det ? det[1] : lerp(top, '#ffffff', 0.2), top);
-        }
-      }
-    },
+    draw(L, ui) { L.paintFlat(ui, (x, y) => blockCell(L.b.map, x, y)); },
   },
   {
     name: 'Relief shadows',

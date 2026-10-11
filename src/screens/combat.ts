@@ -8,7 +8,8 @@ import { Battle, Unit, BEvent, SIDE, MoveMode, attackArc, HitCalc, Assignment, s
 import { aiTakeTurn } from '../combat/ai';
 import { MissionRuntime, MISSION_INFO } from '../combat/missions';
 import { FX, lightAt } from '../combat/fx';
-import { BIOME_INFO, MAP_STYLE_INFO, TERRAIN, dist, dirTo, DIRS, Structure } from '../combat/terrain';
+import { BIOME_INFO, MAP_STYLE_INFO, TERRAIN, dist, dirTo, DIRS, Structure, Terrain } from '../combat/terrain';
+import { blockCell, topoCell, paint3d, perspective } from '../combat/heightview';
 import { item, ItemDef } from '../data/items';
 import { Component, frameGlyph } from '../game/frame';
 import { has, health, ability, iconTag } from '../game/pilot';
@@ -21,7 +22,7 @@ import { wrap, vlen, pad } from '../engine/util';
 import { sfx, weaponSfx, isMuted, setMuted } from '../engine/sound';
 
 const MX = 0, MY = 1, VW = 50, VH = 36;
-const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 31; // attack-timing panel, over the map
+const TUNE_X = 2, TUNE_Y = 3, TUNE_W = 62, TUNE_H = 33; // attack-timing panel, over the map
 const PX = 100, PW = 50;
 
 /** Body order for listing what is mounted where ('Mech, then vehicle locations). */
@@ -54,6 +55,8 @@ export class CombatScreen implements Screen {
   shownPos = new Map<number, [number, number]>();
   animPos = new Map<number, [number, number]>();
   ghosts = new Set<number>();
+  /** Tiles of structures already destroyed in the battle but whose destruction hasn't played yet. */
+  structGhost = new Map<number, { terr: Terrain; sid: number }>();
   logLines: { text: string; color?: string; icon?: [string, string] }[] = [];
   flashMsg: { text: string; until: number; color?: string } | null = null;
   logScroll = { scroll: 0 };
@@ -70,7 +73,8 @@ export class CombatScreen implements Screen {
   aiTimer = 0;
   speed = 1;
   /** Elevation display style, cycled with [Z] and remembered: shading, tint, contours, terraces, numbers. */
-  elevMode = (() => { try { return Math.max(0, Math.min(ELEV_MODES.length - 1, +(localStorage.getItem('bt.elevMode') ?? 0) || 0)); } catch { return 0; } })();
+  // Stored by name so the list can change; everyone starts on Blocks
+  elevMode = (() => { try { return Math.max(0, ELEV_MODES.indexOf(localStorage.getItem('bt.elevView') as ElevMode)); } catch { return 0; } })();
   get showHeights(): boolean { return ELEV_MODES[this.elevMode] === 'Tint'; }
   showHelp = false;
   /** Unit shown in the [I]nspect portrait view. */
@@ -188,6 +192,7 @@ export class CombatScreen implements Screen {
     for (const e of evs) {
       if (e.k === 'move' && !this.shownPos.has(e.u)) this.shownPos.set(e.u, e.path[0]);
       if (e.k === 'destroyed') this.ghosts.add(e.u);
+      if (e.k === 'structure') { const st = this.b.map.structures[e.s]; for (const j of st.tiles) this.structGhost.set(j, { terr: st.terr ?? 'building', sid: st.id }); }
     }
     this.queue.push(...evs);
   }
@@ -348,9 +353,17 @@ export class CombatScreen implements Screen {
         this.wait = 0.2 / sp;
         break;
       }
-      case 'structure':
-        this.wait = 0.15 / sp;
+      case 'structure': {
+        // Now it falls: drop the ghost, blow it up and leave the rubble
+        const st = b.map.structures[e.s];
+        for (const j of st.tiles) this.structGhost.delete(j);
+        const cx = st.tiles.reduce((a, j) => a + (j % b.map.w), 0) / st.tiles.length, cy = st.tiles.reduce((a, j) => a + ((j / b.map.w) | 0), 0) / st.tiles.length;
+        this.fx.explosion(Math.round(cx), Math.round(cy), st.tiles.length >= 6 ? 3 : 2);
+        this.fx.shake = Math.max(this.fx.shake, 0.5);
+        sfx('bigboom', 0, 0.8);
+        this.wait = 0.35 / sp;
         break;
+      }
       case 'status':
         if (e.text === 'KNOCKDOWN') this.fx.sparks(this.b.unit(e.u).x, this.b.unit(e.u).y, 10, ['#b0a080', '#403a30'], 2, 0, 0.8);
         this.fx.float(b.unit(e.u).x, b.unit(e.u).y, e.text, e.color);
@@ -846,10 +859,10 @@ export class CombatScreen implements Screen {
     const wh = ui.wheel(MX, MY, VW * 2, VH);
     if (wh) { if (ui.inp.held.has('Shift')) this.camX += wh * 2; else this.camY += wh * 2; this.clampCam(); }
     // Experimental terrain views on this battle's map (comparison only, read-only)
-    if (ui.key('y')) app.push(new TerrainLab(this.b, (u) => this.glyphOf(u), this.sel));
+    if (ui.key('y') && !this.tuneOpen) app.push(new TerrainLab(this.b, (u) => this.glyphOf(u), this.sel));
     if (ui.key('z')) {
       this.elevMode = (this.elevMode + 1) % ELEV_MODES.length;
-      try { localStorage.setItem('bt.elevMode', String(this.elevMode)); } catch { /* private mode */ }
+      try { localStorage.setItem('bt.elevView', ELEV_MODES[this.elevMode]); } catch { /* private mode */ }
       this.flashMsg = { text: `Elevation: ${ELEV_MODES[this.elevMode]} — ${ELEV_HELP[ELEV_MODES[this.elevMode]]}`, until: this.time + 4, color: C.cyan };
     }
     if (ui.key('t')) {
@@ -986,8 +999,8 @@ export class CombatScreen implements Screen {
     }
     // Movement
     if (!canMove || this.mode === 'look') return;
-    const r = this.getReach(u);
-    const mode: MoveMode | null = this.mode === 'jump' ? (r.jump.has(ht) ? 'jump' : null) : r.walk.has(ht) ? 'walk' : r.sprint.has(ht) ? 'sprint' : null;
+    const dest = this.moveDest(u, ht);
+    const mode: MoveMode | null = dest?.mode ?? null;
     if (!mode) {
       if (ht !== u.y * b.map.w + u.x && (this.mode === 'move' || this.mode === 'jump')) {
         const tt = TERRAIN[b.map.terr[ht]];
@@ -995,8 +1008,34 @@ export class CombatScreen implements Screen {
       }
       return;
     }
-    if (this.pending && this.pending.tile === ht) this.doMove(u, ht, mode);
-    else this.pending = { tile: ht, mode };
+    const to = dest!.tile;
+    if (this.pending && this.pending.tile === to) this.doMove(u, to, mode);
+    else this.pending = { tile: to, mode };
+  }
+
+  snapKey = ''; snap: { tile: number; mode: MoveMode } | null = null;
+  /** Where a move to the hovered tile would go: that tile when in reach, else the nearest reachable one. */
+  moveDest(u: Unit, ht: number): { tile: number; mode: MoveMode } | null {
+    const b = this.b, m = b.map;
+    if (ht < 0 || (this.mode !== 'move' && this.mode !== 'jump') || !this.canAct(u) || u.shutdown) return null;
+    const hx = ht % m.w, hy = (ht / m.w) | 0, home = u.y * m.w + u.x;
+    if (ht === home) return null;
+    const r = this.getReach(u);
+    if (this.mode === 'jump') { if (r.jump.has(ht)) return { tile: ht, mode: 'jump' }; }
+    else if (r.walk.has(ht)) return { tile: ht, mode: 'walk' };
+    else if (r.sprint.has(ht)) return { tile: ht, mode: 'sprint' };
+    // Pointing at a unit means aiming or selecting, not moving
+    const hu = b.unitAt(hx, hy);
+    if (hu && (SIDE(hu.team) === 0 || this.visibleUnit(hu))) return null;
+    const key = `${this.reachKey}|${ht}|${this.mode}`;
+    if (this.snapKey === key) return this.snap;
+    let best = -1, bd = 1e9, bm: MoveMode = 'walk';
+    const consider = (set: Map<number, unknown>, mode: MoveMode, bias: number) => { for (const i of set.keys()) { if (i === home) continue; const dd = Math.hypot((i % m.w) - hx, ((i / m.w) | 0) - hy) + bias; if (dd < bd) { bd = dd; best = i; bm = mode; } } };
+    if (this.mode === 'jump') consider(r.jump, 'jump', 0);
+    else { consider(r.walk, 'walk', 0); consider(r.sprint, 'sprint', 0.01); }
+    this.snapKey = key;
+    this.snap = best >= 0 ? { tile: best, mode: bm } : null;
+    return this.snap;
   }
 
   reachHas(u: Unit, t: number): boolean {
@@ -1113,6 +1152,8 @@ export class CombatScreen implements Screen {
     if (ui.button(x + 26, y, 'Reset all', { key: '0' })) resetTune();
     if (ui.button(x + 40, y, "Reviewer's preset", { key: '9' })) applyPreset(REVIEWER_PRESET);
     y += 2;
+    if (ui.button(x + 32, y, `Move range fill: ${OPTS.moveRange ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.moveRange ? C.green : C.dim, tip: 'Off: only the path to the tile under the cursor is drawn (blue walk, gold sprint), snapping to the nearest reachable tile. On: the whole walk and sprint range is tinted as well.' })) { OPTS.moveRange = !OPTS.moveRange; saveOpts(); }
+    if (ui.button(x + 2, y + 2, `Perspective swoop each round: ${OPTS.swoop ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.swoop ? C.green : C.dim, tip: 'At the start of the mission and of each round the map briefly rises into a 3D perspective around one of your \'Mechs, then settles flat.' })) { OPTS.swoop = !OPTS.swoop; saveOpts(); }
     if (ui.button(x + 2, y, `Undo move [U]: ${OPTS.undo ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.undo ? C.green : C.dim, tip: 'Take back your last move (and the facing you ended on) as long as you have not fired and nothing new came into view. Only while it is still your turn.' })) { OPTS.undo = !OPTS.undo; saveOpts(); }
   }
 
@@ -1142,7 +1183,19 @@ export class CombatScreen implements Screen {
   tileColors(i: number, x: number, y: number): { ch: string; fg: string; bg: string } {
     const b = this.b, m = b.map;
     const B = BIOME_INFO[m.biome];
-    const t = m.terr[i];
+    // A structure destroyed by a volley still on screen keeps standing until its 'structure' event plays
+    const ghost = this.structGhost.get(i);
+    const t = ghost ? ghost.terr : m.terr[i];
+    const sidAt = (j: number) => this.structGhost.get(j)?.sid ?? m.struct[j];
+    const mode = ELEV_MODES[this.elevMode];
+    if ((mode === 'Blocks' || mode === 'Topo') && t !== 'building' && t !== 'wall') {
+      const c = mode === 'Blocks' ? blockCell(m, x, y) : topoCell(m, x, y);
+      if (t === 'water' || t === 'deep') { const wave = Math.sin(this.time * 1.6 + x * 0.7 + y * 0.45) * 0.5 + 0.5; if (c.ch === '≈' || c.ch === '~') c.ch = wave > 0.6 ? '≈' : '~'; }
+      if (m.scorch[i] > 0) c.bg = lerp(c.bg, '#0a0806', 0.5 * m.scorch[i]);
+      const wr = m.wrecks.get(i) && !this.ghostAt(i) ? m.wrecks.get(i) : undefined;
+      if (wr) { c.ch = wr; c.fg = '#8a7060'; }
+      return c;
+    }
     const e = m.elev[i];
     const s = m.shade[i];
     const hs = m.hill[i];
@@ -1171,11 +1224,11 @@ export class CombatScreen implements Screen {
       case 'rock': fg = lerp(scale(B.rock, 1.25), '#ffffff', 0.12 + s * 0.15); bg = lerp(scale(B.ground[Math.min(3, e + 1)], 0.42), '#0c0c10', 0.35); break; // dark stone so walls read against the floor
       case 'road': fg = scale(B.road, 1.15); bg = lerp(bg, scale(B.road, 0.45), 0.75); ch = '·'; break;
       case 'building': case 'wall': {
-        const st = m.structures[m.struct[i]];
+        const sid = sidAt(i), st = m.structures[sid];
         const obj = st?.objective;
         // Box-draw the outline by connecting to neighbouring tiles of the same structure
-        const same = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h && m.struct[yy * m.w + xx] === m.struct[i] && m.struct[i] >= 0; };
-        const wallN = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h && m.terr[yy * m.w + xx] === 'wall'; };
+        const same = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h && sidAt(yy * m.w + xx) === sid && sid >= 0; };
+        const wallN = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy, j = yy * m.w + xx; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h && (this.structGhost.get(j)?.terr ?? m.terr[j]) === 'wall'; };
         const nb = t === 'wall' ? wallN : same;
         const u2 = nb(0, -1), d2 = nb(0, 1), l2 = nb(-1, 0), r2 = nb(1, 0);
         const dbl = !!obj;
@@ -1192,7 +1245,7 @@ export class CombatScreen implements Screen {
           if (inner && (x * 7 + y * 5) % 9 === 0) fg = lerp('#ff7a30', '#5a5e64', 0.5 + 0.5 * Math.sin(tt * 2 + x));
           break;
         }
-        const frac = st ? Math.max(0, st.hp) / st.maxHp : 1;
+        const frac = ghost ? 0.2 : st ? Math.max(0, st.hp) / st.maxHp : 1;
         fg = obj ? (SIDE(st.team) === 0 ? '#6fd8ff' : '#ff7a58') : t === 'wall' ? '#c0c0b4' : '#b0b0a8';
         bg = obj ? (SIDE(st.team) === 0 ? '#0e2a3a' : '#3a1610') : t === 'wall' ? '#24262a' : '#2e3034';
         if (frac < 0.66) fg = lerp(fg, '#6a4a3a', 0.35);
@@ -1211,31 +1264,12 @@ export class CombatScreen implements Screen {
       }
       case 'rough': fg = lerp(bg, scale(B.groundFg, 1.35), 0.75); bg = scale(bg, 0.88); break;
     }
-    const mode = ELEV_MODES[this.elevMode];
     const ground = t === 'plain' || t === 'rough' || t === 'road';
     const at = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h ? m.elev[yy * m.w + xx] : e; };
     if (mode === 'Shading' && ground) {
       // Contour ledges where the ground drops away to the south or west
       if (at(0, 1) < e) { ch = '▁'; fg = lerp(bg, '#000000', 0.55); }
       else if (at(-1, 0) < e) { ch = '▏'; fg = lerp(bg, '#000000', 0.45); }
-    } else if (mode === 'Contours') {
-      // Flatten the shading and draw a bright line on every edge where this tile stands above its neighbour
-      if (ground) { bg = scale(B.ground[1], 1.15 + s * 0.05); fg = lerp(bg, B.groundFg, 0.25); }
-      const drop = [at(0, 1), at(0, -1), at(-1, 0), at(1, 0)].map((n) => e - n);
-      const k = drop.findIndex((v) => v > 0);
-      if (k >= 0 && t !== 'building' && t !== 'wall') {
-        const big = Math.max(...drop) >= 2;
-        ch = ['▁', '▔', '▏', '▕'][k];
-        fg = big ? '#ffb040' : lerp('#e8f0d8', B.groundFg, 0.3);
-      }
-    } else if (mode === 'Terraces' && ground) {
-      // Strong steps of brightness, plus a hatch that thickens with height
-      // Strong, evenly spaced brightness steps with a shadowed lip on every drop
-      bg = scale(B.ground[1], [0.55, 1.0, 1.55, 2.2][e]);
-      ch = ['·', ' ', '∙', '•'][e];
-      fg = lerp(bg, '#ffffff', 0.2);
-      if (at(0, 1) < e) { ch = '▁'; fg = lerp(bg, '#000000', 0.65); }
-      else if (at(-1, 0) < e) { ch = '▏'; fg = lerp(bg, '#000000', 0.55); }
     } else if (mode === 'Numbers' && ground) {
       // Digits on the edge of each height band and on a sparse grid inside it, so the map stays legible
       const edge = [at(0, 1), at(0, -1), at(-1, 0), at(1, 0)].some((n) => n !== e);
@@ -1243,7 +1277,7 @@ export class CombatScreen implements Screen {
       fg = ['#7a8a96', '#9ad0a0', '#f0d060', '#ff9050'][e];
     }
     // Cliffs: a drop of two levels or more to walkable ground can't be walked, only jumped
-    if (ground && mode !== 'Numbers' && mode !== 'Contours') {
+    if (ground && mode !== 'Numbers') {
       const walkable = (dx: number, dy: number) => { const xx = x + dx, yy = y + dy; return xx >= 0 && yy >= 0 && xx < m.w && yy < m.h && isFinite(TERRAIN[m.terr[yy * m.w + xx]].cost); };
       const cliff = ([[0, 1], [0, -1], [-1, 0], [1, 0]] as const).findIndex(([dx, dy]) => e - at(dx, dy) >= 2 && walkable(dx, dy));
       if (cliff >= 0) {
@@ -1251,14 +1285,36 @@ export class CombatScreen implements Screen {
         fg = cliff === 0 || cliff === 2 ? lerp(bg, '#000000', 0.62) : lerp(bg, '#ffffff', 0.2);
       }
     }
-    if (m.scorch[i] > 0) bg = lerp(bg, '#0a0806', 0.5 * m.scorch[i]);
+    if (m.scorch[i] > 0 && !ghost) bg = lerp(bg, '#0a0806', 0.5 * m.scorch[i]);
     const wr = m.wrecks.get(i) && !this.ghostAt(i) ? m.wrecks.get(i) : undefined;
     if (wr) { ch = wr; fg = '#8a7060'; }
     return { ch, fg, bg };
   }
 
+  swoopRound = -1;
+  swoop: { t0: number; x: number; y: number } | null = null;
+  /** Now and then (mission start, each new round) the map rises into perspective around a lance 'Mech and settles flat. */
+  drawSwoop(ui: UI): boolean {
+    const b = this.b;
+    if (!OPTS.swoop || this.briefingOpen || b.result || this.autoplay) { this.swoop = null; return false; }
+    if (this.swoopRound !== b.round) {
+      this.swoopRound = b.round;
+      const f = this.sel && SIDE(this.sel.team) === 0 ? this.sel : b.units.find((u) => u.alive && u.deployed && !u.fled && SIDE(u.team) === 0);
+      if (f) this.swoop = { t0: this.time, x: f.x, y: f.y };
+    }
+    if (!this.swoop) return false;
+    const k = (this.time - this.swoop.t0) / 1.2;
+    if (k >= 1) { this.swoop = null; return false; }
+    const ease = Math.pow(1 - k, 2);
+    const units = b.units.filter((u) => u.alive && u.deployed && !u.fled && (SIDE(u.team) === 0 || this.visibleUnit(u)))
+      .map((u) => ({ x: u.x, y: u.y, glyph: this.glyphOf(u), fg: '#f0f6ff', bg: SIDE(u.team) === 0 ? '#1a4a7a' : '#8a2a1a' }));
+    paint3d(ui.d, b.map, { mx: MX, my: MY, vw: VW, vh: VH, camX: this.camX, camY: this.camY }, perspective(this.swoop.x - this.camX + 0.5, this.swoop.y - this.camY + 0.5, 0.05 * ease), 0.15, units);
+    return true;
+  }
+
   drawMap(ui: UI): void {
     const d = ui.d, b = this.b, m = b.map;
+    if (this.drawSwoop(ui)) return;
     const lights = this.fx.lights();
     // At night every friendly 'Mech carries its own floodlights
     if (m.night) for (const pu of b.units) if (pu.alive && pu.deployed && !pu.fled && SIDE(pu.team) === 0) lights.push({ x: pu.x, y: pu.y, r: 4.5, color: '#c8d0d8', intensity: 0.16 });
@@ -1271,8 +1327,9 @@ export class CombatScreen implements Screen {
     let pendingTile = -1, pendingMode: MoveMode | null = null;
     const ht = this.hoverTile;
     if (act && u && reach) {
-      const tile = this.pending?.tile ?? (ht >= 0 && (this.mode === 'move' || this.mode === 'jump') ? ht : -1);
-      const mode: MoveMode | null = this.pending?.mode ?? (tile >= 0 ? (this.mode === 'jump' ? (reach.jump.has(tile) ? 'jump' : null) : reach.walk.has(tile) ? 'walk' : reach.sprint.has(tile) ? 'sprint' : null) : null);
+      // Off-range hovers snap to the nearest reachable tile, so waving the cursor shows the options without a range fill
+      const dest = this.pending ?? this.moveDest(u, ht);
+      const tile = dest?.tile ?? -1, mode: MoveMode | null = dest?.mode ?? null;
       if (tile >= 0 && mode) {
         pendingTile = tile; pendingMode = mode;
         const mp = mode === 'walk' ? reach.walk : mode === 'sprint' ? reach.sprint : reach.jump;
@@ -1325,7 +1382,7 @@ export class CombatScreen implements Screen {
           bg = light(bg, lr, lg, lb);
         }
         // overlays
-        if (reach && act) {
+        if (reach && act && OPTS.moveRange) {
           if (this.mode === 'jump') { if (reach.jump.has(i)) bg = lerp(bg, '#2a8a4a', 0.32); }
           else if (this.mode === 'move') {
             // Reach replaces the terrain hue with one flat colour per mode (terrain only sets its brightness), so water,
@@ -1352,7 +1409,7 @@ export class CombatScreen implements Screen {
         const mk = markers.get(i);
         if (mk) { bg = lerp(bg, mk.color, 0.3 + 0.1 * Math.sin(this.time * 3)); if (mk.force || ch === '·' || ch === '.') { ch = mk.glyph; fg = mk.force ? lerp(mk.color, '#ffffff', 0.3 + 0.3 * Math.sin(this.time * 4)) : mk.color; } }
         if (meleeSpots?.has(i)) bg = lerp(bg, '#c06a2a', 0.45 + 0.1 * Math.sin(this.time * 6));
-        if (pathTiles.has(i)) { bg = lerp(bg, pendingMode === 'sprint' ? '#e0c050' : pendingMode === 'jump' ? '#60e090' : '#70b0ff', 0.35); if (!b.unitAt(x, y) && i !== pendingTile) { ch = '•'; fg = '#e8f4ff'; } }
+        if (pathTiles.has(i)) { const pc = pendingMode === 'sprint' ? '#e0b030' : pendingMode === 'jump' ? '#50d880' : '#4a9aff'; bg = lerp(bg, pc, 0.45); if (!b.unitAt(x, y) && i !== pendingTile) { ch = '•'; fg = lerp(pc, '#ffffff', 0.6); } }
         if (i === ht) bg = lerp(bg, '#ffffff', 0.18);
         if (this.showHeights) bg = lerp(bg, ['#1a3a6a', '#2a7a4a', '#b0a030', '#c0502a'][m.elev[i]], 0.55);
         // particles that tint bg (smoke)
@@ -1443,7 +1500,7 @@ export class CombatScreen implements Screen {
         const sx = MX + (x - this.camX) * 2, sy = MY + (y - this.camY);
         const [px, py] = [...pathTiles].length ? [u.x, u.y] : [u.x, u.y];
         void px; void py;
-        d.wide(sx, sy, this.glyphOf(u), lerp(C.player, '#000', 0.25), '#1a4a6a', -1);
+        d.wide(sx, sy, this.glyphOf(u), '#e8f4ff', pendingMode === 'sprint' ? '#7a6418' : pendingMode === 'jump' ? '#1e6a3c' : '#1a4a7a', -1);
       }
     }
     // Floaters
@@ -1613,8 +1670,8 @@ export class CombatScreen implements Screen {
       d.text(lx, y0, ` [Z] ${mode.toUpperCase()}`.padEnd(14), C.dim, C.panel);
       if (mode === 'Tint') ['#1a3a6a', '#2a7a4a', '#b0a030', '#c0502a'].forEach((col, k) => { d.text(lx + 14 + k * 5, y0, ` ${k} `, C.bright, col); });
       else if (mode === 'Numbers') d.text(lx + 14, y0, ' digit = height ', C.faint, C.panel);
-      else if (mode === 'Contours') d.text(lx + 14, y0, ' line = drop ', C.faint, C.panel);
-      else if (mode === 'Terraces') d.text(lx + 14, y0, ' lighter = higher ', C.faint, C.panel);
+      else if (mode === 'Topo') d.text(lx + 14, y0, ' lighter = higher ', C.faint, C.panel);
+      else if (mode === 'Blocks') d.text(lx + 14, y0, ' face = drop ', C.faint, C.panel);
     }
     // Action bar
     this.drawActions(ui, 1, y0 + 1);
@@ -2190,7 +2247,7 @@ export class CombatScreen implements Screen {
   drawHelp(ui: UI): void {
     const d = ui.d;
     const lines = [
-      '{#f0a830}MOVEMENT{/}  Blue tiles: walk (may fire after). Amber: sprint (no attack; +1 evasion). Hover a tile to preview its evasion in the panel.',
+      '{#f0a830}MOVEMENT{/}  Point at where you want to go: the path shows blue for a walk (may fire after), gold for a sprint (no attack; +1 evasion). Out of range, it snaps to the nearest tile you can reach. The panel previews your evasion.',
       '  Click a tile to preview the path, click again or [Space] to confirm. [J] jump mode.',
       '  Moving further builds EVASION ◆: each pip is -8% to be hit. Each attack strips one pip.',
       '{#f0a830}ATTACKING{/}  Click an enemy to target, click again or [F] to fire. [1]-[9] toggle weapons.',
@@ -2288,12 +2345,13 @@ import { frameTons } from '../game/frame';
 import { TerrainLab } from './terrainlab';
 function frameTonsOf(u: Unit): number { return frameTons(u.frame); }
 const DOLL_H = 10;
-const ELEV_MODES = ['Shading', 'Tint', 'Contours', 'Terraces', 'Numbers'] as const;
+const ELEV_MODES = ['Blocks', 'Topo', 'Shading', 'Tint', 'Numbers'] as const;
+type ElevMode = typeof ELEV_MODES[number];
 const ELEV_HELP: Record<string, string> = {
+  Blocks: 'raised ground and crags are solid blocks; a dark face marks every drop to the south',
+  Topo: 'one shade per height band (lighter = higher), contour lines on the edges, orange double lines = cliff',
   Shading: 'brighter ground is higher; dark edges mark a drop',
   Tint: 'colour bands: blue 0, green 1, yellow 2, red 3',
-  Contours: 'flat ground, bright lines on the high side of every drop (orange = cliff)',
-  Terraces: 'four strong brightness steps, lighter = higher',
   Numbers: 'each tile shows its height 0-3',
 };
 const DOLL_H_PLUS = 11;

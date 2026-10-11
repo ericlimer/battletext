@@ -141,6 +141,7 @@ export interface Structure {
   name: string;
   team: number; // owner (for defend/destroy)
   destroyed: boolean;
+  terr?: Terrain; // what it stood as, for drawing it until its destruction plays
 }
 
 export interface BattleMap {
@@ -1032,7 +1033,7 @@ function buildBase(m: BattleMap, r: RNG, b: NonNullable<MapGenOpts['base']>): vo
 }
 
 export function addStructure(m: BattleMap, tiles: number[], name: string, hp: number, objective: boolean, team: number, t: Terrain): Structure {
-  const s: Structure = { id: m.structures.length, hp, maxHp: hp, tiles, objective, name, team, destroyed: false };
+  const s: Structure = { id: m.structures.length, hp, maxHp: hp, tiles, objective, name, team, destroyed: false, terr: t };
   m.structures.push(s);
   for (const i of tiles) { m.struct[i] = s.id; m.terr[i] = t; m.glyph[i] = t === 'wall' ? '#' : '▓'; }
   return s;
