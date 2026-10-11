@@ -859,6 +859,7 @@ export class CombatScreen implements Screen {
     const wh = ui.wheel(MX, MY, VW * 2, VH);
     if (wh) { if (ui.inp.held.has('Shift')) this.camX += wh * 2; else this.camY += wh * 2; this.clampCam(); }
     // Experimental terrain views on this battle's map (comparison only, read-only)
+    if (ui.key('g')) this.cycleRange();
     if (ui.key('y') && !this.tuneOpen) app.push(new TerrainLab(this.b, (u) => this.glyphOf(u), this.sel));
     if (ui.key('z')) {
       this.elevMode = (this.elevMode + 1) % ELEV_MODES.length;
@@ -1013,6 +1014,13 @@ export class CombatScreen implements Screen {
     else this.pending = { tile: to, mode };
   }
 
+  cycleRange(): void {
+    const order = ['off', 'line', 'rim', 'fill'] as const;
+    OPTS.moveRange = order[(order.indexOf(OPTS.moveRange) + 1) % order.length];
+    saveOpts();
+    this.flashMsg = { text: `Move range: ${RANGE_LABEL[OPTS.moveRange]}`, until: this.time + 2, color: C.cyan };
+  }
+
   snapKey = ''; snap: { tile: number; mode: MoveMode } | null = null;
   /** Where a move to the hovered tile would go: that tile when in reach, else the nearest reachable one. */
   moveDest(u: Unit, ht: number): { tile: number; mode: MoveMode } | null {
@@ -1152,7 +1160,7 @@ export class CombatScreen implements Screen {
     if (ui.button(x + 26, y, 'Reset all', { key: '0' })) resetTune();
     if (ui.button(x + 40, y, "Reviewer's preset", { key: '9' })) applyPreset(REVIEWER_PRESET);
     y += 2;
-    if (ui.button(x + 32, y, `Move range fill: ${OPTS.moveRange ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.moveRange ? C.green : C.dim, tip: 'Off: only the path to the tile under the cursor is drawn (blue walk, gold sprint), snapping to the nearest reachable tile. On: the whole walk and sprint range is tinted as well.' })) { OPTS.moveRange = !OPTS.moveRange; saveOpts(); }
+    if (ui.button(x + 32, y, `Move range [G]: ${RANGE_LABEL[OPTS.moveRange]}`, { style: 'plain', fg: OPTS.moveRange !== 'off' ? C.green : C.dim, tip: 'How the walk (blue) and sprint (gold) zones are shown besides the path to the cursor. OFF: path only. LINE: a ruled outline along each zone edge. RIM: edge tiles tinted. FILL: whole zone tinted. [G] cycles.' })) this.cycleRange();
     if (ui.button(x + 2, y + 2, `Perspective swoop each round: ${OPTS.swoop ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.swoop ? C.green : C.dim, tip: 'At the start of the mission and of each round the map briefly rises into a 3D perspective around one of your \'Mechs, then settles flat.' })) { OPTS.swoop = !OPTS.swoop; saveOpts(); }
     if (ui.button(x + 2, y, `Undo move [U]: ${OPTS.undo ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.undo ? C.green : C.dim, tip: 'Take back your last move (and the facing you ended on) as long as you have not fired and nothing new came into view. Only while it is still your turn.' })) { OPTS.undo = !OPTS.undo; saveOpts(); }
   }
@@ -1382,21 +1390,30 @@ export class CombatScreen implements Screen {
           bg = light(bg, lr, lg, lb);
         }
         // overlays
-        if (reach && act && OPTS.moveRange) {
-          if (this.mode === 'jump') { if (reach.jump.has(i)) bg = lerp(bg, '#2a8a4a', 0.32); }
-          else if (this.mode === 'move') {
-            // Reach replaces the terrain hue with one flat colour per mode (terrain only sets its brightness), so water,
-            // sand and grass read the same; tiles on the edge of the range get a brighter rim, and tiles out of reach dim
-            const wet = m.terr[i] === 'water' || m.terr[i] === 'deep';
-            const inW = reach.walk.has(i), inS = !inW && reach.sprint.has(i);
-            if (inW || inS) {
-              const set = inW ? reach.walk : reach.sprint;
-              const edge = !set.has(i - 1) || !set.has(i + 1) || !set.has(i - m.w) || !set.has(i + m.w);
+        let edgeMask = 0, edgeCol = '';
+        if (reach && act && OPTS.moveRange !== 'off' && (this.mode === 'move' || this.mode === 'jump')) {
+          // Zones: walk (blue) and sprint (gold), or jump (green). 'line' rules a contour along each zone's edge,
+          // 'rim' tints only the edge tiles, 'fill' tints the whole zone
+          const jump = this.mode === 'jump';
+          const zone = (j: number) => (jump ? (reach.jump.has(j) ? 3 : 0) : reach.walk.has(j) ? 1 : reach.sprint.has(j) ? 2 : 0);
+          const home = u!.y * m.w + u!.x;
+          // Tiles under units are holes in the reach, not edges: they count as inside whichever zone asks
+          const zAt = (xx: number, yy: number) => (xx < 0 || yy < 0 || xx >= m.w || yy >= m.h ? 0 : yy * m.w + xx === home ? 1 : zone(yy * m.w + xx) || (b.unitAt(xx, yy) ? -1 : 0));
+          const z = i === home ? 0 : zone(i);
+          if (z) {
+            const col = z === 1 ? '#5aa8ff' : z === 2 ? '#e8b838' : '#5ad88a';
+            // An edge tile has a 4-neighbour outside its own zone (walk tiles count sprint as outside)
+            const out = (dx: number, dy: number) => { const n = zAt(x + dx, y + dy); return n >= 0 && (z === 2 ? n === 0 : n !== z); };
+            const edge = out(0, -1) || out(0, 1) || out(-1, 0) || out(1, 0);
+            if (OPTS.moveRange === 'fill') {
               const k = Math.min(1, lum(bg) / 70);
-              bg = lerp(inW ? '#1c3c6c' : '#4a3c14', inW ? '#3a78d0' : '#a08428', 0.35 + 0.4 * k + (edge ? 0.18 : 0));
-              fg = inW ? '#a8ccf4' : '#e8d48a';
-              if (wet) ch = '≈';
-            } else if (vis) { bg = scale(bg, 0.7); fg = scale(fg, 0.75); }
+              bg = lerp(z === 1 ? '#1c3c6c' : z === 2 ? '#4a3c14' : '#14402a', col, 0.2 + 0.25 * k + (edge ? 0.15 : 0));
+            } else if (edge && OPTS.moveRange === 'rim') bg = lerp(bg, col, 0.42);
+            else if (edge && OPTS.moveRange === 'line') {
+              // A thin border on each side of the tile that faces out of its zone
+              edgeMask = (out(0, -1) ? 1 : 0) | (out(0, 1) ? 2 : 0) | (out(-1, 0) ? 4 : 0) | (out(1, 0) ? 8 : 0);
+              edgeCol = col;
+            }
           }
         }
         if (facingU && Math.max(Math.abs(x - facingU.x), Math.abs(y - facingU.y)) <= 6 && (x !== facingU.x || y !== facingU.y)) {
@@ -1409,11 +1426,13 @@ export class CombatScreen implements Screen {
         const mk = markers.get(i);
         if (mk) { bg = lerp(bg, mk.color, 0.3 + 0.1 * Math.sin(this.time * 3)); if (mk.force || ch === '·' || ch === '.') { ch = mk.glyph; fg = mk.force ? lerp(mk.color, '#ffffff', 0.3 + 0.3 * Math.sin(this.time * 4)) : mk.color; } }
         if (meleeSpots?.has(i)) bg = lerp(bg, '#c06a2a', 0.45 + 0.1 * Math.sin(this.time * 6));
-        if (pathTiles.has(i)) { const pc = pendingMode === 'sprint' ? '#e0b030' : pendingMode === 'jump' ? '#50d880' : '#4a9aff'; bg = lerp(bg, pc, 0.45); if (!b.unitAt(x, y) && i !== pendingTile) { ch = '•'; fg = lerp(pc, '#ffffff', 0.6); } }
+        // The trail stays blue while it is still within walking distance and turns gold only where it runs into sprint range
+        if (pathTiles.has(i)) { const pc = pendingMode === 'jump' ? '#50d880' : pendingMode === 'sprint' && !reach?.walk.has(i) ? '#e0b030' : '#4a9aff'; bg = lerp(bg, pc, 0.45); if (!b.unitAt(x, y) && i !== pendingTile) { ch = '•'; fg = lerp(pc, '#ffffff', 0.6); } }
         if (i === ht) bg = lerp(bg, '#ffffff', 0.18);
         if (this.showHeights) bg = lerp(bg, ['#1a3a6a', '#2a7a4a', '#b0a030', '#c0502a'][m.elev[i]], 0.55);
         // particles that tint bg (smoke)
         d.wide(sx, sy, ch, fg, bg);
+        if (edgeMask) d.edge(sx, sy, edgeMask, edgeCol);
       }
     }
     // Death marks (scorch flash)
@@ -2355,4 +2374,5 @@ const ELEV_HELP: Record<string, string> = {
   Numbers: 'each tile shows its height 0-3',
 };
 const DOLL_H_PLUS = 11;
+const RANGE_LABEL = { off: 'OFF', line: 'LINE', rim: 'RIM', fill: 'FILL' } as const;
 void rgb; void hex; void Display;

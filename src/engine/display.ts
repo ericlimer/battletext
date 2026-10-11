@@ -35,6 +35,8 @@ export class Display {
   bg: string[];
   fl: Uint8Array;
   mk: Int8Array; // facing marker direction per cell (-1 none)
+  ed: Uint8Array; // tile border lines per wide cell: 1 N, 2 S, 4 W, 8 E
+  edc: string[];
   mkc: string[];
   prevKey: string[];
   font = '"JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace';
@@ -51,6 +53,8 @@ export class Display {
     this.bg = new Array(n).fill('#05070a');
     this.fl = new Uint8Array(n);
     this.mk = new Int8Array(n).fill(-1);
+    this.ed = new Uint8Array(n);
+    this.edc = new Array(n).fill('');
     this.mkc = new Array(n).fill('');
     this.prevKey = new Array(n).fill('');
     this.resize();
@@ -84,6 +88,7 @@ export class Display {
     this.bg.fill(bg);
     this.fl.fill(0);
     this.mk.fill(-1);
+    this.ed.fill(0);
   }
 
   inb(x: number, y: number): boolean {
@@ -102,6 +107,7 @@ export class Display {
     if (bg !== undefined) this.bg[i] = bg;
     this.fl[i] = bold ? F_BOLD : 0;
     this.mk[i] = -1;
+    this.ed[i] = 0;
   }
 
   setBg(x: number, y: number, bg: string): void {
@@ -116,11 +122,17 @@ export class Display {
     this.fg[y * COLS + x] = fg;
   }
 
+  /** Border lines on the sides of a wide tile already drawn at x (1 N, 2 S, 4 W, 8 E). */
+  edge(x: number, y: number, mask: number, color: string): void {
+    if (!this.inb(x, y) || !(this.fl[y * COLS + x] & F_WIDE)) return;
+    this.ed[y * COLS + x] = mask; this.edc[y * COLS + x] = color;
+  }
+
   /** A square map tile spanning columns x, x+1. */
   wide(x: number, y: number, c: string, fg: string, bg: string, mark = -1, markColor = ''): void {
     if (!this.inb(x, y) || !this.inb(x + 1, y)) return;
     const i = y * COLS + x;
-    this.ch[i] = c; this.fg[i] = fg; this.bg[i] = bg; this.fl[i] = F_WIDE; this.mk[i] = mark; this.mkc[i] = markColor;
+    this.ch[i] = c; this.fg[i] = fg; this.bg[i] = bg; this.fl[i] = F_WIDE; this.mk[i] = mark; this.mkc[i] = markColor; this.ed[i] = 0;
     this.ch[i + 1] = ''; this.fg[i + 1] = fg; this.bg[i + 1] = bg; this.fl[i + 1] = F_CONT; this.mk[i + 1] = -1;
   }
 
@@ -215,7 +227,7 @@ export class Display {
         if (f & F_CONT) continue; // drawn with its start cell
         let key: string;
         if (f & F_WIDE) {
-          key = 'W' + this.ch[i] + this.fg[i] + this.bg[i] + this.mk[i] + this.mkc[i];
+          key = 'W' + this.ch[i] + this.fg[i] + this.bg[i] + this.mk[i] + this.mkc[i] + this.ed[i] + this.edc[i];
         } else {
           key = this.ch[i] + this.fg[i] + this.bg[i] + f;
         }
@@ -244,6 +256,15 @@ export class Display {
           }
           const m = this.mk[i];
           if (m >= 0) this.drawMarker(px, py, cw * 2, chh, m, this.mkc[i]);
+          const e = this.ed[i];
+          if (e) {
+            const t = Math.max(1, Math.round(chh / 9));
+            ctx.fillStyle = this.edc[i];
+            if (e & 1) ctx.fillRect(px, py, cw * 2, t);
+            if (e & 2) ctx.fillRect(px, py + chh - t, cw * 2, t);
+            if (e & 4) ctx.fillRect(px, py, t, chh);
+            if (e & 8) ctx.fillRect(px + cw * 2 - t, py, t, chh);
+          }
           continue;
         }
         // If previous frame had a wide glyph here, the continuation cell must be repainted too.
