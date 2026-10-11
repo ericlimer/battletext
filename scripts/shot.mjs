@@ -11,6 +11,8 @@ await page.goto('file://' + path.resolve('dist/battletext.html') + (q ? '?' + q 
 await page.waitForTimeout(+wait);
 for (const a of JSON.parse(actions)) {
   if (a.key) await page.keyboard.press(a.key);
+  if (a.keydown) await page.keyboard.down(a.keydown);
+  if (a.keyup) await page.keyboard.up(a.keyup);
   if (a.click) await page.mouse.click(a.click[0] * 10 + 5, a.click[1] * 20 + 10);
   if (a.move) await page.mouse.move(a.move[0] * 10 + 5, a.move[1] * 20 + 10, { steps: 4 });
   if (a.down) { await page.mouse.move(a.down[0] * 10 + 5, a.down[1] * 20 + 10); await page.mouse.down(); }

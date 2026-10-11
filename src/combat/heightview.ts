@@ -54,7 +54,7 @@ export function detailAt(m: BattleMap, x: number, y: number): [string, string] |
     case 'lforest': return ['♣', lerp(B.forest[1], '#000', 0.1)];
     case 'hforest': return ['♣', B.forest[1]];
     case 'water': case 'deep': return ['≈', scale(B.water[0], 0.9)];
-    case 'rock': return ['▲', '#c8c0b8'];
+    case 'rock': return (x + y) % 2 === 0 ? ['▲', lerp(topColor(m, x, y), '#ffffff', 0.32)] : null; // sparse, so a crag reads as one mass
     case 'rubble': return ['%', '#7a6e5e'];
     default: return null;
   }
@@ -68,9 +68,7 @@ export function blockCell(m: BattleMap, x: number, y: number): { ch: string; fg:
   if (inb(m, x, y - 1) && heightAt(m, x, y - 1) < h - 0.2) top = lerp(top, '#ffffff', 0.12);
   const drop = h - hs;
   if (drop > 0.2) return { ch: VBLOCK[Math.max(2, Math.min(6, Math.round(drop * 2.5)))], fg: scale(top, 0.38), bg: top };
-  let det = detailAt(m, x, y);
-  // Crag tops stay calm: a sparse, soft scatter of peaks so the block reads as one mass
-  if (det && m.terr[y * m.w + x] === 'rock') det = (x + y) % 2 === 0 ? ['▲', lerp(top, '#ffffff', 0.28)] : null;
+  const det = detailAt(m, x, y);
   const plainDot = m.terr[y * m.w + x] === 'plain' && (x * 7 + y * 13) % 5 === 0;
   return { ch: det ? det[0] : plainDot ? '·' : ' ', fg: det ? det[1] : lerp(top, '#ffffff', 0.2), bg: top };
 }

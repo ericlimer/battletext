@@ -775,8 +775,10 @@ export class CombatScreen implements Screen {
   }
 
   // ---- Main loop ----------------------------------------------------------------------
+  frameDt = 0;
   render(ui: UI, dt: number): void {
     this.time += dt;
+    this.frameDt = dt;
     const sp = this.speed;
     this.fx.update(dt * sp);
     for (const a of this.anims) { a.t = (a.t ?? 0) + dt * sp; a.step(dt * sp); }
@@ -1161,7 +1163,7 @@ export class CombatScreen implements Screen {
     if (ui.button(x + 40, y, "Reviewer's preset", { key: '9' })) applyPreset(REVIEWER_PRESET);
     y += 2;
     if (ui.button(x + 32, y, `Move range [G]: ${RANGE_LABEL[OPTS.moveRange]}`, { style: 'plain', fg: OPTS.moveRange !== 'off' ? C.green : C.dim, tip: 'How the walk (blue) and sprint (gold) zones are shown besides the path to the cursor. OFF: path only. LINE: a ruled outline along each zone edge. RIM: edge tiles tinted. FILL: whole zone tinted. [G] cycles.' })) this.cycleRange();
-    if (ui.button(x + 2, y + 2, `Perspective swoop each round: ${OPTS.swoop ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.swoop ? C.green : C.dim, tip: 'At the start of the mission and of each round the map briefly rises into a 3D perspective around one of your \'Mechs, then settles flat.' })) { OPTS.swoop = !OPTS.swoop; saveOpts(); }
+    if (ui.button(x + 2, y + 2, `Opening camera shot: ${OPTS.opening ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.opening ? C.green : C.dim, tip: 'As a mission opens, the camera descends onto your drop zone in 3D and settles into the map (any key skips). Hold [Q] at any time to see the map in 3D.' })) { OPTS.opening = !OPTS.opening; saveOpts(); }
     if (ui.button(x + 2, y, `Undo move [U]: ${OPTS.undo ? 'ON' : 'OFF'}`, { style: 'plain', fg: OPTS.undo ? C.green : C.dim, tip: 'Take back your last move (and the facing you ended on) as long as you have not fired and nothing new came into view. Only while it is still your turn.' })) { OPTS.undo = !OPTS.undo; saveOpts(); }
   }
 
@@ -1299,30 +1301,57 @@ export class CombatScreen implements Screen {
     return { ch, fg, bg };
   }
 
-  swoopRound = -1;
-  swoop: { t0: number; x: number; y: number } | null = null;
-  /** Now and then (mission start, each new round) the map rises into perspective around a lance 'Mech and settles flat. */
-  drawSwoop(ui: UI): boolean {
-    const b = this.b;
-    if (!OPTS.swoop || this.briefingOpen || b.result || this.autoplay) { this.swoop = null; return false; }
-    if (this.swoopRound !== b.round) {
-      this.swoopRound = b.round;
-      const f = this.sel && SIDE(this.sel.team) === 0 ? this.sel : b.units.find((u) => u.alive && u.deployed && !u.fled && SIDE(u.team) === 0);
-      if (f) this.swoop = { t0: this.time, x: f.x, y: f.y };
+  // Perspective view: a slow establishing shot as the mission opens, and a peek while [Q] is held
+  peek = 0;
+  opening: { t0: number; x: number; y: number } | null = null;
+  openingDone = false;
+  drawPerspective(ui: UI, dt: number): void {
+    const b = this.b, d = ui.d, m = b.map;
+    if (!this.openingDone && !this.briefingOpen && !this.autoplay && OPTS.opening) {
+      this.openingDone = true;
+      const mine = b.units.filter((u) => u.alive && u.deployed && SIDE(u.team) === 0);
+      if (mine.length) this.opening = { t0: this.time, x: mine.reduce((a, u) => a + u.x, 0) / mine.length, y: mine.reduce((a, u) => a + u.y, 0) / mine.length };
     }
-    if (!this.swoop) return false;
-    const k = (this.time - this.swoop.t0) / 1.2;
-    if (k >= 1) { this.swoop = null; return false; }
-    const ease = Math.pow(1 - k, 2);
+    // Any key or click skips the opening shot
+    if (this.opening && this.time - this.opening.t0 > 0.3 && (ui.inp.clicked || ui.inp.keys.some((k) => !k.used))) this.opening = null;
+    const held = ui.inp.held.has('q') && !this.briefingOpen && !b.result;
+    this.peek = Math.max(0, Math.min(1, this.peek + (held ? dt / 0.35 : -dt / 0.3)));
+    let amt = 0, strength = 0, vx = 0, vy = 0;
+    if (this.opening) {
+      const k = (this.time - this.opening.t0) / 3.6;
+      if (k >= 1) this.opening = null;
+      else {
+        // The camera starts high over the drop zone and descends; the last stretch dissolves into the flat map
+        const e = 1 - k;
+        strength = 0.012 + 0.07 * e * e;
+        amt = Math.min(1, e / 0.3);
+        vx = this.opening.x; vy = this.opening.y;
+      }
+    }
+    if (!amt && this.peek > 0) {
+      const f = this.sel ?? b.units.find((u) => u.alive && u.deployed && SIDE(u.team) === 0);
+      const e = this.peek * this.peek * (3 - 2 * this.peek);
+      strength = 0.045 * e; amt = Math.min(1, this.peek * 2.2);
+      vx = f ? f.x : this.camX + VW / 2; vy = f ? f.y : this.camY + VH / 2;
+    }
+    if (amt <= 0) return;
+    // Keep the flat frame, paint the 3D one over it, then let the flat frame back through a dither as amt falls
+    const keep: { i: number; ch: string; fg: string; bg: string; fl: number; mk: number; mkc: string; ed: number; edc: string }[] = [];
+    if (amt < 1) for (let y = MY; y < MY + VH; y++) for (let x = MX; x < MX + VW * 2; x += 2) {
+      const h = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+      if ((h % 1000) / 1000 < amt) continue;
+      for (const i of [y * COLS + x, y * COLS + x + 1]) keep.push({ i, ch: d.ch[i], fg: d.fg[i], bg: d.bg[i], fl: d.fl[i], mk: d.mk[i], mkc: d.mkc[i], ed: d.ed[i], edc: d.edc[i] });
+    }
     const units = b.units.filter((u) => u.alive && u.deployed && !u.fled && (SIDE(u.team) === 0 || this.visibleUnit(u)))
-      .map((u) => ({ x: u.x, y: u.y, glyph: this.glyphOf(u), fg: '#f0f6ff', bg: SIDE(u.team) === 0 ? '#1a4a7a' : '#8a2a1a' }));
-    paint3d(ui.d, b.map, { mx: MX, my: MY, vw: VW, vh: VH, camX: this.camX, camY: this.camY }, perspective(this.swoop.x - this.camX + 0.5, this.swoop.y - this.camY + 0.5, 0.05 * ease), 0.15, units);
-    return true;
+      .map((u) => ({ x: u.x, y: u.y, glyph: this.glyphOf(u), fg: '#f0f6ff', bg: u === this.sel ? '#2a6aa8' : SIDE(u.team) === 0 ? '#1a4a7a' : '#8a2a1a' }));
+    // Fog keeps its hold: unseen ground is drawn darker
+    const shade = (x: number, y: number, c: string) => (b.visibleTiles[y * m.w + x] ? c : scale(c, 0.6));
+    paint3d(d, m, { mx: MX, my: MY, vw: VW, vh: VH, camX: this.camX, camY: this.camY }, perspective(vx - this.camX + 0.5, vy - this.camY + 0.5, strength), 0.15, units, shade);
+    for (const k of keep) { d.ch[k.i] = k.ch; d.fg[k.i] = k.fg; d.bg[k.i] = k.bg; d.fl[k.i] = k.fl; d.mk[k.i] = k.mk; d.mkc[k.i] = k.mkc; d.ed[k.i] = k.ed; d.edc[k.i] = k.edc; }
   }
 
   drawMap(ui: UI): void {
     const d = ui.d, b = this.b, m = b.map;
-    if (this.drawSwoop(ui)) return;
     const lights = this.fx.lights();
     // At night every friendly 'Mech carries its own floodlights
     if (m.night) for (const pu of b.units) if (pu.alive && pu.deployed && !pu.fled && SIDE(pu.team) === 0) lights.push({ x: pu.x, y: pu.y, r: 4.5, color: '#c8d0d8', intensity: 0.16 });
@@ -1558,6 +1587,7 @@ export class CombatScreen implements Screen {
       const tsx = MX + (A.tx - this.camX) * 2, tsy = MY + (A.ty - this.camY);
       if (k >= 1 && tsx >= MX + 1 && tsx < MX + VW * 2 - 3 && tsy >= MY && tsy < MY + VH) { d.set(tsx - 1, tsy, '[', '#ff6a4a'); d.set(tsx + 2, tsy, ']', '#ff6a4a'); }
     }
+    this.drawPerspective(ui, this.frameDt);
     this.drawVolleyHud(ui);
     // Round banner
     if (this.banner) {
@@ -2267,6 +2297,7 @@ export class CombatScreen implements Screen {
     const d = ui.d;
     const lines = [
       '{#f0a830}MOVEMENT{/}  Point at where you want to go: the path shows blue for a walk (may fire after), gold for a sprint (no attack; +1 evasion). Out of range, it snaps to the nearest tile you can reach. The panel previews your evasion.',
+      '  Hold [Q] to see the map in 3D around the selected \'Mech. [G] cycles the move range outline. [Z] changes the height view.',
       '  Click a tile to preview the path, click again or [Space] to confirm. [J] jump mode.',
       '  Moving further builds EVASION ◆: each pip is -8% to be hit. Each attack strips one pip.',
       '{#f0a830}ATTACKING{/}  Click an enemy to target, click again or [F] to fire. [1]-[9] toggle weapons.',

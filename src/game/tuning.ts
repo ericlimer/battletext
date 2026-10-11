@@ -45,6 +45,6 @@ export function tuneDiff(): Record<string, number> {
 }
 
 /** Play options kept per browser: semi-debug helpers the player can switch off. */
-export const OPTS: { undo: boolean; moveRange: 'off' | 'line' | 'rim' | 'fill'; swoop: boolean } = { undo: true, moveRange: 'off', swoop: false };
-try { const o = JSON.parse(localStorage.getItem('bt.opts') ?? '{}'); if (typeof o.undo === 'boolean') OPTS.undo = o.undo; if (['off', 'line', 'rim', 'fill'].includes(o.moveRange)) OPTS.moveRange = o.moveRange; if (typeof o.swoop === 'boolean') OPTS.swoop = o.swoop; } catch { /* private mode */ }
+export const OPTS: { undo: boolean; moveRange: 'off' | 'line' | 'rim' | 'fill'; opening: boolean } = { undo: true, moveRange: 'off', opening: true };
+try { const o = JSON.parse(localStorage.getItem('bt.opts') ?? '{}'); if (typeof o.undo === 'boolean') OPTS.undo = o.undo; if (['off', 'line', 'rim', 'fill'].includes(o.moveRange)) OPTS.moveRange = o.moveRange; if (typeof o.opening === 'boolean') OPTS.opening = o.opening; } catch { /* private mode */ }
 export function saveOpts(): void { try { localStorage.setItem('bt.opts', JSON.stringify(OPTS)); } catch { /* private mode */ } }
